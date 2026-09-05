@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink-900: #0b0d10;
+  --color-ink-800: #12151a;
+  --color-ink-700: #1a1f26;
+  --color-ink-600: #232a33;
+  --color-ink-500: #313a46;
+  --color-edge: #2b333d;
+  --color-accent: #6ee7b7;
+  --color-accent-dim: #2f6f57;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-ink-900);
+  color: #d7dee7;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+input,
+select,
+textarea,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+input[type="number"],
+input[type="text"],
+select,
+textarea {
+  background: var(--color-ink-800);
+  border: 1px solid var(--color-edge);
+  border-radius: 4px;
+  padding: 4px 6px;
+  width: 100%;
+}
+
+input[type="number"]:focus,
+input[type="text"]:focus,
+select:focus,
+textarea:focus {
+  outline: 1px solid var(--color-accent-dim);
+}
+
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--color-accent);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.4;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-ink-600);
+  border-radius: 5px;
+}
+
+.checkerboard {
+  background-image:
+    linear-gradient(45deg, #1b2027 25%, transparent 25%),
+    linear-gradient(-45deg, #1b2027 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #1b2027 75%),
+    linear-gradient(-45deg, transparent 75%, #1b2027 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-color: #141821;
+}
