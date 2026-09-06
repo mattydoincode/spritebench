@@ -24,7 +24,7 @@ a placeholder name fails the deploy. The smallest sane tier is 1 GiB / 1 vCPU /
 point-in-time recovery.
 
 ```
-doctl databases create art-studio-db --engine pg --version 17 \
+doctl databases create spritebench-db --engine pg --version 17 \
   --size db-s-1vcpu-1gb --num-nodes 1 --region nyc3
 
 doctl apps spec validate --spec infra/do-app.yaml

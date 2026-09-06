@@ -268,7 +268,7 @@ describe("buildArchive", () => {
 
 describe("zipFilename", () => {
   it("names the archive after what it holds", () => {
-    expect(zipFilename(12, "processed")).toMatch(/^art-studio-12-images-\d{4}-\d{2}-\d{2}\.zip$/);
+    expect(zipFilename(12, "processed")).toMatch(/^spritebench-12-images-\d{4}-\d{2}-\d{2}\.zip$/);
     expect(zipFilename(1, "processed")).toContain("-1-image-");
     expect(zipFilename(3, "original")).toContain("-originals-");
     expect(zipFilename(3, "both")).toContain("-both-");

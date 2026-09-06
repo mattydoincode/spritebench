@@ -82,7 +82,7 @@ describe("LocalFsStorage", () => {
   let storage: LocalFsStorage;
 
   beforeEach(async () => {
-    root = await mkdtemp(path.join(os.tmpdir(), "art-studio-storage-"));
+    root = await mkdtemp(path.join(os.tmpdir(), "spritebench-storage-"));
     storage = new LocalFsStorage(root);
   });
 

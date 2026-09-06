@@ -4,7 +4,7 @@
  * Used to move a locally verified library into R2 without re-running the
  * legacy import, and to rehearse the R2 path before deploying:
  *
- *   ART_STUDIO_DATA_DIR=./data-pg R2_ENDPOINT=... R2_BUCKET=... \
+ *   SPRITEBENCH_DATA_DIR=./data-pg R2_ENDPOINT=... R2_BUCKET=... \
  *   tsx scripts/mirror-storage.ts
  */
 import { EXPORTS, PALETTES, SOURCES, TEMPLATES, THUMBS } from "@/storage/keys";

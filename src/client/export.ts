@@ -310,7 +310,7 @@ export async function downloadZip(
   assets: AssetRecord[],
   kind: ExportKind,
   lookup: PaletteLookup,
-  filename = "art-studio-export.zip",
+  filename = "spritebench-export.zip",
   onProgress?: (progress: ExportProgress) => void,
   nameOverride?: string
 ): Promise<{ entries: number; failures: string[] }> {
@@ -337,10 +337,10 @@ export async function downloadZip(
   return { entries, failures };
 }
 
-/** `art-studio-12-images-2026-09-05.zip` */
+/** `spritebench-12-images-2026-09-05.zip` */
 export function zipFilename(count: number, kind: ExportKind): string {
   const day = new Date().toISOString().slice(0, 10);
   const suffix = kind === "both" ? "-both" : kind === "original" ? "-originals" : "";
 
-  return `art-studio-${count}-image${count === 1 ? "" : "s"}${suffix}-${day}.zip`;
+  return `spritebench-${count}-image${count === 1 ? "" : "s"}${suffix}-${day}.zip`;
 }

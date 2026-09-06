@@ -11,7 +11,7 @@
 # Secrets are left empty so this file stays committable. Set them in the
 # control panel or with `doctl apps update`; App Platform encrypts anything
 # typed SECRET on first submission.
-name: ai-art-studio
+name: spritebench
 region: nyc
 
 databases:
@@ -46,7 +46,7 @@ envs:
     value: r2
   - key: R2_BUCKET
     scope: RUN_TIME
-    value: ai-art-studio
+    value: spritebench
   - key: R2_ACCOUNT_ID
     scope: RUN_TIME
     type: SECRET

@@ -15,7 +15,7 @@ function expandHome(value: string): string {
 }
 
 export function dataRoot(): string {
-  const configured = process.env.ART_STUDIO_DATA_DIR?.trim();
+  const configured = process.env.SPRITEBENCH_DATA_DIR?.trim();
   return configured ? path.resolve(expandHome(configured)) : path.join(process.cwd(), "data");
 }
 

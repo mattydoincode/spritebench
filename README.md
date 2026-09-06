@@ -1,4 +1,4 @@
-# AI Art Studio
+# Spritebench
 
 A pipeline for generating, processing, and exporting game art — prompt an image
 model, cut the background, quantize to a palette, downsample to a sprite, and

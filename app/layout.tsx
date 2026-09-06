@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Art Studio",
+  title: "Spritebench",
   description: "Pixel art generation and composition pipeline"
 };
 

@@ -5,7 +5,7 @@
  * Point DATABASE_URL at a throwaway database -- it writes and deletes rows:
  *
  *   DATABASE_URL=postgres://.../art_studio_verify \
- *   ART_STUDIO_DATA_DIR=/tmp/art-verify tsx scripts/verify-lifecycle.ts
+ *   SPRITEBENCH_DATA_DIR=/tmp/art-verify tsx scripts/verify-lifecycle.ts
  */
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { closeDb, db } from "@/db";
