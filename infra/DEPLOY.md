@@ -80,6 +80,15 @@ fetches `/api/assets/[id]/source`, which answers with a 302 to a signed R2 URL,
 so the image bytes are cross-origin. Without the policy the library renders
 nothing and the console fills with CORS errors.
 
+```bash
+npm run r2:cors        # wrangler r2 bucket cors set
+npm run r2:cors:show   # read back what R2 actually stored
+```
+
+The file is in Wrangler's shape (`rules[].allowed.origins`), not the S3 shape
+(`AllowedOrigins`) the R2 dashboard editor shows. Wrangler rejects S3-style keys
+outright, so prefer the command over pasting this file into the dashboard.
+
 Verify the credentials and the policy before deploying:
 
 ```
