@@ -1,0 +1,28 @@
+.git
+.gitignore
+node_modules
+.next
+dist
+out
+
+# Local libraries and anything the legacy import reads. These are gigabytes of
+# PNGs and must never end up in an image layer.
+data
+data-pg
+data-*
+
+.env
+.env.*
+!.env.example
+
+tests
+vitest.config.mts
+*.log
+.DS_Store
+.vscode
+.idea
+plans.md
+README.md
+docker-compose.yml
+Dockerfile
+.dockerignore

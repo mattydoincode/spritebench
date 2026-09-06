@@ -1,0 +1,147 @@
+# Deploying
+
+Two services from this one repo, both built from the same `Dockerfile`, sharing
+one Postgres and one R2 bucket.
+
+| Service  | Start command                        | Notes                           |
+| -------- | ------------------------------------ | ------------------------------- |
+| `web`    | `node_modules/.bin/next start -p $PORT` | Health check at `/api/health` |
+| `worker` | `node dist/worker.mjs`               | No HTTP port; drains on SIGTERM |
+
+Nothing here is platform-specific except the deploy descriptors. **DigitalOcean
+App Platform** is the primary target (`infra/do-app.yaml`); `railway.json` and
+`railway.worker.json` are kept for Railway. Sections 2 onward apply to both.
+
+## 1. Postgres
+
+### DigitalOcean
+
+Create the Managed Postgres cluster **first**, then put its name in
+`databases[0].cluster_name` in `infra/do-app.yaml`. A database marked
+`production: true` attaches an existing cluster and will not provision one, so
+a placeholder name fails the deploy. The smallest sane tier is 1 GiB / 1 vCPU /
+10 GiB at about $15/month, which includes daily backups and 7-day
+point-in-time recovery.
+
+```
+doctl databases create art-studio-db --engine pg --version 17 \
+  --size db-s-1vcpu-1gb --num-nodes 1 --region nyc3
+
+doctl apps spec validate --spec infra/do-app.yaml
+doctl apps create --spec infra/do-app.yaml
+```
+
+`${art-db.DATABASE_URL}` is a bindable variable resolved from the `databases`
+entry named `art-db`; it is set once at app level so the web service, the
+worker and the migration job cannot drift apart.
+
+Set `DATABASE_SSL=require` here. DigitalOcean's managed Postgres is reached
+over the network with a certificate that does not chain to a public root.
+
+Migrations run as a `PRE_DEPLOY` job, after the build and before either
+component takes traffic, and a non-zero exit aborts the deploy. Attach it to
+exactly one component — two concurrent migrators race.
+
+Note the connection ceiling: a 1 GiB cluster allows 22 usable connections, and
+every component opens both a query pool and a pg-boss pool. Hence
+`DATABASE_POOL_MAX=6` and `QUEUE_POOL_MAX=3` in the spec, which leaves room for
+three components plus a `psql` session.
+
+### Railway
+
+Railway injects `DATABASE_URL`; reference it from both services rather than
+copying the value. Migrations run as the `web` service's pre-deploy command.
+
+Leave `DATABASE_SSL` unset (or `disable`): Railway's private network is the
+default path and is not TLS-terminated. Set it to `require` only if you point
+`DATABASE_URL` at the public proxy host. It governs the query pool and pg-boss
+together; if only one of the two can connect, this is the setting to check.
+
+Railway Postgres is a container on a volume rather than a managed service with
+an SLA. Enable point-in-time recovery on day one and keep periodic `pg_dump`
+copies off-platform.
+
+## 2. R2 bucket
+
+Create the bucket and an API token scoped to it (Object Read & Write), then set
+on both services:
+
+```
+STORAGE_DRIVER=r2
+R2_ACCOUNT_ID=...
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+R2_BUCKET=...
+```
+
+Apply the CORS policy in `r2-cors.json` after replacing the placeholder origin
+with the deployed app's origin. **This is required, not optional:** the browser
+fetches `/api/assets/[id]/source`, which answers with a 302 to a signed R2 URL,
+so the image bytes are cross-origin. Without the policy the library renders
+nothing and the console fills with CORS errors.
+
+Verify the credentials and the policy before deploying:
+
+```
+R2_ACCOUNT_ID=... R2_ACCESS_KEY_ID=... R2_SECRET_ACCESS_KEY=... \
+R2_BUCKET=... npm run verify:s3
+```
+
+To carry an existing local library over, run `scripts/mirror-storage.ts` with
+both drivers configured.
+
+## 3. Secrets and limits
+
+Set on both services:
+
+```
+ENCRYPTION_KEY=          # openssl rand -base64 32 -- changing it orphans stored keys
+FREE_ASSET_LIMIT=100
+ASSET_RETENTION_DAYS=30
+MAX_IMAGES_PER_REQUEST=40
+WORKER_CONCURRENCY=4
+```
+
+`ENCRYPTION_KEY` must be identical across services: the web service encrypts
+provider keys and the worker decrypts them.
+
+Leave `OPENAI_API_KEY` unset in production. It exists as a local convenience
+fallback, and in production every user brings their own key.
+
+On DigitalOcean these live in the app-level `envs` block of
+`infra/do-app.yaml`, which propagates to all three components. Anything typed
+`SECRET` is encrypted on first submission; commit the file with empty values
+and fill them via the control panel or `doctl apps update`.
+
+Set a spend cap: Billing → Alerts on DigitalOcean, Workspace Usage on Railway
+(minimum $10).
+
+## 4. Scaling notes
+
+`WORKER_CONCURRENCY` is provider calls in flight per worker process, and each
+one holds a Postgres connection while it writes. Keep
+`DATABASE_POOL_MAX + QUEUE_POOL_MAX` across every service below the Postgres
+connection ceiling. The defaults (10 and 4) suit two services on Railway;
+`infra/do-app.yaml` lowers them to 6 and 3 for three components against a 1 GiB
+DigitalOcean cluster's 22 usable connections.
+
+Do not fold the worker into the web container to save an instance. `sharp`
+spikes memory through libvips on large PNGs, so an OOM kill during image
+processing would take the web server down with it — users would see 502s
+because someone else's generation was large. You would also lose independent
+restarts and per-service metrics, and the platform health check only watches
+the HTTP port, making a dead worker inside a healthy web container invisible.
+
+Scaling the worker horizontally needs no coordination: pg-boss hands each job
+to exactly one consumer, and a duplicate delivery is a no-op because a job
+whose provider call already completed is never called again.
+
+## 5. Verifying a deploy
+
+```
+curl -s https://<app>/api/health | jq
+```
+
+Expect `status: "ok"` and three passing checks. The storage check writes and
+deletes a probe object, so it catches a read-only token that configuration
+alone would not reveal. A 503 names which dependency is unreachable.

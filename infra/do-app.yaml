@@ -1,0 +1,144 @@
+# DigitalOcean App Platform spec.
+#
+#   doctl apps spec validate --spec infra/do-app.yaml
+#   doctl apps create --spec infra/do-app.yaml
+#   doctl apps update <app-id> --spec infra/do-app.yaml
+#
+# Create the managed Postgres cluster FIRST and put its name in
+# databases[0].cluster_name below: `production: true` attaches an existing
+# cluster and does not provision one. See infra/DEPLOY.md.
+#
+# Secrets are left empty so this file stays committable. Set them in the
+# control panel or with `doctl apps update`; App Platform encrypts anything
+# typed SECRET on first submission.
+name: ai-art-studio
+region: nyc
+
+databases:
+  - name: art-db
+    engine: PG
+    version: "17"
+    # A production database is an existing Managed Database cluster. Instance
+    # size, standby nodes and scaling are set on the cluster itself -- the
+    # spec's `size` and `num_nodes` fields are deprecated and ignored.
+    production: true
+    cluster_name: REPLACE_ME-art-studio-db
+    db_name: art_studio
+    db_user: art
+
+# Applied to every component below, which is what keeps the worker and the
+# migration job from drifting out of step with the web service.
+envs:
+  - key: DATABASE_URL
+    scope: RUN_AND_BUILD_TIME
+    value: ${art-db.DATABASE_URL}
+
+  # DigitalOcean's managed Postgres terminates TLS with a certificate that
+  # does not chain to a public root, unlike a provider private network. Read
+  # by the query pool and pg-boss together: if only one of the two can
+  # connect, this is the setting to check.
+  - key: DATABASE_SSL
+    scope: RUN_TIME
+    value: require
+
+  - key: STORAGE_DRIVER
+    scope: RUN_TIME
+    value: r2
+  - key: R2_BUCKET
+    scope: RUN_TIME
+    value: ai-art-studio
+  - key: R2_ACCOUNT_ID
+    scope: RUN_TIME
+    type: SECRET
+    value: ""
+  - key: R2_ACCESS_KEY_ID
+    scope: RUN_TIME
+    type: SECRET
+    value: ""
+  - key: R2_SECRET_ACCESS_KEY
+    scope: RUN_TIME
+    type: SECRET
+    value: ""
+
+  # Encrypts stored provider keys at rest. The web service encrypts and the
+  # worker decrypts, so it must be identical across components; rotating it
+  # orphans every key users have saved.
+  - key: ENCRYPTION_KEY
+    scope: RUN_TIME
+    type: SECRET
+    value: ""
+
+  - key: FREE_ASSET_LIMIT
+    scope: RUN_TIME
+    value: "100"
+  - key: ASSET_RETENTION_DAYS
+    scope: RUN_TIME
+    value: "30"
+  - key: MAX_IMAGES_PER_REQUEST
+    scope: RUN_TIME
+    value: "40"
+
+  # Kept deliberately low. Every component opens both pools, so the ceiling
+  # is (DATABASE_POOL_MAX + QUEUE_POOL_MAX) x components, against the 22
+  # usable connections on a 1 GiB cluster.
+  - key: DATABASE_POOL_MAX
+    scope: RUN_TIME
+    value: "6"
+  - key: QUEUE_POOL_MAX
+    scope: RUN_TIME
+    value: "3"
+
+services:
+  - name: web
+    instance_size_slug: apps-s-1vcpu-1gb
+    instance_count: 1
+    http_port: 8080
+    dockerfile_path: Dockerfile
+    source_dir: /
+    github:
+      repo: mattydoincode/spritebench
+      branch: main
+      deploy_on_push: true
+    run_command: node_modules/.bin/next start -p 8080
+    health_check:
+      http_path: /api/health
+      initial_delay_seconds: 20
+      period_seconds: 30
+      timeout_seconds: 10
+      failure_threshold: 3
+
+workers:
+  - name: worker
+    instance_size_slug: apps-s-1vcpu-1gb
+    instance_count: 1
+    dockerfile_path: Dockerfile
+    source_dir: /
+    github:
+      repo: mattydoincode/spritebench
+      branch: main
+      deploy_on_push: true
+    # A worker component takes no http_port and gets no health check: it is
+    # not routed, which is exactly what makes it a real always-on process.
+    run_command: node dist/worker.mjs
+    envs:
+      - key: WORKER_CONCURRENCY
+        scope: RUN_TIME
+        value: "4"
+      - key: QUEUE_DRAIN_TIMEOUT_MS
+        scope: RUN_TIME
+        value: "30000"
+
+jobs:
+  # Runs after the build and before either component takes traffic; a non-zero
+  # exit aborts the deploy. This is App Platform's release command. Exactly one
+  # component may carry it -- two concurrent migrators race.
+  - name: migrate
+    kind: PRE_DEPLOY
+    instance_size_slug: apps-s-1vcpu-1gb
+    instance_count: 1
+    dockerfile_path: Dockerfile
+    source_dir: /
+    github:
+      repo: mattydoincode/spritebench
+      branch: main
+    run_command: node dist/migrate.mjs
