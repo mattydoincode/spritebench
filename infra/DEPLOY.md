@@ -38,7 +38,28 @@ able to drop the cluster's other databases.
 ```
 doctl databases db create <cluster-id> spritebench
 doctl databases user create <cluster-id> spritebench
+```
 
+A newly created role can neither create schemas nor create tables, so grant
+both. Connect as `doadmin` **to the `spritebench` database** — the grants are
+per-database and silently apply to the wrong one from `defaultdb`:
+
+```sql
+GRANT ALL ON DATABASE spritebench TO spritebench;
+GRANT ALL ON SCHEMA public TO spritebench;
+```
+
+Two grants because two different privileges are missing, and each surfaces as a
+differently worded error partway through the same migration:
+
+- `CREATE ON DATABASE` for `CREATE SCHEMA`. Drizzle keeps its ledger in a
+  `drizzle` schema and pg-boss owns a `pgboss` schema, so both the migration
+  and the worker need this. Without it: `permission denied for database`.
+- `CREATE ON SCHEMA public` for the tables themselves. Since PostgreSQL 15,
+  `PUBLIC` no longer holds this implicitly. Without it: `permission denied for
+  schema public`.
+
+```
 doctl apps spec validate infra/do-app.yaml
 doctl apps create --spec infra/do-app.yaml
 ```
