@@ -182,15 +182,22 @@ export function Select<T extends string>({
   value,
   options,
   onChange,
-  labels
+  labels,
+  disabled
 }: {
   value: T;
   options: readonly T[];
   onChange: (value: T) => void;
   labels?: Record<string, string>;
+  disabled?: boolean;
 }) {
   return (
-    <select value={value} onChange={(event) => onChange(event.target.value as T)}>
+    <select
+      value={value}
+      disabled={disabled}
+      className={disabled ? "opacity-50" : undefined}
+      onChange={(event) => onChange(event.target.value as T)}
+    >
       {options.map((option) => (
         <option key={option} value={option}>
           {labels?.[option] ?? option}

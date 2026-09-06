@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useStudio } from "@/client/store";
-import { snapRequestSize } from "@/core/size";
-import { composePrompt, MODELS } from "@/shared/model";
+import { modelIds, modelOrDefault, snapRequestSize } from "@/providers/models";
+import { composePrompt } from "@/shared/model";
 import { Button, Divider, Field, NumberInput, Panel, Row, Select, Toggle } from "./ui";
 import { TemplatePanel } from "./TemplatePanel";
 
@@ -55,6 +55,7 @@ export function GeneratePanel() {
 
   const generation = settings.generation;
   const processing = settings.processing;
+  const model = modelOrDefault(generation.model);
   const snapped = generation.useAutoSize
     ? null
     : snapRequestSize(generation.size, generation.model);
@@ -231,7 +232,7 @@ export function GeneratePanel() {
           <Field label="Model">
             <Select
               value={generation.model}
-              options={MODELS}
+              options={modelIds()}
               onChange={(value) => store().setGeneration({ model: value })}
             />
           </Field>
@@ -247,10 +248,14 @@ export function GeneratePanel() {
               </Field>
             </div>
             <div className="flex-1">
-              <Field label="Background">
+              <Field
+                label="Background"
+                hint={model.supportsBackground ? undefined : "not supported by this model"}
+              >
                 <Select
-                  value={generation.background}
+                  value={model.supportsBackground ? generation.background : "auto"}
                   options={["auto", "transparent", "opaque"] as const}
+                  disabled={!model.supportsBackground}
                   onChange={(value) => store().setGeneration({ background: value })}
                 />
               </Field>
@@ -311,15 +316,6 @@ export function GeneratePanel() {
             />
           </Field>
 
-          <Field label="Parallel job limit">
-            <NumberInput
-              value={settings.concurrency}
-              min={1}
-              onChange={(value) =>
-                store().patchSettings({ concurrency: Math.max(1, Math.round(value)) })
-              }
-            />
-          </Field>
         </>
       ) : null}
     </Panel>

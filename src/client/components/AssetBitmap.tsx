@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { processor, type ProcessedPreview } from "@/client/processor";
+import { processor, type ProcessedPreview, type SourceVariant } from "@/client/processor";
 import { EMPTY_PALETTE, useStudio } from "@/client/store";
 import type { Rgb } from "@/core/types";
 import type { AssetRecord } from "@/shared/model";
@@ -26,7 +26,8 @@ export function useAssetPalette(asset: AssetRecord | null): Rgb[] {
 export function useProcessed(
   asset: AssetRecord | null,
   palette: Rgb[],
-  wantSource = false
+  wantSource = false,
+  variant: SourceVariant = "source"
 ): PreviewState {
   const [state, setState] = useState<PreviewState>({
     preview: null,
@@ -34,9 +35,14 @@ export function useProcessed(
     loading: false
   });
 
+  // Falls back to the thumbnail once the full-resolution source has rolled off,
+  // so the library keeps rendering even though the original is gone.
+  const effective: SourceVariant = asset?.hasSource === false ? "thumb" : variant;
+
   const cacheKey = useMemo(
-    () => (asset ? processor.cacheKeyFor(asset.id, asset.processing, palette.length) : ""),
-    [asset, palette.length]
+    () =>
+      asset ? processor.cacheKeyFor(asset.id, asset.processing, palette.length, effective) : "",
+    [asset, palette.length, effective]
   );
 
   useEffect(() => {
@@ -55,7 +61,7 @@ export function useProcessed(
     setState((previous) => ({ ...previous, loading: true }));
 
     processor
-      .process(asset.id, `/api/assets/${asset.id}/source`, asset.processing, palette, wantSource)
+      .process(asset.id, asset.processing, palette, wantSource, effective)
       .then((preview) => {
         if (!cancelled) setState({ preview, error: null, loading: false });
       })
@@ -66,7 +72,7 @@ export function useProcessed(
     return () => {
       cancelled = true;
     };
-  }, [asset, cacheKey, palette, wantSource]);
+  }, [asset, cacheKey, palette, wantSource, effective]);
 
   return state;
 }
@@ -127,7 +133,9 @@ export function BitmapCanvas({
 
 export function AssetThumb({ asset, size = 96 }: { asset: AssetRecord; size?: number }) {
   const palette = useAssetPalette(asset);
-  const { preview, error, loading } = useProcessed(asset, palette);
+  // Runs the pipeline over the small stored preview rather than the source.
+  // The result is indistinguishable at this size and costs a few KB.
+  const { preview, error, loading } = useProcessed(asset, palette, false, "thumb");
 
   if (error) {
     return (

@@ -36,7 +36,6 @@ const FALLBACK_SETTINGS: StudioSettings = {
   assetSlug: "prop",
   generation: DEFAULT_GENERATION,
   processing: DEFAULT_PROCESSING,
-  concurrency: 4,
   activeCompositionId: null,
   cutTemplateBackgroundOnPaste: true,
   templateCutTolerance: 0.28
@@ -947,9 +946,50 @@ function persistComposition(
   if (compositionTimer) clearTimeout(compositionTimer);
   compositionTimer = setTimeout(() => {
     compositionTimer = null;
-    void api("/api/compositions", {
-      method: "PUT",
-      body: JSON.stringify(get().composition)
-    }).catch(() => undefined);
+    void saveComposition(set, get);
   }, 500);
+}
+
+/**
+ * Writes the composition, sending the version we last saw so the server can
+ * refuse a write that would clobber another tab. On conflict we adopt the
+ * server's copy rather than silently overwriting it.
+ */
+async function saveComposition(
+  set: (partial: Partial<StudioState>) => void,
+  get: () => StudioState
+): Promise<void> {
+  const local = get().composition;
+
+  const response = await fetch("/api/compositions", {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      ...(local.version !== undefined ? { "If-Match": String(local.version) } : {})
+    },
+    body: JSON.stringify(local)
+  }).catch(() => null);
+
+  if (!response) return;
+
+  const payload = (await response.json().catch(() => null)) as {
+    composition?: Composition;
+    error?: string;
+  } | null;
+
+  if (response.status === 409 && payload?.composition) {
+    set({
+      composition: payload.composition,
+      notice: "this composition changed elsewhere, so the newer version was loaded"
+    });
+    return;
+  }
+
+  if (!response.ok || !payload?.composition) return;
+
+  // Adopt the new version number so the next save carries it.
+  const saved = payload.composition;
+  if (get().composition.id === saved.id) {
+    set({ composition: { ...get().composition, version: saved.version } });
+  }
 }

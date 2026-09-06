@@ -10,6 +10,7 @@ import {
   PIXELATE_MODES
 } from "@/core/types";
 import { BitmapCanvas, useAssetPalette, useProcessed } from "./AssetBitmap";
+import { ExportDialog } from "./ExportDialog";
 import {
   Button,
   ColorInput,
@@ -53,6 +54,7 @@ export function InspectorPanel() {
   const asset = assets.find((entry) => entry.id === selectedIds[selectedIds.length - 1]) ?? null;
   const [view, setView] = useState<ViewMode>("processed");
   const [exportName, setExportName] = useState("");
+  const [exporting, setExporting] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   useEffect(() => {
@@ -486,7 +488,7 @@ export function InspectorPanel() {
         add to playground
       </Button>
 
-      <Field label="Export filename" hint="art/approved/props">
+      <Field label="Download filename" hint="no extension">
         <input
           type="text"
           value={exportName}
@@ -494,17 +496,30 @@ export function InspectorPanel() {
         />
       </Field>
 
+      <Button variant="primary" className="w-full" onClick={() => setExporting(true)}>
+        download
+      </Button>
+
       <Button
-        variant="primary"
-        className="w-full"
+        variant="ghost"
+        className="mt-1 w-full"
         disabled={busy !== null}
+        title="Writes a copy into this app's own storage instead of downloading it. Counts against your storage."
         onClick={() => void store().approve(asset.id, exportName)}
       >
-        {busy === "exporting" ? "exporting..." : "export png for Godot"}
+        {busy === "exporting" ? "saving..." : "save a server-side copy"}
       </Button>
 
       {asset.approvedPath ? (
         <p className="mt-2 text-[10px] break-all text-emerald-400">{asset.approvedPath}</p>
+      ) : null}
+
+      {exporting ? (
+        <ExportDialog
+          assets={[asset]}
+          nameOverride={exportName}
+          onClose={() => setExporting(false)}
+        />
       ) : null}
     </Panel>
   );

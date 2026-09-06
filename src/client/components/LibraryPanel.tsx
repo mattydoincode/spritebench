@@ -5,6 +5,7 @@ import { startAssetDrag } from "@/client/dragAssets";
 import { useStudio } from "@/client/store";
 import type { AssetRecord } from "@/shared/model";
 import { AssetThumb } from "./AssetBitmap";
+import { ExportDialog } from "./ExportDialog";
 import { Button, Panel, Row } from "./ui";
 
 export function LibraryPanel() {
@@ -16,6 +17,7 @@ export function LibraryPanel() {
   const [search, setSearch] = useState("");
   const [folderFilter, setFolderFilter] = useState("");
   const [thumbSize, setThumbSize] = useState(88);
+  const [exporting, setExporting] = useState(false);
 
   const folders = useMemo(() => {
     const set = new Set<string>();
@@ -38,6 +40,13 @@ export function LibraryPanel() {
       })
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }, [assets, folderFilter, search]);
+
+  // Kept in library order rather than click order, so the zip reads the same
+  // way the grid does.
+  const selectedAssets = useMemo(
+    () => assets.filter((asset) => selectedIds.includes(asset.id)),
+    [assets, selectedIds]
+  );
 
   const onThumbClick = (event: React.MouseEvent, asset: AssetRecord, index: number) => {
     if (event.shiftKey && selectedIds.length > 0) {
@@ -118,7 +127,22 @@ export function LibraryPanel() {
           >
             stage {selectedIds.length}
           </Button>
+          <Button
+            variant="primary"
+            title={
+              selectedIds.length === 1
+                ? "Download this image"
+                : `Download all ${selectedIds.length} as a zip, packaged in your browser`
+            }
+            onClick={() => setExporting(true)}
+          >
+            download {selectedIds.length}
+          </Button>
         </Row>
+      ) : null}
+
+      {exporting ? (
+        <ExportDialog assets={selectedAssets} onClose={() => setExporting(false)} />
       ) : null}
 
       {visible.length === 0 ? (

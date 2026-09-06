@@ -18,6 +18,19 @@ interface Pending {
 
 const MAX_CACHED = 60;
 
+/**
+ * Which stored image to run the pipeline over. `thumb` is a small WebP
+ * generated on ingest; the library grid draws 96-pixel squares and has no
+ * business downloading multi-megabyte sources to do it.
+ */
+export type SourceVariant = "source" | "thumb";
+
+export function sourceUrlFor(assetId: string, variant: SourceVariant): string {
+  return variant === "thumb"
+    ? `/api/assets/${assetId}/source?variant=thumb`
+    : `/api/assets/${assetId}/source`;
+}
+
 class Processor {
   private worker: Worker | null = null;
   private nextRequestId = 1;
@@ -59,8 +72,13 @@ class Processor {
     return worker;
   }
 
-  cacheKeyFor(assetId: string, settings: ProcessingSettings, paletteLength: number): string {
-    return `${assetId}:${hashSettings(settings)}:${paletteLength}`;
+  cacheKeyFor(
+    assetId: string,
+    settings: ProcessingSettings,
+    paletteLength: number,
+    variant: SourceVariant = "source"
+  ): string {
+    return `${assetId}:${variant}:${hashSettings(settings)}:${paletteLength}`;
   }
 
   peek(cacheKey: string): ProcessedPreview | undefined {
@@ -69,12 +87,13 @@ class Processor {
 
   async process(
     assetId: string,
-    sourceUrl: string,
     settings: ProcessingSettings,
     palette: Rgb[],
-    wantSource = false
+    wantSource = false,
+    variant: SourceVariant = "source"
   ): Promise<ProcessedPreview> {
-    const cacheKey = this.cacheKeyFor(assetId, settings, palette.length);
+    const cacheKey = this.cacheKeyFor(assetId, settings, palette.length, variant);
+    const sourceUrl = sourceUrlFor(assetId, variant);
 
     const cached = this.cache.get(cacheKey);
     if (cached && (!wantSource || cached.sourceBitmap)) return cached;
@@ -116,11 +135,17 @@ class Processor {
     return promise;
   }
 
-  evictSource(sourceUrl: string): void {
-    this.worker?.postMessage({ type: "evict", cacheKey: sourceUrl });
+  /** Drops both variants of an asset, in the worker and in the bitmap cache. */
+  evictAsset(assetId: string): void {
+    for (const variant of ["source", "thumb"] as const) {
+      this.worker?.postMessage({ type: "evict", cacheKey: sourceUrlFor(assetId, variant) });
+    }
 
     for (const key of [...this.cache.keys()]) {
-      if (key.startsWith(`${sourceUrl}:`)) this.cache.delete(key);
+      if (!key.startsWith(`${assetId}:`)) continue;
+
+      this.cache.get(key)?.processed.close();
+      this.cache.delete(key);
     }
   }
 }
