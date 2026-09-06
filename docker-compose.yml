@@ -1,0 +1,30 @@
+# Local Postgres only. The app itself runs from `scripts/dev.sh`, which starts
+# this same container directly and needs no compose implementation installed.
+#
+#   podman-compose up -d     (or: docker compose up -d)
+#   ./scripts/dev.sh up      equivalent, and also starts web + worker
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: art-studio-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: art
+      POSTGRES_PASSWORD: art
+      POSTGRES_DB: art_studio
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U art -d art_studio"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
+    # Pinned so this and scripts/dev.sh address the same volume. Without an
+    # explicit name, compose derives one from the directory ("ai-art-studio_
+    # pgdata") and you get a second, empty database that looks like data loss.
+    name: art-studio-pgdata

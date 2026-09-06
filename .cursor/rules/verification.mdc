@@ -1,0 +1,40 @@
+---
+description: Verify with unit tests, not browser automation; hand UI checks to the user
+alwaysApply: true
+---
+
+# Verification
+
+Browser automation is slow and expensive, and the user can check the UI in
+seconds. Do not use it.
+
+## Never
+
+- The `browser-use` subagent, or `cursor-ide-browser` tools, to verify work.
+- Driving the app to confirm a change looks right or a page still loads.
+
+Terminal checks against a running server are fine: `curl` for status codes,
+health endpoints, and API payloads. It is the *browser* that is off limits.
+
+## Instead
+
+Push logic out of the UI into something a test can call, then test that.
+
+```ts
+// ❌ BAD: only checkable by clicking Download and unpacking the file
+async function downloadZip(assets, kind) { /* fetch, zip, click <a> */ }
+
+// ✅ GOOD: layout and bytes are unit-testable; only the <a> click is not
+export function planZipEntries(assets, kind): PlannedEntry[]
+export function buildArchive(plan, provide): Promise<ArchiveResult>
+```
+
+Stub the browser seam (`fetch`, canvas, `URL.createObjectURL`) and assert on
+the real output. Prefer `vitest` in this repo.
+
+## Then hand off
+
+When something genuinely needs a human eye, finish the code, run
+`npm run typecheck` and `npm test`, and end the turn with a short numbered
+checklist of what to click and what to expect. Be specific — name the button,
+the panel, and the expected result. Do not ask permission to use the browser.

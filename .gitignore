@@ -7,3 +7,11 @@ tsconfig.tsbuildinfo
 .env.local
 
 data/
+# Local library used to verify the Postgres and object-storage migration.
+data-pg/
+
+# Bundled worker and migrator, built by `npm run build:node`.
+dist/
+
+# Local pg_dump copies.
+.backups/
