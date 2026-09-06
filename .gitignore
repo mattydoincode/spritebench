@@ -15,3 +15,11 @@ dist/
 
 # Local pg_dump copies.
 .backups/
+
+# App Platform spec with real secret values filled in. `doctl apps update`
+# overwrites every variable it is given, so pushing the committed spec (whose
+# SECRET values are empty) would blank them; keep an unredacted copy here.
+infra/do-app.local.yaml
+
+# Cursor MCP config, which holds API tokens.
+.cursor/mcp.json
