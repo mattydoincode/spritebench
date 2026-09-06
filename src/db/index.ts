@@ -1,6 +1,7 @@
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import * as schema from "./schema";
+import { requiresSsl as needsSsl, withoutSslParams } from "./url";
 
 export * as schema from "./schema";
 export * from "./schema";
@@ -22,10 +23,18 @@ export function connectionString(): string {
   const url = process.env.DATABASE_URL?.trim();
   if (!url) {
     throw new Error(
-      "DATABASE_URL is required. Point it at Postgres (Railway provides one, or run a local container)."
+      "DATABASE_URL is required. Point it at Postgres (a managed cluster, or run a local container)."
     );
   }
   return url;
+}
+
+/**
+ * What the pools are actually given: the URL minus its TLS parameters, so
+ * `sslConfig()` is the only thing deciding TLS. See `withoutSslParams`.
+ */
+export function poolConnectionString(): string {
+  return withoutSslParams(connectionString());
 }
 
 /**
@@ -36,7 +45,7 @@ export function pgPool(): Pool {
   if (pool) return pool;
 
   pool = new Pool({
-    connectionString: connectionString(),
+    connectionString: poolConnectionString(),
     max: Number(process.env.DATABASE_POOL_MAX ?? 10),
     ssl: sslConfig()
   });
@@ -55,30 +64,19 @@ export function pgPool(): Pool {
  * connects while queries fail, or the reverse.
  *
  * Inferring from the hostname is a guess that gets it wrong on any private
- * network name -- Railway's `postgres.railway.internal`, a container's
- * `host.containers.internal`, a compose service alias -- so DATABASE_SSL
- * exists to state it outright, and `sslmode` in the URL is honored too.
+ * network name -- a container's `host.containers.internal`, a compose service
+ * alias -- so DATABASE_SSL exists to state it outright, and `sslmode` in the
+ * URL is honored as a fallback.
+ *
+ * For this to hold, the pools get `poolConnectionString()` rather than the raw
+ * URL. `pg` lets a parsed connection string overwrite the options object, so
+ * an `sslmode` left in place would beat whatever is returned here.
  *
  * `rejectUnauthorized: false` because managed providers front Postgres with
  * certificates that do not chain to a public root.
  */
 export function sslConfig(): { rejectUnauthorized: false } | undefined {
-  return requiresSsl() ? { rejectUnauthorized: false } : undefined;
-}
-
-function requiresSsl(): boolean {
-  const explicit = process.env.DATABASE_SSL?.trim().toLowerCase();
-  if (explicit === "disable" || explicit === "false") return false;
-  if (explicit === "require" || explicit === "true") return true;
-
-  const url = connectionString();
-  if (/sslmode=disable/.test(url)) return false;
-  if (/sslmode=require/.test(url)) return true;
-
-  // Default off: an unencrypted hop inside a provider's private network is the
-  // common case, and failing closed here would break local and container runs
-  // for a setting the deployment can state explicitly.
-  return false;
+  return needsSsl(connectionString(), process.env.DATABASE_SSL) ? { rejectUnauthorized: false } : undefined;
 }
 
 export function db(): Database {

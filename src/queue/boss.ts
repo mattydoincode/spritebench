@@ -1,5 +1,5 @@
 import { PgBoss } from "pg-boss";
-import { connectionString, sslConfig } from "@/db";
+import { poolConnectionString, sslConfig } from "@/db";
 
 export const GENERATE_QUEUE = "generate";
 export const GENERATE_DLQ = "generate-dlq";
@@ -16,7 +16,7 @@ let starting: Promise<PgBoss> | null = null;
 
 async function start(): Promise<PgBoss> {
   const next = new PgBoss({
-    connectionString: connectionString(),
+    connectionString: poolConnectionString(),
     // pg-boss owns its own schema, well away from the domain tables.
     schema: "pgboss",
     max: Number(process.env.QUEUE_POOL_MAX ?? 4),
