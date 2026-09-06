@@ -5,6 +5,7 @@ tsconfig.tsbuildinfo
 
 .env
 .env.local
+.env.remote
 
 data/
 # Local library used to verify the Postgres and object-storage migration.

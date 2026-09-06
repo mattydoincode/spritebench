@@ -34,9 +34,41 @@ Detach with `Ctrl-b d`; the stack keeps running.
 | `npm run typecheck`   | `tsc --noEmit`                                         |
 | `npm run import:legacy` | pull a pre-Postgres `data/` directory into the app   |
 
-Everything the app reads comes from `.env.local`. The dev scripts strip those
-variables from the environment they hand to the servers, so a stale `export` in
-your shell cannot silently override the file.
+## Environments
+
+Two env files, both gitignored, each with a checked-in template:
+
+| File          | Template               | Holds                                    |
+| ------------- | ---------------------- | ---------------------------------------- |
+| `.env.local`  | `.env.example`         | the dev container and `./data-pg`        |
+| `.env.remote` | `.env.remote.example`  | credentials for the deployed Postgres and R2 |
+
+Commands that touch a database or a bucket come in pairs, and every one names
+the file it loads rather than inheriting whatever is exported:
+
+| Local                   | Remote                          |
+| ----------------------- | ------------------------------- |
+| `npm run db:migrate`    | `npm run db:migrate:remote`     |
+| `npm run db:studio`     | `npm run db:studio:remote`      |
+| `npm run psql`          | `npm run psql:remote`           |
+| `npm run verify:s3`     | `npm run verify:s3:remote`      |
+
+Each prints the database and bucket it resolved before doing anything:
+
+```
+[env] .env.remote
+      db      spritebench@spritebench-prod-....db.ondigitalocean.com/spritebench
+      storage r2 bucket=spritebench-prod
+```
+
+`scripts/env-run.sh` clears every variable the templates declare before it
+loads the file. Node and Next both decline to overwrite a variable that is
+already set, so without that step a stale `export DATABASE_URL` in your shell
+beats the file and the command runs against the wrong database while appearing
+to work.
+
+`npm run mirror:storage` is the one command that loads both files, since it
+copies from the local data directory into the remote bucket.
 
 ## Architecture
 
