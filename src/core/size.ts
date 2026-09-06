@@ -13,8 +13,6 @@ export const LEGACY_SIZES: Size[] = [
   { width: 1536, height: 1024 }
 ];
 
-export const FLEXIBLE_SIZE_MODELS = new Set(["gpt-image-2", "gpt-image-2-2026-04-21"]);
-
 function ceilToMultiple(value: number, multiple: number): number {
   return Math.ceil(value / multiple) * multiple;
 }
@@ -130,12 +128,6 @@ export function snapLegacySize(requested: Size): Size {
   }
 
   return best;
-}
-
-export function snapRequestSize(requested: Size, model: string): Size {
-  return FLEXIBLE_SIZE_MODELS.has(model)
-    ? snapFlexibleSize(requested)
-    : snapLegacySize(requested);
 }
 
 export function fitToAspect(template: Size, budget: Size): Size {

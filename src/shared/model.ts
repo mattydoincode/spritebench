@@ -5,14 +5,6 @@ export type ImageQuality = "auto" | "low" | "medium" | "high";
 export type ImageBackground = "auto" | "transparent" | "opaque";
 export type ImageModeration = "auto" | "low";
 
-export const MODELS = [
-  "gpt-image-2",
-  "gpt-image-2-2026-04-21",
-  "gpt-image-1.5",
-  "gpt-image-1",
-  "gpt-image-1-mini"
-] as const;
-
 export interface GenerationParams {
   model: string;
   quality: ImageQuality;
@@ -82,6 +74,10 @@ export interface AssetRecord {
   template: TemplateSpec | null;
   usage: TokenUsage | null;
   elapsedSeconds: number | null;
+  /** False once the full-resolution source has been rolled off. */
+  hasSource: boolean;
+  /** When the source becomes eligible for roll-off, ISO 8601. */
+  expiresAt: string | null;
 }
 
 export type JobStatus = "queued" | "running" | "done" | "error" | "cancelled";
@@ -152,15 +148,21 @@ export interface Composition {
   palette: string;
   paletteDither: DitherMode;
   paletteDitherStrength: number;
+  /** Server-assigned. Sent back on write so a second tab cannot clobber. */
+  version?: number;
 }
 
+/**
+ * Per-user preferences. Job concurrency used to live here but is server
+ * configuration (`WORKER_CONCURRENCY`) -- with more than one user, saving
+ * settings would otherwise rewrite it for everybody.
+ */
 export interface StudioSettings {
   promptPrefix: string;
   promptSuffix: string;
   assetSlug: string;
   generation: GenerationParams;
   processing: ProcessingSettings;
-  concurrency: number;
   activeCompositionId: string | null;
   cutTemplateBackgroundOnPaste: boolean;
   templateCutTolerance: number;
