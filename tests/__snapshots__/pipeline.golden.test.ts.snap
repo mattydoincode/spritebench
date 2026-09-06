@@ -1,0 +1,265 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`applyPipeline golden output > sprite-1.png > chroma key cutout 1`] = `
+{
+  "description": "chromaKey · trim 192x189 to 85x163 · snap alpha",
+  "sha256": "84a2182cd984240c",
+  "size": "85x163",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-1.png > cutout then 32px sprite 1`] = `
+{
+  "description": "cutout skipped, border is 100% transparent already · trim 192x189 to 85x163 · 17x32 dominantColor · snap alpha",
+  "sha256": "304297f0c52745f1",
+  "size": "17x32",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-1.png > cutout, despeckle, erode, trim 1`] = `
+{
+  "description": "cutout skipped, border is 100% transparent already · despeckle + fill holes · erode 1px · trim 192x189 to 87x165 · snap alpha",
+  "sha256": "7c1c5ac216f3bb29",
+  "size": "87x165",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-1.png > defaults 1`] = `
+{
+  "description": "cutout skipped, border is 100% transparent already · trim 192x189 to 85x163 · 33x64 dominantColor · snap alpha",
+  "sha256": "9fef6d2311974694",
+  "size": "33x64",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-1.png > luminance cutout 1`] = `
+{
+  "description": "luminanceAbove · trim 192x189 to 85x163 · snap alpha",
+  "sha256": "f7d074d4daffbf7a",
+  "size": "85x163",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-1.png > nearest neighbour downsample 1`] = `
+{
+  "description": "cutout skipped, border is 100% transparent already · trim 192x189 to 85x163 · 24x24 nearest · snap alpha",
+  "sha256": "8ab26234f8c59120",
+  "size": "24x24",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-1.png > no processing at all 1`] = `
+{
+  "description": "",
+  "sha256": "b729e7d82f5d503e",
+  "size": "192x189",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-1.png > orientation and flips 1`] = `
+{
+  "description": "rotate 90cw flip xy · cutout skipped, border is 100% transparent already · snap alpha",
+  "sha256": "635c0fdfe1fd0c71",
+  "size": "189x192",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-1.png > palette quantize, bayer4x4, weighted rgb 1`] = `
+{
+  "description": "cutout skipped, border is 100% transparent already · trim 192x189 to 85x163 · 25x48 dominantColor · snap alpha · palette 6 colors + bayer4x4",
+  "sha256": "5aed91c4303d22ff",
+  "size": "25x48",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-1.png > palette quantize, floyd-steinberg 1`] = `
+{
+  "description": "cutout skipped, border is 100% transparent already · trim 192x189 to 85x163 · 25x48 dominantColor · snap alpha · palette 6 colors + floydSteinberg",
+  "sha256": "4656eafa8494882f",
+  "size": "25x48",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-1.png > palette quantize, no dither 1`] = `
+{
+  "description": "cutout skipped, border is 100% transparent already · trim 192x189 to 85x163 · 25x48 dominantColor · snap alpha · palette 6 colors",
+  "sha256": "27b5a46add1eb8d0",
+  "size": "25x48",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-2.png > chroma key cutout 1`] = `
+{
+  "description": "chromaKey · trim 192x93 to 78x81 · snap alpha",
+  "sha256": "26840b59978ef850",
+  "size": "78x81",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-2.png > cutout then 32px sprite 1`] = `
+{
+  "description": "cutout skipped, border is 100% transparent already · trim 192x93 to 78x81 · 31x32 dominantColor · snap alpha",
+  "sha256": "30f55a5b63e892c8",
+  "size": "31x32",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-2.png > cutout, despeckle, erode, trim 1`] = `
+{
+  "description": "cutout skipped, border is 100% transparent already · despeckle + fill holes · erode 1px · trim 192x93 to 80x83 · snap alpha",
+  "sha256": "98600f36e3050efc",
+  "size": "80x83",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-2.png > defaults 1`] = `
+{
+  "description": "cutout skipped, border is 100% transparent already · trim 192x93 to 78x81 · 62x64 dominantColor · snap alpha",
+  "sha256": "b914a2ac8924b9d7",
+  "size": "62x64",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-2.png > luminance cutout 1`] = `
+{
+  "description": "luminanceAbove · trim 192x93 to 78x81 · snap alpha",
+  "sha256": "a63262d0d3c815ce",
+  "size": "78x81",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-2.png > nearest neighbour downsample 1`] = `
+{
+  "description": "cutout skipped, border is 100% transparent already · trim 192x93 to 78x81 · 24x24 nearest · snap alpha",
+  "sha256": "4f7f001349cfd9e1",
+  "size": "24x24",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-2.png > no processing at all 1`] = `
+{
+  "description": "",
+  "sha256": "e2c4d4a21a6313e6",
+  "size": "192x93",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-2.png > orientation and flips 1`] = `
+{
+  "description": "rotate 90cw flip xy · cutout skipped, border is 100% transparent already · snap alpha",
+  "sha256": "0cdb5acce157da75",
+  "size": "93x192",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-2.png > palette quantize, bayer4x4, weighted rgb 1`] = `
+{
+  "description": "cutout skipped, border is 100% transparent already · trim 192x93 to 78x81 · 46x48 dominantColor · snap alpha · palette 6 colors + bayer4x4",
+  "sha256": "7593de0691ebf68f",
+  "size": "46x48",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-2.png > palette quantize, floyd-steinberg 1`] = `
+{
+  "description": "cutout skipped, border is 100% transparent already · trim 192x93 to 78x81 · 46x48 dominantColor · snap alpha · palette 6 colors + floydSteinberg",
+  "sha256": "6e52d8b95cf1325a",
+  "size": "46x48",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-2.png > palette quantize, no dither 1`] = `
+{
+  "description": "cutout skipped, border is 100% transparent already · trim 192x93 to 78x81 · 46x48 dominantColor · snap alpha · palette 6 colors",
+  "sha256": "897a010b5377c706",
+  "size": "46x48",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-3.png > chroma key cutout 1`] = `
+{
+  "description": "chromaKey · trim 192x189 to 80x138 · snap alpha",
+  "sha256": "51869f599f4a93f8",
+  "size": "80x138",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-3.png > cutout then 32px sprite 1`] = `
+{
+  "description": "cutout skipped, border is 100% transparent already · trim 192x189 to 80x138 · 19x32 dominantColor · snap alpha",
+  "sha256": "bbc1897c2993bf6b",
+  "size": "19x32",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-3.png > cutout, despeckle, erode, trim 1`] = `
+{
+  "description": "cutout skipped, border is 100% transparent already · despeckle + fill holes · erode 1px · trim 192x189 to 82x140 · snap alpha",
+  "sha256": "f730e1df77cdedfd",
+  "size": "82x140",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-3.png > defaults 1`] = `
+{
+  "description": "cutout skipped, border is 100% transparent already · trim 192x189 to 80x138 · 37x64 dominantColor · snap alpha",
+  "sha256": "2e124c4122b40e08",
+  "size": "37x64",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-3.png > luminance cutout 1`] = `
+{
+  "description": "luminanceAbove · trim 192x189 to 80x138 · snap alpha",
+  "sha256": "a23dd96b531e2cf9",
+  "size": "80x138",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-3.png > nearest neighbour downsample 1`] = `
+{
+  "description": "cutout skipped, border is 100% transparent already · trim 192x189 to 80x138 · 24x24 nearest · snap alpha",
+  "sha256": "e49c07c019836742",
+  "size": "24x24",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-3.png > no processing at all 1`] = `
+{
+  "description": "",
+  "sha256": "56183b4e731487a1",
+  "size": "192x189",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-3.png > orientation and flips 1`] = `
+{
+  "description": "rotate 90cw flip xy · cutout skipped, border is 100% transparent already · snap alpha",
+  "sha256": "eef477d9234efd90",
+  "size": "189x192",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-3.png > palette quantize, bayer4x4, weighted rgb 1`] = `
+{
+  "description": "cutout skipped, border is 100% transparent already · trim 192x189 to 80x138 · 28x48 dominantColor · snap alpha · palette 6 colors + bayer4x4",
+  "sha256": "0b6cef093eaa0b1d",
+  "size": "28x48",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-3.png > palette quantize, floyd-steinberg 1`] = `
+{
+  "description": "cutout skipped, border is 100% transparent already · trim 192x189 to 80x138 · 28x48 dominantColor · snap alpha · palette 6 colors + floydSteinberg",
+  "sha256": "395fd315a70716c1",
+  "size": "28x48",
+}
+`;
+
+exports[`applyPipeline golden output > sprite-3.png > palette quantize, no dither 1`] = `
+{
+  "description": "cutout skipped, border is 100% transparent already · trim 192x189 to 80x138 · 28x48 dominantColor · snap alpha · palette 6 colors",
+  "sha256": "8d08f88b0aebf074",
+  "size": "28x48",
+}
+`;

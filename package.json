@@ -3,25 +3,62 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "dev:up": "scripts/dev.sh up",
+    "dev:down": "scripts/dev.sh down",
+    "dev:restart": "scripts/dev.sh restart",
+    "dev:status": "scripts/dev.sh status",
+    "dev:attach": "scripts/dev.sh attach",
+    "dev:psql": "scripts/dev.sh psql",
     "dev": "next dev -p 4300",
+    "worker": "tsx watch --env-file-if-exists=.env.local src/worker/main.ts",
     "build": "next build",
-    "start": "next start -p 4300",
-    "typecheck": "tsc --noEmit"
+    "build:node": "node scripts/build-node.mjs",
+    "start": "next start -p ${PORT:-4300}",
+    "worker:start": "node dist/worker.mjs",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx --env-file-if-exists=.env.local scripts/migrate.ts",
+    "db:migrate:prod": "node dist/migrate.mjs",
+    "db:studio": "drizzle-kit studio",
+    "import:legacy": "tsx --env-file-if-exists=.env.local scripts/import-legacy.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "verify:s3": "tsx --env-file-if-exists=.env.local scripts/verify-s3.ts",
+    "verify:lifecycle": "tsx --env-file-if-exists=.env.local scripts/verify-lifecycle.ts",
+    "mirror:storage": "tsx --env-file-if-exists=.env.local scripts/mirror-storage.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1127.0",
+    "@aws-sdk/s3-request-presigner": "^3.1127.0",
+    "drizzle-orm": "^0.45.2",
+    "fflate": "^0.8.3",
     "next": "^15.5.4",
+    "pg": "^8.23.0",
+    "pg-boss": "^12.30.0",
     "pngjs": "^7.0.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "sharp": "^0.35.4",
+    "zod": "^4.5.4",
     "zustand": "^5.0.8"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.13",
     "@types/node": "^24.5.2",
+    "@types/pg": "^8.23.1",
     "@types/pngjs": "^6.0.5",
     "@types/react": "^19.1.13",
     "@types/react-dom": "^19.1.9",
+    "drizzle-kit": "^0.31.10",
+    "esbuild": "^0.28.2",
     "tailwindcss": "^4.1.13",
-    "typescript": "^5.9.2"
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.2",
+    "vitest": "^5.0.0"
+  },
+  "allowScripts": {
+    "esbuild@0.18.20": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.2": true
   }
 }
