@@ -26,9 +26,9 @@
     "verify:s3": "tsx --env-file-if-exists=.env.local scripts/verify-s3.ts",
     "verify:lifecycle": "tsx --env-file-if-exists=.env.local scripts/verify-lifecycle.ts",
     "mirror:storage": "tsx --env-file-if-exists=.env.local scripts/mirror-storage.ts",
-    "r2:create": "wrangler r2 bucket create spritebench",
-    "r2:cors": "wrangler r2 bucket cors set spritebench --file infra/r2-cors.json",
-    "r2:cors:show": "wrangler r2 bucket cors list spritebench"
+    "r2:create": "wrangler r2 bucket create spritebench-prod",
+    "r2:cors": "wrangler r2 bucket cors set spritebench-prod --file infra/r2-cors.json",
+    "r2:cors:show": "wrangler r2 bucket cors list spritebench-prod"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1127.0",

@@ -23,17 +23,29 @@ a placeholder name fails the deploy. The smallest sane tier is 1 GiB / 1 vCPU /
 10 GiB at about $15/month, which includes daily backups and 7-day
 point-in-time recovery.
 
-```
-doctl databases create spritebench-db --engine pg --version 17 \
-  --size db-s-1vcpu-1gb --num-nodes 1 --region nyc3
+`version` must match the live cluster or the deploy is rejected. Read it back
+rather than assuming, since DigitalOcean's default moves:
 
-doctl apps spec validate --spec infra/do-app.yaml
+```
+doctl databases list
+```
+
+A new cluster contains only `defaultdb` and the `doadmin` superuser, so create
+the database and role the spec names. Do not fall back to `doadmin` — the app
+has no need for a superuser, and a leaked application credential should not be
+able to drop the cluster's other databases.
+
+```
+doctl databases db create <cluster-id> spritebench
+doctl databases user create <cluster-id> spritebench
+
+doctl apps spec validate infra/do-app.yaml
 doctl apps create --spec infra/do-app.yaml
 ```
 
-`${art-db.DATABASE_URL}` is a bindable variable resolved from the `databases`
-entry named `art-db`; it is set once at app level so the web service, the
-worker and the migration job cannot drift apart.
+`${db.DATABASE_URL}` is a bindable variable resolved from the `databases` entry
+named `db`; it is set once at app level so the web service, the worker and the
+migration job cannot drift apart.
 
 Set `DATABASE_SSL=require` here. DigitalOcean's managed Postgres is reached
 over the network with a certificate that does not chain to a public root.
@@ -42,10 +54,12 @@ Migrations run as a `PRE_DEPLOY` job, after the build and before either
 component takes traffic, and a non-zero exit aborts the deploy. Attach it to
 exactly one component — two concurrent migrators race.
 
-Note the connection ceiling: a 1 GiB cluster allows 22 usable connections, and
-every component opens both a query pool and a pg-boss pool. Hence
-`DATABASE_POOL_MAX=6` and `QUEUE_POOL_MAX=3` in the spec, which leaves room for
-three components plus a `psql` session.
+Note the connection ceiling: a 1 GiB cluster allows roughly 22 usable
+connections, and every component opens both a query pool and a pg-boss pool.
+The peak is a redeploy, when the outgoing web and worker still hold their pools
+while the new migration job opens its own. Hence `DATABASE_POOL_MAX=4` and
+`QUEUE_POOL_MAX=2`: 12 connections steady, 16 mid-deploy, leaving room for a
+`psql` session.
 
 ### Railway
 
