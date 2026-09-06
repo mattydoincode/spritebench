@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
-import { cancelJob } from "@/server/queue";
+import { cancelJob } from "@/db/repo/jobs";
+import { currentUserId } from "@/db/repo/users";
 
 export const dynamic = "force-dynamic";
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const cancelled = cancelJob(id);
+  const userId = await currentUserId();
 
-  if (!cancelled) {
+  if (!(await cancelJob(userId, id))) {
     return NextResponse.json({ error: "only queued jobs can be cancelled" }, { status: 409 });
   }
 

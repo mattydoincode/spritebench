@@ -1,13 +1,17 @@
 import { NextResponse } from "next/server";
-import { clearFinishedJobs, listJobs } from "@/server/queue";
+import { clearFinishedJobs, listJobs } from "@/db/repo/jobs";
+import { currentUserId } from "@/db/repo/users";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json({ jobs: listJobs() });
+  const userId = await currentUserId();
+  return NextResponse.json({ jobs: await listJobs(userId) });
 }
 
 export async function DELETE() {
-  clearFinishedJobs();
-  return NextResponse.json({ jobs: listJobs() });
+  const userId = await currentUserId();
+  await clearFinishedJobs(userId);
+
+  return NextResponse.json({ jobs: await listJobs(userId) });
 }

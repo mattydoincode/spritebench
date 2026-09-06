@@ -1,22 +1,27 @@
 import { NextResponse } from "next/server";
-import { readSettings, serialize, writeSettings } from "@/server/library";
-import { hasOpenAiApiKey } from "@/server/env";
-import type { StudioSettings } from "@/shared/model";
+import { listProviderKeys } from "@/db/repo/providerKeys";
+import { currentUserId, readSettings, writeSettings } from "@/db/repo/users";
+import { parseBody, settingsPatchSchema, withValidation } from "@/server/validation";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const settings = await serialize(() => readSettings());
-  return NextResponse.json({ settings, hasApiKey: hasOpenAiApiKey() });
+  const userId = await currentUserId();
+  const [settings, keys] = await Promise.all([readSettings(userId), listProviderKeys(userId)]);
+
+  return NextResponse.json({
+    settings,
+    providerKeys: keys,
+    // Retained for the existing client, which only checks whether a key exists.
+    hasApiKey: keys.some((key) => key.provider === "openai")
+  });
 }
 
 export async function PUT(request: Request) {
-  const body = (await request.json()) as Partial<StudioSettings>;
+  return withValidation(async () => {
+    const body = await parseBody(request, settingsPatchSchema);
+    const userId = await currentUserId();
 
-  const settings = await serialize(() => {
-    const current = readSettings();
-    return writeSettings({ ...current, ...body });
+    return NextResponse.json({ settings: await writeSettings(userId, body) });
   });
-
-  return NextResponse.json({ settings });
 }

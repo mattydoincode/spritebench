@@ -1,9 +1,9 @@
-import fs from "node:fs";
-import path from "node:path";
 import { NextResponse } from "next/server";
 import { buildAlphaVisualization } from "@/core/mask";
-import { paths } from "@/server/paths";
+import { currentUserId } from "@/db/repo/users";
 import { decodePng, encodePng } from "@/server/png";
+import { loadTemplate } from "@/server/templates";
+import { asBytes } from "@/storage/types";
 
 export const dynamic = "force-dynamic";
 
@@ -14,17 +14,18 @@ export async function GET(request: Request) {
 
   if (!file) return NextResponse.json({ error: "file required" }, { status: 400 });
 
-  const target = path.join(paths.templates, path.basename(file));
-  if (!fs.existsSync(target)) {
-    return NextResponse.json({ error: "template not found" }, { status: 404 });
-  }
+  const bytes = await loadTemplate(await currentUserId(), file);
+  if (!bytes) return NextResponse.json({ error: "template not found" }, { status: 404 });
 
-  const bytes = fs.readFileSync(target);
   const payload = alpha
-    ? encodePng(buildAlphaVisualization(decodePng(bytes)))
+    ? asBytes(encodePng(buildAlphaVisualization(decodePng(Buffer.from(bytes)))))
     : bytes;
 
-  return new NextResponse(new Uint8Array(payload), {
-    headers: { "Content-Type": "image/png", "Cache-Control": "no-store" }
+  return new NextResponse(payload, {
+    headers: {
+      "Content-Type": "image/png",
+      // Keyed by filename and rewritten on re-upload, so revalidate.
+      "Cache-Control": "no-cache"
+    }
   });
 }

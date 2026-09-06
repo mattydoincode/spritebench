@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { readAssets, serialize } from "@/server/library";
+import { currentUserId } from "@/db/repo/users";
+import { listAssets } from "@/db/repo/assets";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const assets = await serialize(() => readAssets());
-  return NextResponse.json({ assets });
+  const userId = await currentUserId();
+  return NextResponse.json({ assets: await listAssets(userId) });
 }

@@ -1,35 +1,21 @@
-import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { withDefaults } from "@/core/settings";
-import { readSettings, serialize, writeSettings } from "@/server/library";
-import { enqueue } from "@/server/queue";
-import { composePrompt, type GenerationParams, type TemplateSpec } from "@/shared/model";
-import type { ProcessingSettings } from "@/core/settings";
+import { currentUserId, readSettings, writeSettings } from "@/db/repo/users";
+import {
+  FanOutExceededError,
+  QuotaExceededError,
+  enqueueGeneration
+} from "@/server/generation";
+import { generateBodySchema, parseBody, withValidation } from "@/server/validation";
+import { composePrompt, type GenerationParams } from "@/shared/model";
 
 export const dynamic = "force-dynamic";
 
-interface GenerateBody {
-  promptBody: string;
-  promptPrefix?: string;
-  promptSuffix?: string;
-  generation?: Partial<GenerationParams>;
-  processing?: Partial<ProcessingSettings>;
-  folder?: string;
-  template?: TemplateSpec | null;
-  label?: string;
-  batches?: number;
-  remember?: boolean;
-}
-
 export async function POST(request: Request) {
-  const body = (await request.json()) as GenerateBody;
-
-  if (!body.promptBody || body.promptBody.trim().length === 0) {
-    return NextResponse.json({ error: "a prompt is required" }, { status: 400 });
-  }
-
-  const jobs = await serialize(() => {
-    const settings = readSettings();
+  return withValidation(async () => {
+    const body = await parseBody(request, generateBodySchema);
+    const userId = await currentUserId();
+    const settings = await readSettings(userId);
 
     const prompt = {
       prefix: body.promptPrefix ?? settings.promptPrefix,
@@ -41,8 +27,7 @@ export async function POST(request: Request) {
     const processing = withDefaults({ ...settings.processing, ...(body.processing ?? {}) });
 
     if (body.remember !== false) {
-      writeSettings({
-        ...settings,
+      await writeSettings(userId, {
         promptPrefix: prompt.prefix,
         promptSuffix: prompt.suffix,
         generation,
@@ -50,23 +35,27 @@ export async function POST(request: Request) {
       });
     }
 
-    const count = Math.max(1, Math.min(20, Math.floor(body.batches ?? 1)));
-    const batchId = count > 1 ? crypto.randomUUID() : null;
-
-    return Array.from({ length: count }, (_unused, index) =>
-      enqueue({
+    try {
+      const jobs = await enqueueGeneration({
+        userId,
         prompt,
         generation,
         processing,
         folder: body.folder ?? "",
         template: body.template ?? null,
         label: body.label,
-        batchId,
-        batchIndex: index + 1,
-        batchSize: count
-      })
-    );
-  });
+        batches: body.batches ?? 1
+      });
 
-  return NextResponse.json({ jobs, composedPrompt: composePrompt(jobs[0].prompt) });
+      return NextResponse.json({ jobs, composedPrompt: composePrompt(prompt) });
+    } catch (error) {
+      if (error instanceof QuotaExceededError) {
+        return NextResponse.json({ error: error.message }, { status: 402 });
+      }
+      if (error instanceof FanOutExceededError) {
+        return NextResponse.json({ error: error.message }, { status: 400 });
+      }
+      throw error;
+    }
+  });
 }

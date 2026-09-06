@@ -1,34 +1,43 @@
 import { NextResponse } from "next/server";
-import { withDefaults } from "@/core/settings";
-import { deleteAsset, getAsset, serialize, upsertAsset } from "@/server/library";
-import type { AssetRecord } from "@/shared/model";
+import { softDeleteAsset, updateAsset } from "@/db/repo/assets";
+import { currentUserId } from "@/db/repo/users";
+import { assetPatchSchema, parseBody, withValidation } from "@/server/validation";
+import { storage } from "@/storage";
 
 export const dynamic = "force-dynamic";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const body = (await request.json()) as Partial<AssetRecord>;
+  return withValidation(async () => {
+    const { id } = await params;
+    const body = await parseBody(request, assetPatchSchema);
+    const userId = await currentUserId();
 
-  const updated = await serialize(() => {
-    const current = getAsset(id);
-    if (!current) return null;
-
-    return upsertAsset({
-      ...current,
-      ...body,
-      id: current.id,
-      processing: body.processing ? withDefaults(body.processing) : current.processing
+    const updated = await updateAsset(userId, id, {
+      name: body.name,
+      folder: body.folder,
+      tags: body.tags,
+      processing: body.processing,
+      ...(body.approvedName !== undefined ? { exportName: body.approvedName } : {})
     });
-  });
 
-  if (!updated) return NextResponse.json({ error: "asset not found" }, { status: 404 });
-  return NextResponse.json({ asset: updated });
+    if (!updated) return NextResponse.json({ error: "asset not found" }, { status: 404 });
+    return NextResponse.json({ asset: updated });
+  });
 }
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const removeFiles = new URL(request.url).searchParams.get("files") === "true";
+  const userId = await currentUserId();
 
-  await serialize(() => deleteAsset(id, removeFiles));
+  const row = await softDeleteAsset(userId, id);
+  if (!row) return NextResponse.json({ error: "asset not found" }, { status: 404 });
+
+  // The row is soft-deleted either way; `files=true` also drops the bytes.
+  if (removeFiles) {
+    if (row.sourceKey) await storage().delete(row.sourceKey);
+    if (row.thumbKey) await storage().delete(row.thumbKey);
+  }
+
   return NextResponse.json({ ok: true });
 }

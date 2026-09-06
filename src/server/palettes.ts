@@ -1,71 +1,83 @@
-import fs from "node:fs";
-import path from "node:path";
 import { parsePaletteText, uniqueOpaqueColors } from "@/core/palette";
 import type { Rgb } from "@/core/types";
-import { ensureFolders, paths } from "./paths";
+import {
+  deletePalette as deletePaletteRow,
+  getPaletteColors,
+  listPalettes as listPaletteRows,
+  upsertPalette,
+  type PaletteInfo
+} from "@/db/repo/palettes";
+import { basename, paletteKey } from "@/storage/keys";
+import { storage } from "@/storage";
 import { decodePng } from "./png";
+
+export type { PaletteInfo };
 
 const TEXT_EXTENSIONS = new Set([".hex", ".txt", ".gpl", ".pal"]);
 const IMAGE_EXTENSIONS = new Set([".png"]);
 
+function extensionOf(file: string): string {
+  const name = basename(file);
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot).toLowerCase() : "";
+}
+
 export function isPaletteFile(file: string): boolean {
-  const extension = path.extname(file).toLowerCase();
+  const extension = extensionOf(file);
   return TEXT_EXTENSIONS.has(extension) || IMAGE_EXTENSIONS.has(extension);
 }
 
-export function loadPalette(file: string): Rgb[] {
-  if (!file) return [];
-
-  const full = path.join(paths.palettes, path.basename(file));
-  if (!fs.existsSync(full)) return [];
-
-  const extension = path.extname(full).toLowerCase();
+/** Parses palette bytes into colours. Pure; no storage or database access. */
+export function parsePalette(filename: string, bytes: Uint8Array): Rgb[] {
+  const extension = extensionOf(filename);
 
   if (IMAGE_EXTENSIONS.has(extension)) {
-    return uniqueOpaqueColors(decodePng(fs.readFileSync(full)));
+    return uniqueOpaqueColors(decodePng(Buffer.from(bytes)));
   }
-
   if (TEXT_EXTENSIONS.has(extension)) {
-    return parsePaletteText(full, fs.readFileSync(full, "utf8"));
+    return parsePaletteText(filename, Buffer.from(bytes).toString("utf8"));
   }
 
   return [];
 }
 
-export function savePalette(name: string, bytes: Buffer): { file: string; count: number } {
-  ensureFolders();
+/** Colours come from the database, parsed once at upload time. */
+export async function loadPalette(userId: string, file: string): Promise<Rgb[]> {
+  return getPaletteColors(userId, basename(file));
+}
 
-  const extension = path.extname(name).toLowerCase();
+export async function listPalettes(userId: string): Promise<PaletteInfo[]> {
+  return listPaletteRows(userId);
+}
+
+export async function savePalette(
+  userId: string,
+  name: string,
+  bytes: Uint8Array
+): Promise<PaletteInfo> {
   if (!isPaletteFile(name)) {
     throw new Error(`${name} is not a palette. Use .hex, .txt, .gpl, .pal, or .png.`);
   }
 
-  const base = path
-    .basename(name, extension)
+  const extension = extensionOf(name);
+  const stem = basename(name)
+    .slice(0, basename(name).length - extension.length)
     .replace(/[^a-zA-Z0-9-_ ]/g, "")
     .trim();
 
-  const file = `${base.length > 0 ? base : "palette"}${extension}`;
-  fs.writeFileSync(path.join(paths.palettes, file), bytes);
+  const filename = `${stem.length > 0 ? stem : "palette"}${extension}`;
 
-  const colors = loadPalette(file);
-  if (colors.length === 0) {
-    fs.unlinkSync(path.join(paths.palettes, file));
-    throw new Error(`no colours could be read out of ${name}`);
-  }
+  const colors = parsePalette(filename, bytes);
+  if (colors.length === 0) throw new Error(`no colours could be read out of ${name}`);
 
-  return { file, count: colors.length };
+  await storage().put(paletteKey(filename), bytes, {
+    contentType: extension === ".png" ? "image/png" : "text/plain"
+  });
+
+  return upsertPalette(userId, filename, colors);
 }
 
-export function listPalettes(): Array<{ file: string; count: number; preview: Rgb[] }> {
-  ensureFolders();
-
-  return fs
-    .readdirSync(paths.palettes)
-    .filter(isPaletteFile)
-    .sort()
-    .map((file) => {
-      const colors = loadPalette(file);
-      return { file, count: colors.length, preview: colors.slice(0, 24) };
-    });
+export async function deletePalette(userId: string, file: string): Promise<void> {
+  const key = await deletePaletteRow(userId, basename(file));
+  if (key) await storage().delete(key);
 }

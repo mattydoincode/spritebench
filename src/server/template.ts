@@ -1,30 +1,29 @@
-import fs from "node:fs";
-import path from "node:path";
 import { buildMask, conformToSize } from "@/core/mask";
-import { fitToAspect, snapRequestSize } from "@/core/size";
+import { fitToAspect } from "@/core/size";
 import type { Size } from "@/core/types";
+import { snapRequestSize } from "@/providers/models";
 import type { GenerationParams, TemplateSpec } from "@/shared/model";
-import { paths } from "./paths";
+import { asBytes, type Bytes } from "@/storage/types";
 import { decodePng, encodePng } from "./png";
+import { loadTemplate } from "./templates";
 
 export interface EditInputs {
-  basePath: string;
-  maskPath: string | null;
+  /** PNG bytes, held in memory. Concurrent jobs previously overwrote each
+   *  other's inputs by sharing fixed `_edit_base.png` / `_edit_mask.png` paths. */
+  base: Bytes;
+  mask: Bytes | null;
   size: Size;
 }
 
-export function templatePath(file: string): string {
-  return path.join(paths.templates, path.basename(file));
-}
-
 export async function buildEditInputs(
+  userId: string,
   template: TemplateSpec,
   generation: GenerationParams
 ): Promise<EditInputs> {
-  const source = templatePath(template.file);
-  if (!fs.existsSync(source)) throw new Error(`template not found: ${template.file}`);
+  const bytes = await loadTemplate(userId, template.file);
+  if (!bytes) throw new Error(`template not found: ${template.file}`);
 
-  const decoded = decodePng(fs.readFileSync(source));
+  const decoded = decodePng(Buffer.from(bytes));
 
   const budget = snapRequestSize(generation.size, generation.model);
   const requested = template.matchAspect
@@ -32,32 +31,27 @@ export async function buildEditInputs(
     : budget;
 
   const size = snapRequestSize(requested, generation.model);
-
   const base = conformToSize(decoded, size, template.fit, true);
-  const basePath = path.join(paths.templates, "_edit_base.png");
-  fs.writeFileSync(basePath, encodePng(base));
 
-  let maskPath: string | null = null;
-  if (template.useAsMask) {
-    const mask = buildMask(
-      decoded,
-      size,
-      template.maskSource,
-      0.5,
-      0.85,
-      template.dilatePixels,
-      template.fit
-    );
-
-    if (mask.width !== base.width || mask.height !== base.height) {
-      throw new Error(
-        `mask ${mask.width}x${mask.height} does not match base ${base.width}x${base.height}`
-      );
-    }
-
-    maskPath = path.join(paths.templates, "_edit_mask.png");
-    fs.writeFileSync(maskPath, encodePng(mask));
+  if (!template.useAsMask) {
+    return { base: asBytes(encodePng(base)), mask: null, size };
   }
 
-  return { basePath, maskPath, size };
+  const mask = buildMask(
+    decoded,
+    size,
+    template.maskSource,
+    0.5,
+    0.85,
+    template.dilatePixels,
+    template.fit
+  );
+
+  if (mask.width !== base.width || mask.height !== base.height) {
+    throw new Error(
+      `mask ${mask.width}x${mask.height} does not match base ${base.width}x${base.height}`
+    );
+  }
+
+  return { base: asBytes(encodePng(base)), mask: asBytes(encodePng(mask)), size };
 }
