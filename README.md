@@ -70,6 +70,25 @@ to work.
 `npm run mirror:storage` is the one command that loads both files, since it
 copies from the local data directory into the remote bucket.
 
+## Deploying
+
+Pushing to `main` deploys: all three components have `deploy_on_push`. The rest
+is for changing or watching the deployment itself.
+
+| Command                  | Does                                              |
+| ------------------------ | ------------------------------------------------- |
+| `npm run deploy:status`  | components, last deploy, assigned origin          |
+| `npm run deploy:logs`    | follow the worker                                 |
+| `npm run deploy:logs:web`| follow the web service                            |
+| `npm run deploy:spec`    | apply `infra/do-app.local.yaml` after a spec edit |
+
+`deploy:spec` reads `infra/do-app.local.yaml`, not the committed
+`infra/do-app.yaml`. The committed spec leaves every `SECRET` value empty so it
+can be checked in, and `doctl apps update` overwrites every variable it is
+handed — applying the committed file would blank the R2 credentials and the
+encryption key, and the worker would then fail to decrypt stored provider keys.
+Keep the unredacted copy locally and edit both.
+
 ## Architecture
 
 Two Node processes against one Postgres and one object store:

@@ -31,6 +31,10 @@
     "verify:s3:remote": "scripts/env-run.sh .env.remote tsx scripts/verify-s3.ts",
     "verify:lifecycle": "scripts/env-run.sh .env.local tsx scripts/verify-lifecycle.ts",
     "mirror:storage": "scripts/env-run.sh .env.local,.env.remote tsx scripts/mirror-storage.ts",
+    "deploy:spec": "scripts/env-run.sh .env.remote sh -c 'doctl apps update \"$DO_APP_ID\" --spec infra/do-app.local.yaml'",
+    "deploy:status": "scripts/env-run.sh .env.remote sh -c 'doctl apps get \"$DO_APP_ID\"'",
+    "deploy:logs": "scripts/env-run.sh .env.remote sh -c 'doctl apps logs \"$DO_APP_ID\" worker --follow'",
+    "deploy:logs:web": "scripts/env-run.sh .env.remote sh -c 'doctl apps logs \"$DO_APP_ID\" web --follow'",
     "r2:create": "wrangler r2 bucket create spritebench-prod",
     "r2:cors": "wrangler r2 bucket cors set spritebench-prod --file infra/r2-cors.json",
     "r2:cors:show": "wrangler r2 bucket cors list spritebench-prod"
