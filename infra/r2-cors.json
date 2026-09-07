@@ -2,9 +2,14 @@
   "rules": [
     {
       "allowed": {
-        "origins": ["https://REPLACE-WITH-APP-ORIGIN", "http://localhost:4300"],
-        "methods": ["GET", "HEAD"],
-        "headers": ["Range", "If-None-Match", "If-Modified-Since"]
+        "origins": [
+          "https://spritebench.com",
+          "https://www.spritebench.com",
+          "https://spritebench-wwp6q.ondigitalocean.app",
+          "http://localhost:4300"
+        ],
+        "methods": ["GET", "HEAD", "PUT"],
+        "headers": ["Range", "If-None-Match", "If-Modified-Since", "Content-Type"]
       },
       "exposeHeaders": ["Content-Length", "Content-Type", "ETag", "Accept-Ranges"],
       "maxAgeSeconds": 3600

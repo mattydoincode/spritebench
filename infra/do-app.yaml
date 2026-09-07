@@ -42,6 +42,20 @@ envs:
     scope: RUN_AND_BUILD_TIME
     value: ${db.DATABASE_URL}
 
+# DNS lives at Cloudflare, so `zone` is deliberately omitted -- setting it
+# would have DigitalOcean try to manage records in its own nameservers. An
+# ALIAS domain redirects to the PRIMARY, which is what keeps www from becoming
+# a second origin needing its own CORS entry and canonical URLs.
+#
+# App Platform validates for Let's Encrypt over HTTP, which fails through
+# Cloudflare's proxy. Leave the record DNS-only (grey cloud) until the domain
+# reports Active, then turn the proxy on with SSL/TLS set to Full (strict).
+domains:
+  - domain: spritebench.com
+    type: PRIMARY
+  - domain: www.spritebench.com
+    type: ALIAS
+
 services:
   - name: web
     instance_size_slug: apps-s-1vcpu-1gb
