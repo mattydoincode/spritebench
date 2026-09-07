@@ -1,6 +1,7 @@
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import * as schema from "./schema";
+import { count } from "@/server/env";
 import { requiresSsl as needsSsl, withoutSslParams } from "./url";
 
 export * as schema from "./schema";
@@ -46,7 +47,7 @@ export function pgPool(): Pool {
 
   pool = new Pool({
     connectionString: poolConnectionString(),
-    max: Number(process.env.DATABASE_POOL_MAX ?? 10),
+    max: count("DATABASE_POOL_MAX"),
     ssl: sslConfig()
   });
 

@@ -1,5 +1,6 @@
 import { PgBoss } from "pg-boss";
 import { poolConnectionString, sslConfig } from "@/db";
+import { count, num } from "@/server/env";
 
 export const GENERATE_QUEUE = "generate";
 export const GENERATE_DLQ = "generate-dlq";
@@ -19,7 +20,7 @@ async function start(): Promise<PgBoss> {
     connectionString: poolConnectionString(),
     // pg-boss owns its own schema, well away from the domain tables.
     schema: "pgboss",
-    max: Number(process.env.QUEUE_POOL_MAX ?? 4),
+    max: count("QUEUE_POOL_MAX"),
     ssl: sslConfig()
   });
 
@@ -67,6 +68,6 @@ export async function stopBoss(): Promise<void> {
   await current.stop({
     graceful: true,
     close: true,
-    timeout: Number(process.env.QUEUE_DRAIN_TIMEOUT_MS ?? 30_000)
+    timeout: num("QUEUE_DRAIN_TIMEOUT_MS")
   });
 }

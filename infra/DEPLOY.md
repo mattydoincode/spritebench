@@ -134,43 +134,43 @@ R2_BUCKET=... npm run verify:s3
 To carry an existing local library over, run `scripts/mirror-storage.ts` with
 both drivers configured.
 
-## 3. Secrets and limits
+## 3. Secrets
 
-Set on both services:
+Under Settings → App-Level Environment Variables, encrypted, on the app (not on
+one component — all three need them):
 
 ```
-ENCRYPTION_KEY=          # openssl rand -base64 32 -- changing it orphans stored keys
-FREE_ASSET_LIMIT=100
-ASSET_RETENTION_DAYS=30
-MAX_IMAGES_PER_REQUEST=40
-WORKER_CONCURRENCY=4
+ENCRYPTION_KEY         # openssl rand -base64 32
+R2_ACCOUNT_ID
+R2_ACCESS_KEY_ID
+R2_SECRET_ACCESS_KEY
 ```
 
-`ENCRYPTION_KEY` must be identical across services: the web service encrypts
-provider keys and the worker decrypts them.
+`ENCRYPTION_KEY` must be identical across components: the web service encrypts
+provider keys and the worker decrypts them. Rotating it orphans every key users
+have saved.
 
-Leave `OPENAI_API_KEY` unset in production. It exists as a local convenience
-fallback, and in production every user brings their own key.
+Nothing else needs setting. Every other variable is declared in `.env`, which
+is committed with the values production wants and ships inside the image — an
+already-set variable wins over it, so the panel is where you override one.
+`infra/do-app.yaml` carries no values, only structure and the
+`${db.DATABASE_URL}` binding.
 
-These live in the app-level `envs` block of `infra/do-app.yaml`, which
-propagates to all three components. The `SECRET`-typed ones are committed with
-empty values and **set once in the control panel**, under Settings →
-App-Level Environment Variables. Nothing in this repo, and no file on your
-machine, holds a production credential.
+Leave `OPENAI_API_KEY` unset. It exists as a local convenience fallback; in
+production every user brings their own key.
 
-That places a rule on every later change: use `npm run spec:push`, never
-`doctl apps update --spec`. App Platform has no secret store separate from the
-app — the panel edits the same spec — and a submitted spec replaces the
-previous one, so applying the committed file would unset all four. `spec:push`
-reads the live spec, carries its `EV[1:...]` values across, and refuses to
-submit a `SECRET` with no value.
+Until the four are set, the worker refuses to start and `/api/health` reports
+which names are missing. The intermediate state is loud rather than a running
+app that fails on its first real request.
 
-Two consequences of App Platform's encryption worth knowing. A secret must be
-plaintext on **first** submission: DigitalOcean rejects `EV[...]` values before
-the app exists, which is why the app is created without them and they are typed
-in afterward. And until they are set, the worker refuses to start and
-`/api/health` reports which names are missing — the intermediate state is loud
-rather than a running app that fails on its first real request.
+Two things about App Platform's encryption. A secret must be plaintext on
+**first** submission — DigitalOcean rejects `EV[...]` values before the app
+exists, which is why the app is created without them and they are typed in
+afterward. And thereafter, use `npm run spec:push`, never `doctl apps update
+--spec`: the panel edits the same spec `doctl` submits, and a submitted spec
+replaces the previous one, so applying the committed file directly would unset
+everything typed in. `spec:push` reads the live spec first and carries every
+variable the file doesn't declare back across.
 
 Set a spend cap: Billing → Alerts on DigitalOcean, Workspace Usage on Railway
 (minimum $10).

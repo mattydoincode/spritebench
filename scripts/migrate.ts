@@ -5,6 +5,7 @@
  * rather than `drizzle-kit migrate` so production does not need drizzle-kit,
  * which is a dev dependency.
  */
+import "@/server/env-load";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { closeDb, db } from "@/db";
 

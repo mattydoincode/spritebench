@@ -13,7 +13,7 @@ Postgres.
 
 ```bash
 npm install
-printf 'ENCRYPTION_KEY=%s\n' "$(openssl rand -base64 32)" > .env.local
+# see Configuration below for the .env.local this needs
 npm run dev:up               # http://localhost:4300
 ```
 
@@ -36,19 +36,39 @@ Detach with `Ctrl-b d`; the stack keeps running.
 
 ## Configuration
 
-Local development reads two files, in order:
+Every variable the app reads is declared in one place: `.env`. There are no
+fallback values in `src/`, so a variable has exactly one home and a missing one
+is a named error rather than a silent default.
 
-| File         | Tracked | Holds                                            |
-| ------------ | ------- | ------------------------------------------------ |
-| `.env`       | **yes** | non-secret defaults: dev container, `./data-pg`, limits |
-| `.env.local` | no      | secrets and machine-specific overrides           |
+| Where                  | Tracked | Holds                                                |
+| ---------------------- | ------- | ---------------------------------------------------- |
+| `.env`                 | **yes** | every variable, with the values production wants; secrets blank |
+| `.env.local`           | no      | overrides that point at the dev container and local disk, plus local secrets |
+| DigitalOcean panel     | n/a     | production secrets                                   |
 
-A fresh clone runs with no setup beyond an `ENCRYPTION_KEY` in `.env.local`.
-Because `.env` is tracked, never put a credential in it.
+Precedence runs the other way: an already-set variable wins, then `.env.local`,
+then `.env`. So the platform beats the image and your machine beats both. Node
+and Next both implement this by declining to overwrite, which is also why
+`scripts/env-run.sh` clears the variables `.env` declares before loading —
+without it a stale `export DATABASE_URL` in your shell beats the file and the
+command runs against the wrong database while appearing to work.
 
-**Production is not configured here.** Its values live in the DigitalOcean
-control panel; nothing in the repo holds a production credential, and there is
-no env file that points at production. That is deliberate — see below.
+`.env` holds production values rather than local ones, and ships inside the
+image. That direction is deliberate: forgetting to set `STORAGE_DRIVER` in
+production then yields `r2` rather than writing images to a container
+filesystem that disappears on the next deploy. The cost is that a fresh clone
+needs `.env.local`:
+
+```
+DATABASE_URL=postgres://art:art@localhost:5433/art_studio
+DATABASE_SSL=disable
+STORAGE_DRIVER=local
+SPRITEBENCH_DATA_DIR=./data-pg
+ENCRYPTION_KEY=<openssl rand -base64 32>
+```
+
+Don't copy a default down into `.env.local` just to read it — it will quietly
+go stale and win.
 
 Commands that touch a database or a bucket load both files and print what they
 resolved before doing anything:
@@ -58,11 +78,6 @@ resolved before doing anything:
       db      art@localhost/art_studio
       storage local dir=./data-pg
 ```
-
-`scripts/env-run.sh` clears every variable `.env` declares before loading.
-Node and Next both decline to overwrite a variable that is already set, so
-without that step a stale `export DATABASE_URL` in your shell beats the file
-and the command runs against the wrong database while appearing to work.
 
 Missing or malformed configuration is reported at startup rather than at first
 use: the worker refuses to start and `/api/health` fails, listing the variable
@@ -85,17 +100,22 @@ needs them and nothing is applied from a laptop.
 | `npm run spec:push`       | apply `infra/do-app.yaml` after a spec edit   |
 | `npm run spec:pull`       | print the live spec                           |
 
-Secrets are set once in the control panel and never leave it. App Platform has
-no secret store separate from the app — the panel's environment variable editor
-writes the same spec `doctl` submits — and a submitted spec *replaces* the
-previous one. So `doctl apps update --spec infra/do-app.yaml` would unset every
-credential, leaving an app that serves pages while no image can be read or
-written.
+Production configuration lives in the control panel, not in the repo, and
+`infra/do-app.yaml` carries no values at all — only components, the build, the
+health check, and the `${db.DATABASE_URL}` binding. Adding a production
+override means typing it into the panel; nothing needs declaring in git first.
 
-`spec:push` exists for exactly that reason: it reads the live spec, carries its
-`EV[1:...]` encrypted values across, and refuses to submit a `SECRET` with no
-value. Structure stays in git, secrets stay in the panel, and no plaintext
-credential is ever written to disk.
+That works because App Platform has no secret store separate from the app. The
+panel's environment variable editor writes the same spec `doctl` submits, and a
+submitted spec *replaces* the previous one — so `doctl apps update --spec
+infra/do-app.yaml` would unset every panel variable, leaving an app that serves
+pages while no image can be read or written.
+
+`spec:push` exists for exactly that reason: it reads the live spec first and
+carries every variable the committed file doesn't mention back across, secrets
+as `EV[1:...]` ciphertext. Declaring a key in the file overrides the panel,
+which is how a value gets promoted into version control when it stops being a
+secret.
 
 ## Architecture
 

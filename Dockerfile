@@ -40,7 +40,9 @@ COPY --from=build --chown=node:node /app/.next ./.next
 COPY --from=build --chown=node:node /app/dist ./dist
 # Migrations are read from disk at release time, so they ship with the image.
 COPY --from=build --chown=node:node /app/drizzle ./drizzle
-COPY --chown=node:node package.json next.config.mjs ./
+# Declares every variable the app reads, and holds no credentials -- the panel
+# supplies those, and an already-set variable wins over this file.
+COPY --chown=node:node package.json next.config.mjs .env ./
 
 USER node
 

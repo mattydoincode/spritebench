@@ -1,3 +1,4 @@
+import "@/server/env-load";
 import { closeDb } from "@/db";
 import { failOrphanedJobs } from "@/db/repo/jobs";
 import {
