@@ -61,3 +61,42 @@ export function hasEncryptionKey(): boolean {
     return false;
   }
 }
+
+/**
+ * Configuration that is missing or malformed, described by name only. Values
+ * never appear, so this is safe to log and to serve from `/api/health`.
+ *
+ * Everything else here is validated lazily, at first use. That is fine for a
+ * value needed on every request and quietly fatal for one needed rarely: with
+ * no ENCRYPTION_KEY the app boots, serves pages and answers a naive health
+ * check, then fails the first time a user saves a provider key -- long after
+ * the deploy that caused it looked successful.
+ */
+export function configProblems(): string[] {
+  const problems: string[] = [];
+
+  const require = (name: string, hint?: string): void => {
+    if (!process.env[name]?.trim()) {
+      problems.push(hint ? `${name} is not set (${hint})` : `${name} is not set`);
+    }
+  };
+
+  require("DATABASE_URL", "a Postgres connection string");
+
+  const key = process.env.ENCRYPTION_KEY?.trim();
+  if (!key) {
+    problems.push("ENCRYPTION_KEY is not set (generate with: openssl rand -base64 32)");
+  } else if (Buffer.from(key, "base64").length !== 32) {
+    problems.push("ENCRYPTION_KEY does not decode to 32 bytes");
+  }
+
+  // Only the selected driver's credentials matter: local development should
+  // not be asked for R2 keys it has no use for.
+  if ((process.env.STORAGE_DRIVER?.trim().toLowerCase() || "local") === "r2") {
+    for (const name of ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"]) {
+      require(name, "required when STORAGE_DRIVER=r2");
+    }
+  }
+
+  return problems;
+}

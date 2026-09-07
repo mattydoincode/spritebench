@@ -1,16 +1,20 @@
 # DigitalOcean App Platform spec.
 #
 #   doctl apps spec validate infra/do-app.yaml   # note: positional, not --spec
-#   doctl apps create --spec infra/do-app.yaml
-#   doctl apps update <app-id> --spec infra/do-app.yaml
+#   doctl apps create --spec infra/do-app.yaml   # once, to create the app
+#   npm run spec:diff                            # what a push would submit
+#   npm run spec:push                            # every change after creation
+#
+# Use `npm run spec:push`, not `doctl apps update`, for changes. A submitted
+# spec REPLACES the previous one, and the four SECRET values below are empty
+# here so this file can be committed -- so applying it directly would unset
+# every credential in the control panel. The app would go on serving pages
+# while no image could be read or written. `spec:push` reads the live spec
+# first and carries its encrypted values across.
 #
 # `production: true` attaches the existing spritebench-prod cluster rather than
 # provisioning one, so db_name and db_user must already exist inside it -- see
 # infra/DEPLOY.md. `version` has to match the live cluster, currently PG 18.
-#
-# Secrets are left empty so this file stays committable. Set them in the
-# control panel or with `doctl apps update`; App Platform encrypts anything
-# typed SECRET on first submission.
 name: spritebench
 region: nyc
 

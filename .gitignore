@@ -3,9 +3,13 @@ node_modules/
 next-env.d.ts
 tsconfig.tsbuildinfo
 
-.env
+# `.env` is tracked and holds non-secret defaults. These two are not, and are
+# kept ignored even though .env.remote is no longer part of the workflow --
+# production secrets live in the DigitalOcean control panel now, and this is
+# the net that catches a stray copy.
 .env.local
 .env.remote
+.env.*.local
 
 data/
 # Local library used to verify the Postgres and object-storage migration.

@@ -55,13 +55,13 @@ command -v tmux >/dev/null 2>&1 || die "need tmux on PATH"
 # directory -- a genuinely confusing failure, because the app looks fine and
 # just serves the wrong content.
 #
-# Every key .env.example declares is therefore stripped from the environment
-# the panes inherit, which makes .env.local the single source of truth.
+# Every key .env declares is therefore stripped from the environment
+# the panes inherit, so .env and .env.local are the only things configuring it.
 ENV_PREFIX="env"
-if [ -f .env.example ]; then
+if [ -f .env ]; then
   while read -r key; do
     [ -n "$key" ] && ENV_PREFIX="$ENV_PREFIX -u $key"
-  done < <(grep -oE '^[A-Z][A-Z0-9_]*' .env.example | sort -u)
+  done < <(grep -oE '^[A-Z][A-Z0-9_]*' .env | sort -u)
 fi
 
 container_state() {
@@ -242,7 +242,7 @@ Panes:  0 web (:4300)   1 worker   2 free shell
 tmux:   detach with Ctrl-b d, move between panes with Ctrl-b arrow
 
 Postgres data lives in the named volume "art-studio-pgdata" and survives
-`down`. Every variable declared in .env.example is stripped from the panes'
+`down`. Every variable declared in .env is stripped from the panes'
 environment, so .env.local is the only thing that configures the app.
 
 To run just one piece: npm run dev (web only), npm run worker (worker only).

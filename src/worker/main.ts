@@ -8,7 +8,7 @@ import {
   stopBoss
 } from "@/queue/boss";
 import type { GenerateJobPayload } from "@/queue/dispatch";
-import { workerConcurrency } from "@/server/config";
+import { configProblems, workerConcurrency } from "@/server/config";
 import { pruneExpiredSources } from "./prune";
 import { runJob } from "./runJob";
 
@@ -38,6 +38,15 @@ async function shutdown(signal: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  // Refuse to start rather than accepting jobs it cannot finish. A worker with
+  // no R2 credentials would claim a job, call the provider, spend the user's
+  // money and then fail to store the result.
+  const problems = configProblems();
+  if (problems.length > 0) {
+    for (const problem of problems) console.error(`[worker] config: ${problem}`);
+    throw new Error(`${problems.length} configuration problem(s)`);
+  }
+
   const concurrency = workerConcurrency();
   const instance = await boss();
 

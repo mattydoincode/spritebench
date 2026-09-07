@@ -2,16 +2,16 @@
 #
 # Runs a command with one of the project's env files loaded.
 #
-#   scripts/env-run.sh .env.local tsx scripts/migrate.ts
-#   scripts/env-run.sh .env.remote sh -c 'psql "$DATABASE_URL"'
-#   scripts/env-run.sh .env.local,.env.remote tsx scripts/mirror-storage.ts
+#   scripts/env-run.sh .env,.env.local tsx scripts/migrate.ts
+#   scripts/env-run.sh .env,.env.local sh -c 'psql "$DATABASE_URL"'
+#   scripts/env-run.sh .env,.env.local tsx scripts/mirror-storage.ts
 #
-# Comma-separated files are applied left to right, so later files win. That is
-# how a command reads the local data directory and the remote bucket at once.
+# Comma-separated files are applied left to right, so later files win: .env
+# carries the defaults and .env.local overrides them. A missing file is skipped.
 #
 # Two things this does that `node --env-file` cannot:
 #
-#   1. Clears every variable the example files declare before loading. Node and
+#   1. Clears every variable `.env` declares before loading. Node and
 #      Next both decline to overwrite a variable that is already set, so a
 #      stale `export DATABASE_URL` in the calling shell otherwise beats the
 #      file and the command runs against the wrong database while looking fine.
@@ -32,7 +32,7 @@ shift
 
 # Anything the templates name is app configuration, so it belongs to the env
 # file rather than to whatever happens to be exported in this shell.
-for template in .env.example .env.remote.example; do
+for template in .env; do
   [ -f "$template" ] || continue
   while read -r key; do
     [ -n "$key" ] && unset "$key"
@@ -60,15 +60,23 @@ load() {
   done <"$file"
 }
 
+# A missing file is skipped rather than fatal, because `.env.local` is optional
+# once `.env` carries the defaults -- it exists to hold secrets and overrides.
+# Every file being absent is still an error, since that means nothing was
+# configured at all.
 IFS=',' read -ra chosen <<<"$FILES"
+LOADED=""
 for file in "${chosen[@]}"; do
-  if [ ! -f "$file" ]; then
-    echo "env-run: no $file" >&2
-    echo "  copy the template first: cp ${file%.local}.example $file" >&2
-    exit 1
-  fi
+  [ -f "$file" ] || continue
   load "$file"
+  LOADED="${LOADED:+$LOADED }$file"
 done
+
+if [ -z "$LOADED" ]; then
+  echo "env-run: none of these exist: $FILES" >&2
+  echo "  .env holds the defaults and is tracked; put secrets in .env.local" >&2
+  exit 1
+fi
 
 # Reported without the password, so this is safe in a shared terminal.
 describe_database() {
@@ -95,7 +103,7 @@ describe_storage() {
   fi
 }
 
-printf '[env] %s\n' "$FILES" >&2
+printf '[env] %s\n' "$LOADED" >&2
 printf '      db      %s\n' "$(describe_database)" >&2
 printf '      storage %s\n' "$(describe_storage)" >&2
 

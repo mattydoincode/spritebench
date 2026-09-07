@@ -13,7 +13,7 @@ Postgres.
 
 ```bash
 npm install
-cp .env.example .env.local   # add your OpenAI key
+printf 'ENCRYPTION_KEY=%s\n' "$(openssl rand -base64 32)" > .env.local
 npm run dev:up               # http://localhost:4300
 ```
 
@@ -34,60 +34,68 @@ Detach with `Ctrl-b d`; the stack keeps running.
 | `npm run typecheck`   | `tsc --noEmit`                                         |
 | `npm run import:legacy` | pull a pre-Postgres `data/` directory into the app   |
 
-## Environments
+## Configuration
 
-Two env files, both gitignored, each with a checked-in template:
+Local development reads two files, in order:
 
-| File          | Template               | Holds                                    |
-| ------------- | ---------------------- | ---------------------------------------- |
-| `.env.local`  | `.env.example`         | the dev container and `./data-pg`        |
-| `.env.remote` | `.env.remote.example`  | credentials for the deployed Postgres and R2 |
+| File         | Tracked | Holds                                            |
+| ------------ | ------- | ------------------------------------------------ |
+| `.env`       | **yes** | non-secret defaults: dev container, `./data-pg`, limits |
+| `.env.local` | no      | secrets and machine-specific overrides           |
 
-Commands that touch a database or a bucket come in pairs, and every one names
-the file it loads rather than inheriting whatever is exported:
+A fresh clone runs with no setup beyond an `ENCRYPTION_KEY` in `.env.local`.
+Because `.env` is tracked, never put a credential in it.
 
-| Local                   | Remote                          |
-| ----------------------- | ------------------------------- |
-| `npm run db:migrate`    | `npm run db:migrate:remote`     |
-| `npm run db:studio`     | `npm run db:studio:remote`      |
-| `npm run psql`          | `npm run psql:remote`           |
-| `npm run verify:s3`     | `npm run verify:s3:remote`      |
+**Production is not configured here.** Its values live in the DigitalOcean
+control panel; nothing in the repo holds a production credential, and there is
+no env file that points at production. That is deliberate — see below.
 
-Each prints the database and bucket it resolved before doing anything:
+Commands that touch a database or a bucket load both files and print what they
+resolved before doing anything:
 
 ```
-[env] .env.remote
-      db      spritebench@spritebench-prod-....db.ondigitalocean.com/spritebench
-      storage r2 bucket=spritebench-prod
+[env] .env .env.local
+      db      art@localhost/art_studio
+      storage local dir=./data-pg
 ```
 
-`scripts/env-run.sh` clears every variable the templates declare before it
-loads the file. Node and Next both decline to overwrite a variable that is
-already set, so without that step a stale `export DATABASE_URL` in your shell
-beats the file and the command runs against the wrong database while appearing
-to work.
+`scripts/env-run.sh` clears every variable `.env` declares before loading.
+Node and Next both decline to overwrite a variable that is already set, so
+without that step a stale `export DATABASE_URL` in your shell beats the file
+and the command runs against the wrong database while appearing to work.
 
-`npm run mirror:storage` is the one command that loads both files, since it
-copies from the local data directory into the remote bucket.
+Missing or malformed configuration is reported at startup rather than at first
+use: the worker refuses to start and `/api/health` fails, listing the variable
+names involved and never their values. Without that, a missing
+`ENCRYPTION_KEY` lets the app boot, serve pages and pass a health check, then
+fail the first time someone saves a provider key.
 
 ## Deploying
 
-Pushing to `main` deploys: all three components have `deploy_on_push`. The rest
-is for changing or watching the deployment itself.
+Pushing to `main` deploys: all three components have `deploy_on_push`.
+Migrations run as a `PRE_DEPLOY` job, so schema changes ship with the code that
+needs them and nothing is applied from a laptop.
 
-| Command                  | Does                                              |
-| ------------------------ | ------------------------------------------------- |
-| `npm run deploy:status`  | components, last deploy, assigned origin          |
-| `npm run deploy:logs`    | follow the worker                                 |
-| `npm run deploy:logs:web`| follow the web service                            |
-| `npm run deploy:spec`    | apply `infra/do-app.local.yaml` after a spec edit |
+| Command                   | Does                                          |
+| ------------------------- | --------------------------------------------- |
+| `npm run deploy:status`   | components, last deploy, assigned origin      |
+| `npm run deploy:logs`     | follow the worker                             |
+| `npm run deploy:logs:web` | follow the web service                        |
+| `npm run spec:diff`       | what a push would submit                      |
+| `npm run spec:push`       | apply `infra/do-app.yaml` after a spec edit   |
+| `npm run spec:pull`       | print the live spec                           |
 
-`deploy:spec` reads `infra/do-app.local.yaml`, not the committed
-`infra/do-app.yaml`. The committed spec leaves every `SECRET` value empty so it
-can be checked in, and `doctl apps update` overwrites every variable it is
-handed — applying the committed file would blank the R2 credentials and the
-encryption key, and the worker would then fail to decrypt stored provider keys.
-Keep the unredacted copy locally and edit both.
+Secrets are set once in the control panel and never leave it. App Platform has
+no secret store separate from the app — the panel's environment variable editor
+writes the same spec `doctl` submits — and a submitted spec *replaces* the
+previous one. So `doctl apps update --spec infra/do-app.yaml` would unset every
+credential, leaving an app that serves pages while no image can be read or
+written.
+
+`spec:push` exists for exactly that reason: it reads the live spec, carries its
+`EV[1:...]` encrypted values across, and refuses to submit a `SECRET` with no
+value. Structure stays in git, secrets stay in the panel, and no plaintext
+credential is ever written to disk.
 
 ## Architecture
 

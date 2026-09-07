@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { GENERATE_QUEUE, boss } from "@/queue/boss";
+import { configProblems } from "@/server/config";
 import { storage, storageDriver } from "@/storage";
 
 export const dynamic = "force-dynamic";
@@ -70,6 +71,15 @@ async function timed(check: () => Promise<string | undefined>): Promise<CheckRes
  * to catch a read-only token.
  */
 export async function GET() {
+  // Reported first and without a timing race: unlike the others this needs no
+  // network, and it is the check that explains the rest. Missing credentials
+  // otherwise surface as three unrelated-looking connection failures.
+  const problems = configProblems();
+  const config: CheckResult =
+    problems.length === 0
+      ? { state: "ok", ms: 0 }
+      : { state: "failed", detail: problems.join("; "), ms: 0 };
+
   const [database, objects, queue] = await Promise.all([
     timed(async () => {
       const result = await db().execute(sql`select 1 as ok`);
@@ -107,13 +117,13 @@ export async function GET() {
     })
   ]);
 
-  const checks = { database, storage: objects, queue };
+  const checks = { config, database, storage: objects, queue };
   const healthy = Object.values(checks).every((check) => check.state === "ok");
 
   return NextResponse.json(
     {
       status: healthy ? "ok" : "degraded",
-      version: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) ?? "dev",
+      version: process.env.DIGITALOCEAN_GIT_COMMIT_SHA?.slice(0, 7) ?? "dev",
       checks
     },
     {

@@ -152,10 +152,25 @@ provider keys and the worker decrypts them.
 Leave `OPENAI_API_KEY` unset in production. It exists as a local convenience
 fallback, and in production every user brings their own key.
 
-On DigitalOcean these live in the app-level `envs` block of
-`infra/do-app.yaml`, which propagates to all three components. Anything typed
-`SECRET` is encrypted on first submission; commit the file with empty values
-and fill them via the control panel or `doctl apps update`.
+These live in the app-level `envs` block of `infra/do-app.yaml`, which
+propagates to all three components. The `SECRET`-typed ones are committed with
+empty values and **set once in the control panel**, under Settings →
+App-Level Environment Variables. Nothing in this repo, and no file on your
+machine, holds a production credential.
+
+That places a rule on every later change: use `npm run spec:push`, never
+`doctl apps update --spec`. App Platform has no secret store separate from the
+app — the panel edits the same spec — and a submitted spec replaces the
+previous one, so applying the committed file would unset all four. `spec:push`
+reads the live spec, carries its `EV[1:...]` values across, and refuses to
+submit a `SECRET` with no value.
+
+Two consequences of App Platform's encryption worth knowing. A secret must be
+plaintext on **first** submission: DigitalOcean rejects `EV[...]` values before
+the app exists, which is why the app is created without them and they are typed
+in afterward. And until they are set, the worker refuses to start and
+`/api/health` reports which names are missing — the intermediate state is loud
+rather than a running app that fails on its first real request.
 
 Set a spend cap: Billing → Alerts on DigitalOcean, Workspace Usage on Railway
 (minimum $10).
