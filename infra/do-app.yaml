@@ -30,8 +30,14 @@ databases:
     db_name: spritebench
     db_user: spritebench
 
-# Applied to every component below, which is what keeps the worker and the
-# migration job from drifting out of step with the web service.
+# Only what production needs *differently* from the fallbacks in
+# src/server/config.ts. FREE_ASSET_LIMIT, ASSET_RETENTION_DAYS,
+# MAX_IMAGES_PER_REQUEST, WORKER_CONCURRENCY and QUEUE_DRAIN_TIMEOUT_MS already
+# default to these values in code, so restating them here would only create two
+# places to change one number.
+#
+# Applies to every component below, which is what keeps the worker and the
+# migration job in step with the web service.
 envs:
   - key: DATABASE_URL
     scope: RUN_AND_BUILD_TIME
@@ -72,15 +78,6 @@ envs:
     type: SECRET
     value: ""
 
-  - key: FREE_ASSET_LIMIT
-    scope: RUN_TIME
-    value: "100"
-  - key: ASSET_RETENTION_DAYS
-    scope: RUN_TIME
-    value: "30"
-  - key: MAX_IMAGES_PER_REQUEST
-    scope: RUN_TIME
-    value: "40"
 
   # Kept deliberately low, because a redeploy is the peak: the previous web and
   # worker still hold their pools while the new migration job opens its own.
@@ -127,13 +124,6 @@ workers:
     # A worker component takes no http_port and gets no health check: it is
     # not routed, which is exactly what makes it a real always-on process.
     run_command: node dist/worker.mjs
-    envs:
-      - key: WORKER_CONCURRENCY
-        scope: RUN_TIME
-        value: "4"
-      - key: QUEUE_DRAIN_TIMEOUT_MS
-        scope: RUN_TIME
-        value: "30000"
 
 jobs:
   # Runs after the build and before either component takes traffic; a non-zero

@@ -1,0 +1,21 @@
+---
+description: Project stage: disposable local data, no users, optimize for change management
+alwaysApply: true
+---
+
+# Stage
+
+Brand new app, no users, no data worth keeping.
+
+- **Local is disposable.** The dev database and `./data-pg` get blown away and
+  regenerated. Never design around preserving them, never hedge about losing
+  them, never propose a migration path for local data.
+- **No back-compat.** Nothing is deployed to users yet. Prefer deleting and
+  rewriting over a compatibility shim. One-time destructive fixes are fine —
+  drop the database, recreate the bucket, rewrite the schema.
+- **Optimize for change management, not first-time setup.** A rough one-time
+  step is fine. Anything repeated weekly should be one command that's hard to
+  get wrong. Spend the effort on the second.
+
+Corollary: don't build guards against mistakes I'd only make once during
+setup. Do build them for anything on the deploy path.
