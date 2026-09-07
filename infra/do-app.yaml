@@ -42,18 +42,24 @@ envs:
     scope: RUN_AND_BUILD_TIME
     value: ${db.DATABASE_URL}
 
-# No `domains:` block, deliberately. spritebench.com is configured on
-# Cloudflare, which proxies to the default ingress below and terminates TLS
-# itself -- that is what buys the WAF, bot filtering and rate limiting.
+# App Platform owns spritebench.com and its certificate, so the Cloudflare
+# records must stay DNS-only (grey cloud). DigitalOcean validates the domain by
+# resolving it to the ingress below; through Cloudflare's proxy it resolves to
+# Cloudflare instead, and the domain falls back to `configuring` and eventually
+# fails certificate renewal -- an outage about 90 days after the change.
 #
-# Adding the domain here as well would break it on a 90-day fuse: App Platform
-# would keep re-validating a hostname that now resolves to Cloudflare, mark it
-# `configuring`, and eventually fail certificate *renewal*. The two models are
-# exclusive, not sequential.
-#   https://docs.digitalocean.com/products/app-platform/how-to/configure-external-cdn/
+# Fronting the app with Cloudflare's proxy instead is a real option, but it
+# needs the Host header rewritten to the ingress hostname, or DigitalOcean's
+# router 404s a host it does not know. Origin Rules can do that only on
+# Enterprise; on lower plans it takes a Worker. See infra/DEPLOY.md.
 #
-# So the app answers only on *.ondigitalocean.app, and Cloudflare must not
-# override the Host header on the way in.
+# ALIAS redirects www to the PRIMARY, which keeps www from becoming a second
+# origin with duplicate content and its own CORS entry.
+domains:
+  - domain: spritebench.com
+    type: PRIMARY
+  - domain: www.spritebench.com
+    type: ALIAS
 
 services:
   - name: web

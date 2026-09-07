@@ -175,46 +175,54 @@ variable the file doesn't declare back across.
 Set a spend cap: Billing → Alerts on DigitalOcean, Workspace Usage on Railway
 (minimum $10).
 
-## 4. Domain and Cloudflare
+## 4. Domain
 
-spritebench.com is registered at Squarespace, but its nameservers point at
-Cloudflare, which proxies to App Platform's default ingress and terminates TLS
-itself. That is what provides bot filtering, rate limiting and DDoS protection.
-
-The app spec deliberately has **no `domains:` block**. Adding the domain in both
-places breaks on a delay rather than immediately: App Platform keeps
-re-validating a hostname that resolves to Cloudflare, marks it `configuring`,
-and eventually fails certificate *renewal* — an outage roughly 90 days after
-the mistake. See DigitalOcean's external-CDN guidance.
-
-DNS, both records proxied (orange). The apex is only legal as a CNAME because
-Cloudflare flattens it:
+spritebench.com is registered at Squarespace with its nameservers pointed at
+Cloudflare, but Cloudflare is only a DNS host: both records are **DNS-only
+(grey cloud)** and traffic goes straight to App Platform, which owns the
+certificate and renews it.
 
 ```
-CNAME  @     spritebench-wwp6q.ondigitalocean.app   proxied
-CNAME  www   spritebench-wwp6q.ondigitalocean.app   proxied
+CNAME  @     spritebench-wwp6q.ondigitalocean.app   DNS only
+CNAME  www   spritebench-wwp6q.ondigitalocean.app   DNS only
 ```
 
-Cloudflare settings that matter:
+The apex is only legal as a CNAME because Cloudflare flattens it. `www` is an
+ALIAS domain in the spec, so App Platform redirects it to the apex; without
+that it would serve a second origin with duplicate content.
 
-- **SSL/TLS: Full, not Full (strict).** Strict returns 526. Cloudflare sends
-  the visitor's hostname as SNI, so DigitalOcean answers with its
-  `*.ondigitalocean.app` certificate and strict validation rejects the
-  mismatch. Full still encrypts the Cloudflare-to-origin hop but does not
-  authenticate it; since App Platform's ingress is itself behind Cloudflare,
-  that hop does not cross the public internet in any meaningful sense. Getting
-  strict would mean an Origin Rule rewriting the Host header to the ingress
-  hostname, which DigitalOcean explicitly warns against — so this is a
-  deliberate deviation, not an oversight.
-- **No Host header override in Origin Rules.** App Platform expects the
-  ingress hostname; overriding it breaks certificate validation.
-- **Redirect rule** sends `www` to the apex. App Platform's ALIAS domain type
-  used to do this; with the domain out of the spec, `www` otherwise serves a
-  second origin with duplicate content and its own CORS entry.
-- **Bot Fight Mode** on, under Security → Bots.
+Turning either record's proxy on breaks the domain on a delay. DigitalOcean
+validates by resolving the hostname to its ingress, and through the proxy it
+resolves to Cloudflare, so the domain drops back to `configuring` and
+eventually fails certificate *renewal* — roughly 90 days later.
 
-Both origins are already in `infra/r2-cors.json`, so a download works from
-either. Changing the domain means editing that file and running
+### Why Cloudflare isn't proxying
+
+Putting Cloudflare's WAF, Bot Fight Mode and rate limiting in front of the app
+is a genuine option, and the reason it isn't done yet is a plan limitation
+rather than a design choice.
+
+It requires two changes together: remove the `domains:` block from the spec, so
+DigitalOcean stops validating a hostname it can no longer see, and rewrite the
+Host header to the ingress hostname. The second is not optional — App
+Platform's router serves only hostnames it knows, so a forwarded
+`Host: spritebench.com` returns 404, recognizable by `x-do-orig-status: 404`
+on a response Cloudflare otherwise passes through untouched while the ingress
+hostname keeps answering 200.
+
+Cloudflare can rewrite the Host header in Origin Rules only on Enterprise. On
+lower plans it takes a Worker bound to `spritebench.com/*` that forwards the
+request to the ingress hostname, which also puts SNI right and so allows Full
+(strict) — a proxied record without the rewrite returns 526, because Cloudflare
+sends the visitor's hostname and DigitalOcean answers with its
+`*.ondigitalocean.app` certificate. The Free tier allows 100k Worker requests a
+day; signed R2 URLs bypass it, so only HTML and API calls count.
+
+Note that App Platform's ingress is itself behind Cloudflare, so network-layer
+DDoS protection exists either way. What the proxy adds is *your* rules.
+
+Both origins are already in `infra/r2-cors.json`, so downloads work from either
+hostname. Changing the domain means editing that file and running
 `npm run r2:cors`.
 
 ## 5. Scaling notes
