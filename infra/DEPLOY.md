@@ -175,7 +175,49 @@ variable the file doesn't declare back across.
 Set a spend cap: Billing → Alerts on DigitalOcean, Workspace Usage on Railway
 (minimum $10).
 
-## 4. Scaling notes
+## 4. Domain and Cloudflare
+
+spritebench.com is registered at Squarespace, but its nameservers point at
+Cloudflare, which proxies to App Platform's default ingress and terminates TLS
+itself. That is what provides bot filtering, rate limiting and DDoS protection.
+
+The app spec deliberately has **no `domains:` block**. Adding the domain in both
+places breaks on a delay rather than immediately: App Platform keeps
+re-validating a hostname that resolves to Cloudflare, marks it `configuring`,
+and eventually fails certificate *renewal* — an outage roughly 90 days after
+the mistake. See DigitalOcean's external-CDN guidance.
+
+DNS, both records proxied (orange). The apex is only legal as a CNAME because
+Cloudflare flattens it:
+
+```
+CNAME  @     spritebench-wwp6q.ondigitalocean.app   proxied
+CNAME  www   spritebench-wwp6q.ondigitalocean.app   proxied
+```
+
+Cloudflare settings that matter:
+
+- **SSL/TLS: Full, not Full (strict).** Strict returns 526. Cloudflare sends
+  the visitor's hostname as SNI, so DigitalOcean answers with its
+  `*.ondigitalocean.app` certificate and strict validation rejects the
+  mismatch. Full still encrypts the Cloudflare-to-origin hop but does not
+  authenticate it; since App Platform's ingress is itself behind Cloudflare,
+  that hop does not cross the public internet in any meaningful sense. Getting
+  strict would mean an Origin Rule rewriting the Host header to the ingress
+  hostname, which DigitalOcean explicitly warns against — so this is a
+  deliberate deviation, not an oversight.
+- **No Host header override in Origin Rules.** App Platform expects the
+  ingress hostname; overriding it breaks certificate validation.
+- **Redirect rule** sends `www` to the apex. App Platform's ALIAS domain type
+  used to do this; with the domain out of the spec, `www` otherwise serves a
+  second origin with duplicate content and its own CORS entry.
+- **Bot Fight Mode** on, under Security → Bots.
+
+Both origins are already in `infra/r2-cors.json`, so a download works from
+either. Changing the domain means editing that file and running
+`npm run r2:cors`.
+
+## 5. Scaling notes
 
 `WORKER_CONCURRENCY` is provider calls in flight per worker process, and each
 one holds a Postgres connection while it writes. Keep
@@ -195,7 +237,7 @@ Scaling the worker horizontally needs no coordination: pg-boss hands each job
 to exactly one consumer, and a duplicate delivery is a no-op because a job
 whose provider call already completed is never called again.
 
-## 5. Verifying a deploy
+## 6. Verifying a deploy
 
 ```
 curl -s https://<app>/api/health | jq
