@@ -1,14 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useStudio } from "@/client/store";
+import { useEffect, useMemo, useState } from "react";
+import { useServer } from "@/client/stores/server";
+import { useUi } from "@/client/stores/ui";
+import { batchElapsedSeconds, formatElapsed, jobElapsedSeconds } from "@/shared/jobTime";
 import type { JobRecord, JobStatus } from "@/shared/model";
-import { Button, Modal, Row } from "./ui";
+import { Button, Modal, Row, TextButton } from "./ui";
 
 const VISIBLE_CHIPS = 5;
 
 const STATUS_STYLES: Record<JobStatus, string> = {
   queued: "border-slate-600 text-slate-400",
+  blocked: "border-slate-700 text-slate-500",
   running: "border-sky-600 text-sky-300",
   done: "border-emerald-700 text-emerald-300",
   error: "border-rose-700 text-rose-300",
@@ -28,6 +31,7 @@ interface JobBatch {
 function batchStatus(counts: Record<JobStatus, number>): JobStatus {
   if (counts.running > 0) return "running";
   if (counts.queued > 0) return "queued";
+  if (counts.blocked > 0) return "blocked";
   if (counts.error > 0) return "error";
   if (counts.done > 0) return "done";
   return "cancelled";
@@ -48,6 +52,7 @@ function groupJobs(jobs: JobRecord[]): JobBatch[] {
       const ordered = [...members].sort((a, b) => a.batchIndex - b.batchIndex);
       const counts: Record<JobStatus, number> = {
         queued: 0,
+        blocked: 0,
         running: 0,
         done: 0,
         error: 0,
@@ -65,7 +70,7 @@ function groupJobs(jobs: JobRecord[]): JobBatch[] {
           (newest, job) => (job.createdAt > newest ? job.createdAt : newest),
           ordered[0].createdAt
         ),
-        active: counts.queued > 0 || counts.running > 0,
+        active: counts.queued > 0 || counts.blocked > 0 || counts.running > 0,
         counts
       };
     })
@@ -86,26 +91,41 @@ function jobSize(job: JobRecord): string {
     : `${job.generation.size.width}x${job.generation.size.height}`;
 }
 
-function jobSeconds(job: JobRecord): number | null {
-  if (!job.startedAt || !job.finishedAt) return null;
-  return (new Date(job.finishedAt).getTime() - new Date(job.startedAt).getTime()) / 1000;
+function useNow(ticking: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!ticking) return;
+
+    setNow(Date.now());
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [ticking]);
+
+  return now;
+}
+
+function elapsedLabel(seconds: number | null): string | null {
+  return seconds === null ? null : formatElapsed(seconds);
 }
 
 function BatchChip({
   batch,
   selected,
+  now,
   onSelect
 }: {
   batch: JobBatch;
   selected: boolean;
+  now: number;
   onSelect: () => void;
 }) {
-  const store = useStudio.getState;
-  const cancellable = batch.jobs.filter((job) => job.status === "queued");
+  const cancellable = batch.jobs.filter((job) => job.status === "queued" || job.status === "blocked");
+  const elapsed = elapsedLabel(batchElapsedSeconds(batch.jobs, now));
 
   return (
     <div
-      className={`flex min-w-[130px] shrink items-center gap-2 rounded border px-2 py-1 text-[11px] ${
+      className={`flex min-w-[130px] max-w-[11.5rem] shrink items-center gap-2 rounded border px-2 py-1 text-[11px] ${
         STATUS_STYLES[batch.status]
       } ${selected ? "bg-[var(--color-ink-600)]" : ""}`}
     >
@@ -124,34 +144,34 @@ function BatchChip({
         ) : null}
 
         <span className="shrink-0 tabular-nums opacity-70">{progressLabel(batch)}</span>
+        {elapsed ? <span className="shrink-0 tabular-nums opacity-70">{elapsed}</span> : null}
         {batch.counts.error > 0 ? <span className="shrink-0 font-bold">!</span> : null}
       </button>
 
       {cancellable.length > 0 ? (
-        <button
-          type="button"
+        <TextButton
+          danger
           title={
             cancellable.length > 1
               ? `Cancel the ${cancellable.length} jobs still queued here`
               : "Cancel this job"
           }
-          className="shrink-0 opacity-60 hover:opacity-100"
           onClick={() => {
-            for (const job of cancellable) void store().cancelJob(job.id);
+            for (const job of cancellable) void useServer.getState().cancelJob(job.id);
           }}
         >
           &times;
-        </button>
+        </TextButton>
       ) : null}
     </div>
   );
 }
 
-function JobRow({ job, showIndex }: { job: JobRecord; showIndex: boolean }) {
-  const busy = useStudio((state) => state.busy);
-  const store = useStudio.getState;
+function JobRow({ job, showIndex, now }: { job: JobRecord; showIndex: boolean; now: number }) {
+  const busy = useUi((state) => state.busy);
+  const store = useServer.getState;
 
-  const seconds = jobSeconds(job);
+  const seconds = elapsedLabel(jobElapsedSeconds(job, now));
 
   return (
     <div className={`rounded border px-2 py-1 ${STATUS_STYLES[job.status]}`}>
@@ -159,12 +179,12 @@ function JobRow({ job, showIndex }: { job: JobRecord; showIndex: boolean }) {
         <span className="truncate text-[10px]">
           {showIndex ? `#${job.batchIndex} \u00b7 ` : ""}
           {job.status}
-          {seconds !== null ? ` \u00b7 ${seconds.toFixed(1)}s` : ""}
+          {seconds ? ` \u00b7 ${seconds}` : ""}
           {job.assetIds.length > 0 ? ` \u00b7 ${job.assetIds.length} asset(s)` : ""}
         </span>
 
         <Row>
-          {job.status === "queued" ? (
+          {job.status === "queued" || job.status === "blocked" ? (
             <Button variant="ghost" onClick={() => void store().cancelJob(job.id)}>
               cancel
             </Button>
@@ -193,10 +213,12 @@ function JobRow({ job, showIndex }: { job: JobRecord; showIndex: boolean }) {
 
 function BatchDetail({
   batch,
+  now,
   onClose,
   bordered = true
 }: {
   batch: JobBatch;
+  now: number;
   onClose?: () => void;
   bordered?: boolean;
 }) {
@@ -218,7 +240,7 @@ function BatchDetail({
           <span className="shrink-0 text-[10px] text-slate-500">
             {first.generation.model} &middot; {jobSize(first)} &middot; {first.generation.quality}
             {first.folder ? ` \u00b7 ${first.folder}` : ""}
-            {first.template ? " \u00b7 template edit" : ""}
+            {first.inputs?.loop ? " \u00b7 loop" : first.inputs?.chunk ? " \u00b7 chunk" : first.inputs ? " \u00b7 edit" : ""}
           </span>
 
           {onClose ? (
@@ -231,7 +253,7 @@ function BatchDetail({
 
       <div className="mb-1 flex flex-col gap-1">
         {batch.jobs.map((job) => (
-          <JobRow key={job.id} job={job} showIndex={batch.jobs.length > 1} />
+          <JobRow key={job.id} job={job} showIndex={batch.jobs.length > 1} now={now} />
         ))}
       </div>
 
@@ -263,8 +285,16 @@ function matches(batch: JobBatch, query: string): boolean {
   );
 }
 
-function QueueHistory({ batches, onClose }: { batches: JobBatch[]; onClose: () => void }) {
-  const store = useStudio.getState;
+function QueueHistory({
+  batches,
+  now,
+  onClose
+}: {
+  batches: JobBatch[];
+  now: number;
+  onClose: () => void;
+}) {
+  const store = useServer.getState;
   const [query, setQuery] = useState("");
 
   const found = batches.filter((batch) => matches(batch, query));
@@ -312,7 +342,7 @@ function QueueHistory({ batches, onClose }: { batches: JobBatch[]; onClose: () =
             key={batch.key}
             className="rounded border border-[var(--color-edge)] bg-[var(--color-ink-800)]"
           >
-            <BatchDetail batch={batch} bordered={false} />
+            <BatchDetail batch={batch} now={now} bordered={false} />
           </div>
         ))}
       </div>
@@ -321,15 +351,16 @@ function QueueHistory({ batches, onClose }: { batches: JobBatch[]; onClose: () =
 }
 
 export function JobsBar() {
-  const jobs = useStudio((state) => state.jobs);
-  const error = useStudio((state) => state.error);
-  const notice = useStudio((state) => state.notice);
-  const store = useStudio.getState;
+  const jobs = useServer((state) => state.jobs);
+  const error = useUi((state) => state.error);
+  const notice = useUi((state) => state.notice);
+  const store = useUi.getState;
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
 
   const batches = useMemo(() => groupJobs(jobs), [jobs]);
+  const now = useNow(jobs.some((job) => job.status === "running"));
 
   const active = batches.filter((batch) => batch.active);
   const settled = batches.filter((batch) => !batch.active);
@@ -339,7 +370,7 @@ export function JobsBar() {
   const selected = batches.find((batch) => batch.key === selectedKey) ?? null;
 
   return (
-    <div className="shrink-0 border-t border-[var(--color-edge)] bg-[var(--color-ink-800)]">
+    <div className="relative z-10 shrink-0 border-t border-[var(--color-edge)] bg-[var(--color-ink-800)]">
       {error ? (
         <Row className="justify-between border-b border-rose-900 bg-rose-950/50 px-3 py-1.5">
           <span className="text-[11px] text-rose-200">{error}</span>
@@ -358,17 +389,16 @@ export function JobsBar() {
         </Row>
       ) : null}
 
-      {selected ? <BatchDetail batch={selected} onClose={() => setSelectedKey(null)} /> : null}
+      {selected ? <BatchDetail batch={selected} now={now} onClose={() => setSelectedKey(null)} /> : null}
 
       <div className="flex items-center gap-2 px-3 py-2">
-        <button
-          type="button"
+        <TextButton
+          className="text-[11px] font-semibold tracking-wider uppercase"
           title="Open the full queue history"
           onClick={() => setShowHistory(true)}
-          className="shrink-0 text-[11px] font-semibold tracking-wider text-slate-400 uppercase hover:text-slate-200"
         >
           Queue
-        </button>
+        </TextButton>
 
         <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
           {batches.length === 0 ? <span className="text-[11px] text-slate-600">idle</span> : null}
@@ -377,6 +407,7 @@ export function JobsBar() {
             <BatchChip
               key={batch.key}
               batch={batch}
+              now={now}
               selected={batch.key === selectedKey}
               onSelect={() => setSelectedKey(batch.key === selectedKey ? null : batch.key)}
             />
@@ -394,7 +425,7 @@ export function JobsBar() {
       </div>
 
       {showHistory ? (
-        <QueueHistory batches={batches} onClose={() => setShowHistory(false)} />
+        <QueueHistory batches={batches} now={now} onClose={() => setShowHistory(false)} />
       ) : null}
     </div>
   );

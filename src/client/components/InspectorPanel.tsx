@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useStudio } from "@/client/store";
+import { useActiveScene, useAsset, useSelectedAsset } from "@/client/stores/assets";
+import { useDoc } from "@/client/stores/doc";
+import { useServer } from "@/client/stores/server";
+import { DEFAULT_INSPECTOR_PREVIEW, useUi } from "@/client/stores/ui";
 import {
   CUTOUT_MODES,
   DISTANCE_MODES,
@@ -9,12 +12,21 @@ import {
   ORIENTATIONS,
   PIXELATE_MODES
 } from "@/core/types";
+import { useSequenceFrames, useSequencePlayback } from "@/client/sequence";
+import { isSetAsset } from "@/shared/repeaterMix";
+import { frameSettings, frameSourceAssetId, type Sequence } from "@/shared/sequence";
+import { AnimationSection } from "./AnimationSection";
+import { SetSection } from "./SetSection";
+import { useMaskOverlay } from "@/client/maskOverlay";
 import { BitmapCanvas, useAssetPalette, useProcessed } from "./AssetBitmap";
 import { ExportDialog } from "./ExportDialog";
+import { GenerationHistory } from "./GenerationHistory";
+import { ResizeHandle } from "./ResizeHandle";
 import {
   Button,
   ColorInput,
   Divider,
+  ExpandablePreview,
   Field,
   NumberInput,
   Panel,
@@ -43,30 +55,86 @@ const CUTOUT_LABELS: Record<string, string> = {
   luminanceBelow: "clear pixels darker than"
 };
 
-export function InspectorPanel() {
-  const assets = useStudio((state) => state.assets);
-  const selectedIds = useStudio((state) => state.selectedIds);
-  const palettes = useStudio((state) => state.palettes);
-  const playgroundPalette = useStudio((state) => state.composition.palette);
-  const busy = useStudio((state) => state.busy);
-  const store = useStudio.getState;
+const EMPTY_SEQUENCES: Sequence[] = [];
 
-  const asset = assets.find((entry) => entry.id === selectedIds[selectedIds.length - 1]) ?? null;
+function lightboxScale(width: number, height: number): number {
+  if (width <= 0 || height <= 0 || typeof window === "undefined") return 1;
+  return Math.min((window.innerWidth - 48) / width, (window.innerHeight - 80) / height);
+}
+
+export function InspectorPanel() {
+  const selectedIds = useUi((state) => state.selectedIds);
+  const palettes = useServer((state) => state.palettes);
+  const scene = useActiveScene();
+  const busy = useUi((state) => state.busy);
+  const asset = useSelectedAsset();
+  const activeSequenceId = useUi((state) => state.activeSequenceId);
+  const previewHeight = useUi((state) => state.inspectorPreview);
+  const panelWidth = useUi((state) => state.layout.right);
+  const projectId = useServer((state) => state.project?.id ?? null);
+
+  const scenePalette = scene?.palette ?? "";
+  const paletteName = (id: string) =>
+    palettes.find((entry) => entry.id === id)?.name ?? "a palette";
+
+  const doc = useDoc.getState;
+  const server = useServer.getState;
+  const ui = useUi.getState;
+
   const [view, setView] = useState<ViewMode>("processed");
+  const [showMask, setShowMask] = useState(false);
   const [exportName, setExportName] = useState("");
   const [exporting, setExporting] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
+  // Seeded from the asset's label, which is its pretty name if it has one and
+  // its number otherwise, so a never-renamed asset downloads as `001`.
   useEffect(() => {
-    setExportName(asset?.approvedName ?? asset?.name ?? "");
-  }, [asset?.id, asset?.approvedName, asset?.name]);
+    setExportName(asset?.label ?? "");
+  }, [asset?.id, asset?.label]);
 
   const palette = useAssetPalette(asset);
-  const { preview, error, loading } = useProcessed(asset, palette, view === "source");
+
+  // The picker's choice, falling back to the first animation whenever it names
+  // one this asset does not have -- which is every time the selection changes.
+  const sequences = asset?.sequences ?? EMPTY_SEQUENCES;
+  const sequence =
+    sequences.find((entry) => entry.id === activeSequenceId) ?? sequences[0] ?? null;
+
+  const frames = useSequenceFrames(asset, sequence, palette);
+  const playback = useSequencePlayback(sequence);
+
+  const frameOverride =
+    asset && sequence && sequence.frames[playback.index]
+      ? frameSettings(asset.processing, sequence, sequence.frames[playback.index])
+      : undefined;
+
+  // With a sequence selected the top preview shows the playing frame rather
+  // than the whole sheet, so there is one preview surface and not two.
+  const frameAssetId =
+    asset && sequence && sequence.frames[playback.index]
+      ? frameSourceAssetId(asset.id, sequence.frames[playback.index])
+      : undefined;
+  const frameAsset = useAsset(frameAssetId ?? null);
+  const overlayAsset = frameAsset ?? asset;
+  const { bitmap: maskOverlay, available: maskAvailable } = useMaskOverlay(
+    overlayAsset,
+    projectId,
+    view === "source" ? "source" : "processed"
+  );
+
+  const { preview, error, loading } = useProcessed(
+    asset,
+    palette,
+    view === "source",
+    "source",
+    frameOverride,
+    frameAssetId
+  );
 
   if (!asset) {
     return (
-      <Panel title="Inspector">
+      <Panel title="Inspector" pane="right">
         <p className="text-[11px] text-slate-500">
           Select an asset in the library to tune its size, cutout, and palette. Every asset keeps
           its own snapshot, so editing one never touches the others.
@@ -77,24 +145,35 @@ export function InspectorPanel() {
 
   const processing = asset.processing;
 
-  const update = (patch: Partial<typeof processing>) =>
-    store().updateProcessing(asset.id, patch);
+  const update = (patch: Partial<typeof processing>) => {
+    doc().patchProcessing(asset.id, patch);
+    if (patch.paletteId) void server().ensurePalette(patch.paletteId);
+  };
 
   const showBitmap = view === "source" ? preview?.sourceBitmap : preview?.processed;
   const bitmapWidth = view === "source" ? preview?.sourceWidth ?? 0 : preview?.width ?? 0;
   const bitmapHeight = view === "source" ? preview?.sourceHeight ?? 0 : preview?.height ?? 0;
-  const previewScale = bitmapWidth > 0 ? Math.min(1, 260 / bitmapWidth, 260 / bitmapHeight) : 1;
+  const previewPad = 16;
+  const previewBoxW = Math.max(64, panelWidth - 36);
+  const previewScale =
+    bitmapWidth > 0 && bitmapHeight > 0
+      ? Math.min(
+          (previewBoxW - previewPad) / bitmapWidth,
+          (previewHeight - previewPad) / bitmapHeight
+        )
+      : 1;
 
   return (
     <Panel
       title="Inspector"
+      pane="right"
       actions={
         <Button
           variant="danger"
           title="Delete this asset and its raw source file"
           onClick={() => {
-            if (confirm(`Delete ${asset.name} and its source PNG?`)) {
-              void store().deleteAsset(asset.id);
+            if (confirm(`Delete ${asset.label} and its source PNG?`)) {
+              void server().deleteAsset(asset.id);
             }
           }}
         >
@@ -113,35 +192,107 @@ export function InspectorPanel() {
           </Button>
         ))}
 
+        {maskAvailable ? (
+          <label className="flex items-center gap-1 text-[10px] text-slate-400">
+            <input
+              type="checkbox"
+              checked={showMask}
+              onChange={(event) => setShowMask(event.target.checked)}
+              className="h-3 w-3 accent-[var(--color-accent)]"
+            />
+            mask
+          </label>
+        ) : null}
+
         <span className="flex-1" />
+
+        {sequence && sequence.frames.length > 0 ? (
+          <Button
+            variant={playback.playing ? "primary" : "default"}
+            title={playback.playing ? "Pause the animation" : "Play the animation"}
+            onClick={playback.toggle}
+          >
+            {playback.playing ? "pause" : "play"}
+          </Button>
+        ) : null}
 
         <Button
           variant={processing.edits.length > 0 ? "primary" : "default"}
           title="Crop this image without touching the raw file, for every instance at once"
-          onClick={() => store().openImageEditor(asset.id)}
+          onClick={() => ui().openImageEditor(asset.id)}
         >
           {processing.edits.length > 0 ? `edit (${processing.edits.length})` : "edit"}
         </Button>
       </Row>
 
-      <div className="checkerboard mb-2 flex min-h-[120px] items-center justify-center rounded p-2">
-        {error ? (
-          <span className="p-2 text-center text-[11px] text-rose-300">{error}</span>
-        ) : showBitmap ? (
-          <BitmapCanvas
-            bitmap={showBitmap}
-            width={bitmapWidth}
-            height={bitmapHeight}
-            showAlpha={view === "alpha"}
-            pixelated={previewScale >= 1}
-            style={{
-              width: Math.max(1, Math.round(bitmapWidth * previewScale)),
-              height: Math.max(1, Math.round(bitmapHeight * previewScale))
-            }}
+      {sequence && sequence.frames.length > 1 ? (
+        <Row className="mb-2">
+          <input
+            type="range"
+            className="flex-1"
+            min={0}
+            max={sequence.frames.length - 1}
+            step={1}
+            value={playback.index}
+            onChange={(event) => playback.seek(Number(event.target.value))}
           />
-        ) : (
-          <span className="text-[11px] text-slate-500">{loading ? "processing..." : ""}</span>
-        )}
+          <span className="w-12 shrink-0 text-right text-[10px] tabular-nums text-slate-400">
+            {playback.index + 1}/{sequence.frames.length}
+          </span>
+        </Row>
+      ) : null}
+
+      <div className="mb-2">
+        <ExpandablePreview
+          title={`${asset.label} · ${bitmapWidth}×${bitmapHeight}`}
+          className="checkerboard flex w-full items-center justify-center rounded-t border-0 bg-transparent p-2"
+          style={{ height: previewHeight }}
+          expanded={
+            showBitmap ? (
+              <BitmapCanvas
+                bitmap={showBitmap}
+                width={bitmapWidth}
+                height={bitmapHeight}
+                showAlpha={view === "alpha"}
+                overlay={showMask ? maskOverlay : null}
+                pixelated
+                style={{
+                  width: Math.max(1, Math.round(bitmapWidth * lightboxScale(bitmapWidth, bitmapHeight))),
+                  height: Math.max(
+                    1,
+                    Math.round(bitmapHeight * lightboxScale(bitmapWidth, bitmapHeight))
+                  )
+                }}
+              />
+            ) : (
+              <span className="text-[11px] text-slate-400">{error ?? "no preview"}</span>
+            )
+          }
+        >
+          {error ? (
+            <span className="p-2 text-center text-[11px] text-rose-300">{error}</span>
+          ) : showBitmap ? (
+            <BitmapCanvas
+              bitmap={showBitmap}
+              width={bitmapWidth}
+              height={bitmapHeight}
+              showAlpha={view === "alpha"}
+              overlay={showMask ? maskOverlay : null}
+              pixelated={previewScale >= 1}
+              style={{
+                width: Math.max(1, Math.round(bitmapWidth * previewScale)),
+                height: Math.max(1, Math.round(bitmapHeight * previewScale))
+              }}
+            />
+          ) : (
+            <span className="text-[11px] text-slate-500">{loading ? "processing..." : ""}</span>
+          )}
+        </ExpandablePreview>
+        <ResizeHandle
+          orientation="horizontal"
+          onDrag={(delta) => ui().setInspectorPreview(previewHeight + delta)}
+          onReset={() => ui().setInspectorPreview(DEFAULT_INSPECTOR_PREVIEW)}
+        />
       </div>
 
       <p className="mb-3 text-[10px] leading-snug text-slate-500">
@@ -153,11 +304,12 @@ export function InspectorPanel() {
         ) : null}
       </p>
 
-      <Field label="Name">
+      <Field label="Name" hint={`asset ${asset.seq}, blank to use the number`}>
         <input
           type="text"
           value={asset.name}
-          onChange={(event) => store().updateAsset(asset.id, { name: event.target.value })}
+          placeholder={asset.label}
+          onChange={(event) => doc().rename(asset.id, event.target.value)}
         />
       </Field>
 
@@ -167,7 +319,7 @@ export function InspectorPanel() {
             <input
               type="text"
               value={asset.folder}
-              onChange={(event) => store().updateAsset(asset.id, { folder: event.target.value })}
+              onChange={(event) => doc().setFolder(asset.id, event.target.value)}
             />
           </Field>
         </div>
@@ -177,17 +329,37 @@ export function InspectorPanel() {
               type="text"
               value={asset.tags.join(", ")}
               onChange={(event) =>
-                store().updateAsset(asset.id, {
-                  tags: event.target.value
+                doc().setTags(
+                  asset.id,
+                  event.target.value
                     .split(",")
                     .map((tag) => tag.trim())
                     .filter((tag) => tag.length > 0)
-                })
+                )
               }
             />
           </Field>
         </div>
       </Row>
+
+      {asset.set ? (
+        <SetSection
+          asset={asset}
+          set={asset.set}
+          sequence={sequence}
+          palette={palette}
+          playback={playback}
+          frames={frames}
+        />
+      ) : (
+        <AnimationSection
+          asset={asset}
+          sequence={sequence}
+          palette={palette}
+          playback={playback}
+          frames={frames}
+        />
+      )}
 
       <Divider label="size" />
 
@@ -319,19 +491,24 @@ export function InspectorPanel() {
       <Divider label="palette" />
 
       <Field label="Palette" hint={`${palette.length} colours`}>
-        <Select
-          value={processing.paletteFile}
-          options={["", ...palettes.map((entry) => entry.file)] as const}
-          labels={{ "": "(full colour)" }}
-          onChange={(value) => update({ paletteFile: value })}
-        />
+        <select
+          value={processing.paletteId}
+          onChange={(event) => update({ paletteId: event.target.value })}
+        >
+          <option value="">(full colour)</option>
+          {palettes.map((entry) => (
+            <option key={entry.id} value={entry.id}>
+              {entry.name}
+            </option>
+          ))}
+        </select>
       </Field>
 
-      {processing.paletteFile === "" && playgroundPalette !== "" ? (
+      {processing.paletteId === "" && scenePalette !== "" ? (
         <p className="mb-2 text-[10px] leading-snug text-amber-300">
-          The playground is previewing this with {playgroundPalette}, but it exports in full colour
-          until you pick a palette here or bake the playground one in. Choosing one here always wins
-          over the playground.
+          The scene is previewing this with {paletteName(scenePalette)}, but it exports
+          in full colour until you pick a palette here or bake the scene one in. Choosing one
+          here always wins over the scene.
         </p>
       ) : null}
 
@@ -347,7 +524,7 @@ export function InspectorPanel() {
         </div>
       ) : null}
 
-      {processing.paletteFile ? (
+      {processing.paletteId ? (
         <>
           <Field label="Dither">
             <Select
@@ -458,19 +635,9 @@ export function InspectorPanel() {
         </>
       ) : null}
 
-      <Divider label="prompt" />
+      <Divider label="history" />
 
-      <Field label="Prompt body" hint="reruns reuse this">
-        <textarea
-          rows={3}
-          value={asset.prompt.body}
-          onChange={(event) =>
-            store().updateAsset(asset.id, {
-              prompt: { ...asset.prompt, body: event.target.value }
-            })
-          }
-        />
-      </Field>
+      <GenerationHistory asset={frameAsset ?? asset} />
 
       <Divider label="output" />
 
@@ -478,14 +645,44 @@ export function InspectorPanel() {
         <Button
           className="mb-2 w-full"
           title="Copy this asset's processing settings onto every selected asset"
-          onClick={() => store().applyProcessingToSelection(processing)}
+          onClick={() => {
+            // Crops are per-image; copying them onto a different sprite would
+            // cut it in the wrong place.
+            const { edits, ...shared } = processing;
+            void edits;
+            doc().applyProcessingToMany(selectedIds, shared as typeof processing);
+          }}
         >
           apply these settings to all {selectedIds.length} selected
         </Button>
       ) : null}
 
-      <Button className="mb-2 w-full" onClick={() => store().stageAsset(asset.id)}>
-        add to playground
+      <Button
+        className="mb-2 w-full"
+        disabled={!scene}
+        onClick={() => {
+          if (!scene) return;
+
+          doc().addItem(scene.id, {
+            id: crypto.randomUUID(),
+            assetId: asset.id,
+            x: (scene.items.length % 6) * 96,
+            y: Math.floor(scene.items.length / 6) * 96,
+            footprint: { width: 0, height: 0 },
+            flipHorizontal: false,
+            flipVertical: false,
+            isoTurn: 0,
+            showSource: false,
+            opacity: 1,
+            paused: false,
+            sequenceId: "",
+            heldFrame: 0,
+            rotation: 0,
+            display: isSetAsset(asset) ? "sheet" : "cell"
+          });
+        }}
+      >
+        add to scene
       </Button>
 
       <Field label="Download filename" hint="no extension">
@@ -505,13 +702,13 @@ export function InspectorPanel() {
         className="mt-1 w-full"
         disabled={busy !== null}
         title="Writes a copy into this app's own storage instead of downloading it. Counts against your storage."
-        onClick={() => void store().approve(asset.id, exportName)}
+        onClick={() => void server().approve(asset.id, exportName)}
       >
         {busy === "exporting" ? "saving..." : "save a server-side copy"}
       </Button>
 
-      {asset.approvedPath ? (
-        <p className="mt-2 text-[10px] break-all text-emerald-400">{asset.approvedPath}</p>
+      {asset.exportPath ? (
+        <p className="mt-2 text-[10px] break-all text-emerald-400">{asset.exportPath}</p>
       ) : null}
 
       {exporting ? (

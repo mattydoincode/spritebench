@@ -1,25 +1,52 @@
+import crypto from "node:crypto";
 import { cut } from "@/core/cutout";
+import {
+  buildIsoDiamondTemplate,
+  isIsoDiamondTemplate,
+  isoDiamondTemplateInfo
+} from "@/core/isoMask";
+import {
+  PIXEL_CONSTRAINT_PREVIEW_SIZE,
+  buildPixelConstraintTemplate,
+  isPixelConstraintTemplate,
+  pixelConstraintTemplateInfo
+} from "@/core/pixelMask";
 import { hexToRgb } from "@/core/pixels";
 import {
   deleteTemplate as deleteTemplateRow,
   getTemplate,
+  insertTemplate,
   listTemplates as listTemplateRows,
-  upsertTemplate,
   type TemplateInfo
 } from "@/db/repo/templates";
-import { basename, templateKey } from "@/storage/keys";
+import { templateKey } from "@/storage/keys";
 import { storage } from "@/storage";
-import type { Bytes } from "@/storage/types";
+import { asBytes, type Bytes } from "@/storage/types";
 import { decodePng, encodePng } from "./png";
 
 export type { TemplateInfo };
 
-export async function listTemplates(userId: string): Promise<TemplateInfo[]> {
-  return listTemplateRows(userId);
+export function isBuiltinTemplate(id: string): boolean {
+  return isIsoDiamondTemplate(id) || isPixelConstraintTemplate(id);
 }
 
-export async function loadTemplate(userId: string, file: string): Promise<Bytes | null> {
-  const row = await getTemplate(userId, basename(file));
+export async function listTemplates(projectId: string): Promise<TemplateInfo[]> {
+  return [isoDiamondTemplateInfo(), pixelConstraintTemplateInfo(), ...(await listTemplateRows(projectId))];
+}
+
+export async function loadTemplate(
+  projectId: string,
+  templateId: string
+): Promise<Bytes | null> {
+  if (isIsoDiamondTemplate(templateId)) {
+    return asBytes(encodePng(buildIsoDiamondTemplate()));
+  }
+
+  if (isPixelConstraintTemplate(templateId)) {
+    return asBytes(encodePng(buildPixelConstraintTemplate(PIXEL_CONSTRAINT_PREVIEW_SIZE)));
+  }
+
+  const row = await getTemplate(projectId, templateId);
   if (!row) return null;
 
   return storage()
@@ -27,9 +54,17 @@ export async function loadTemplate(userId: string, file: string): Promise<Bytes 
     .catch(() => null);
 }
 
+/**
+ * Stores a template under a fresh id.
+ *
+ * Never an upsert on the name: the name is a label, so two people uploading
+ * `hero.png` get two templates instead of the second silently replacing the
+ * first -- which, when the bucket key was name-derived, also meant replacing
+ * bytes another project was still pointing at.
+ */
 export async function saveTemplate(
-  userId: string,
-  file: string,
+  projectId: string,
+  name: string,
   bytes: Uint8Array,
   cutBackground: boolean,
   cutTolerance: number
@@ -48,13 +83,18 @@ export async function saveTemplate(
     );
   }
 
-  const filename = basename(file);
-  await storage().put(templateKey(filename), encodePng(decoded), { contentType: "image/png" });
+  const id = crypto.randomUUID();
 
-  return upsertTemplate(userId, filename, decoded.width, decoded.height);
+  await storage().put(templateKey(projectId, id), encodePng(decoded), {
+    contentType: "image/png"
+  });
+
+  return insertTemplate(projectId, id, name, decoded.width, decoded.height);
 }
 
-export async function deleteTemplate(userId: string, file: string): Promise<void> {
-  const key = await deleteTemplateRow(userId, basename(file));
+export async function deleteTemplate(projectId: string, templateId: string): Promise<void> {
+  if (isBuiltinTemplate(templateId)) return;
+
+  const key = await deleteTemplateRow(projectId, templateId);
   if (key) await storage().delete(key);
 }

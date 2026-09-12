@@ -1,21 +1,23 @@
 import { NextResponse } from "next/server";
-import {
-  deleteProviderKey,
-  listProviderKeys,
-  saveProviderKey
-} from "@/db/repo/providerKeys";
-import { currentUserId } from "@/db/repo/users";
+import { addProviderKey, deleteProviderKey, listProviderKeys } from "@/db/repo/providerKeys";
 import { hasEncryptionKey } from "@/server/config";
+import { requireUser } from "@/server/session";
 import { parseBody, providerKeyBodySchema, withValidation } from "@/server/validation";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * A user's own provider keys. Not project-scoped: keys belong to people, and
+ * a project you own points at one of yours.
+ */
 export async function GET() {
-  const userId = await currentUserId();
-  return NextResponse.json({ providerKeys: await listProviderKeys(userId) });
+  return withValidation(async () => {
+    const userId = await requireUser();
+    return NextResponse.json({ providerKeys: await listProviderKeys(userId) });
+  });
 }
 
-export async function PUT(request: Request) {
+export async function POST(request: Request) {
   return withValidation(async () => {
     if (!hasEncryptionKey()) {
       return NextResponse.json(
@@ -27,20 +29,29 @@ export async function PUT(request: Request) {
       );
     }
 
+    const userId = await requireUser();
     const body = await parseBody(request, providerKeyBodySchema);
-    const userId = await currentUserId();
 
-    const saved = await saveProviderKey(userId, body.provider, body.key);
-    return NextResponse.json({ providerKey: saved });
+    // Adds rather than replaces: several keys per provider is the point.
+    const providerKey = await addProviderKey(
+      userId,
+      body.provider,
+      body.label ?? "",
+      body.key
+    );
+
+    return NextResponse.json({ providerKey });
   });
 }
 
 export async function DELETE(request: Request) {
-  const provider = new URL(request.url).searchParams.get("provider");
-  if (!provider) return NextResponse.json({ error: "provider required" }, { status: 400 });
+  return withValidation(async () => {
+    const userId = await requireUser();
+    const id = new URL(request.url).searchParams.get("id");
 
-  const userId = await currentUserId();
-  await deleteProviderKey(userId, provider);
+    if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
-  return NextResponse.json({ providerKeys: await listProviderKeys(userId) });
+    await deleteProviderKey(userId, id);
+    return NextResponse.json({ providerKeys: await listProviderKeys(userId) });
+  });
 }

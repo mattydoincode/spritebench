@@ -9,7 +9,9 @@ import {
   PIXELATE_MODES,
   TEMPLATE_FIT_MODES
 } from "@/core/types";
-import { findModel, modelIds } from "@/providers/models";
+import { findModel, modelIds, providerIds } from "@/providers/models";
+import { IMAGE_QUALITIES } from "@/shared/model";
+import { ForbiddenError, UnauthorizedError } from "./errors";
 
 const size = z.object({
   width: z.number().finite(),
@@ -24,6 +26,17 @@ const crop = z.object({
   height: z.number().finite()
 });
 
+const pixelGrid = z.object({
+  kind: z.literal("pixelGrid"),
+  columns: z.number().int().min(1).max(512),
+  rows: z.number().int().min(1).max(512),
+  canvasWidth: z.number().int().min(1).max(8192).optional(),
+  canvasHeight: z.number().int().min(1).max(8192).optional(),
+  originX: z.number().int().min(0).max(8192).optional(),
+  originY: z.number().int().min(0).max(8192).optional(),
+  cell: z.number().int().min(1).max(8192).optional()
+});
+
 /**
  * Processing settings arrive from the client on nearly every write. Parsed
  * loosely on purpose: `withDefaults()` still runs afterwards and fills gaps,
@@ -31,7 +44,7 @@ const crop = z.object({
  */
 export const processingSchema = z
   .object({
-    edits: z.array(crop),
+    edits: z.array(z.union([crop, pixelGrid])),
     orientation: z.enum(ORIENTATIONS),
     flipHorizontal: z.boolean(),
     flipVertical: z.boolean(),
@@ -51,7 +64,7 @@ export const processingSchema = z
     pixelate: z.enum(PIXELATE_MODES),
     snapAlpha: z.boolean(),
     alphaThreshold: z.number().min(0).max(1),
-    paletteFile: z.string().max(255),
+    paletteId: z.string().max(64),
     dither: z.enum(DITHER_MODES),
     ditherStrength: z.number().min(0).max(4),
     distanceMode: z.enum(DISTANCE_MODES)
@@ -68,7 +81,7 @@ export const generationSchema = z
     model: z.string().refine((value) => findModel(value) !== null, {
       message: `must be one of ${modelIds().join(", ")}`
     }),
-    quality: z.enum(["auto", "low", "medium", "high"]),
+    quality: z.enum(IMAGE_QUALITIES),
     background: z.enum(["auto", "transparent", "opaque"]),
     moderation: z.enum(["auto", "low"]),
     size,
@@ -82,27 +95,121 @@ export const generationSchema = z
       value.imageCount === undefined ||
       value.imageCount <= (findModel(value.model)?.maxImagesPerRequest ?? 10),
     { message: "imageCount is above what this model accepts per request", path: ["imageCount"] }
+  )
+  .refine(
+    (value) => {
+      if (value.model === undefined || value.quality === undefined) return true;
+      const model = findModel(value.model);
+      return model === null || !model.supportsQuality || model.qualities.includes(value.quality);
+    },
+    { message: "quality is not supported by this model", path: ["quality"] }
   );
 
-export const templateSpecSchema = z.object({
-  file: z.string().min(1).max(255),
+/**
+ * The grid an animation sheet was asked for. Bounds are generous on purpose:
+ * this is a note about what the prompt described, not something the server
+ * acts on, and the slicer lets you override all of it anyway.
+ */
+export const sequencePlanSchema = z.object({
+  columns: z.number().int().min(1).max(32),
+  rows: z.number().int().min(1).max(32),
+  fps: z.number().int().min(1).max(60),
+  kind: z.enum(["animation", "set"]).optional(),
+  actions: z
+    .array(
+      z.object({
+        name: z.string().max(255),
+        frames: z.number().int().min(1).max(32)
+      })
+    )
+    .min(1)
+    .max(32)
+});
+
+const imageSourceSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("template"), templateId: z.string().min(1).max(64) }),
+  z.object({ kind: z.literal("asset"), assetId: z.string().uuid() })
+]);
+
+export const baseSpecSchema = z.object({
+  source: imageSourceSchema,
   fit: z.enum(TEMPLATE_FIT_MODES),
+  matchAspect: z.boolean()
+});
+
+export const maskSpecSchema = z.object({
+  source: imageSourceSchema,
   maskSource: z.enum(MASK_SOURCES),
-  matchAspect: z.boolean(),
   dilatePixels: z.number().int().min(0).max(256),
-  useAsMask: z.boolean()
+  fit: z.enum(TEMPLATE_FIT_MODES),
+  window: z
+    .object({
+      width: z.number().int().min(1).max(512),
+      height: z.number().int().min(1).max(512)
+    })
+    .optional()
+});
+
+const rectSchema = z.object({
+  x: z.number().finite(),
+  y: z.number().finite(),
+  width: z.number().finite(),
+  height: z.number().finite()
+});
+
+const loopRequestSchema = z.object({
+  steps: z.number().int().min(2).max(20)
+});
+
+const loopJobSchema = z.object({
+  steps: z.number().int().min(1).max(20),
+  index: z.number().int().min(1).max(20)
+});
+
+const chunkRequestSchema = z.object({
+  columns: z.number().int().min(1).max(16),
+  rows: z.number().int().min(1).max(16)
+});
+
+const chunkJobSchema = chunkRequestSchema.extend({
+  index: z.number().int().min(0).max(256),
+  rect: rectSchema
+});
+
+export const jobInputsSchema = z.object({
+  base: baseSpecSchema.nullish(),
+  mask: maskSpecSchema.nullish(),
+  loop: z.union([loopJobSchema, loopRequestSchema]).nullish(),
+  chunk: z.union([chunkJobSchema, chunkRequestSchema]).nullish()
 });
 
 export const generateBodySchema = z.object({
   promptBody: z.string().trim().min(1).max(8000),
   promptPrefix: z.string().max(8000).optional(),
   promptSuffix: z.string().max(8000).optional(),
+  promptGuide: z.string().max(8000).optional(),
+  promptExtra: z.string().max(8000).optional(),
+  /** Which of the owner's keys to bill. Validated against the project. */
+  providerKeyId: z.string().uuid().nullish(),
   generation: generationSchema.optional(),
   processing: processingSchema.optional(),
   folder: z.string().max(255).optional(),
-  template: templateSpecSchema.nullish(),
+  inputs: jobInputsSchema.nullish(),
+  sequencePlan: sequencePlanSchema.nullish(),
   label: z.string().max(255).optional(),
   batches: z.number().int().min(1).max(20).optional(),
+  variables: z
+    .array(
+      z.object({
+        name: z
+          .string()
+          .trim()
+          .regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "must be a slot name like color"),
+        values: z.string().max(2000)
+      })
+    )
+    .max(20)
+    .optional(),
   remember: z.boolean().optional()
 });
 
@@ -110,89 +217,43 @@ export const rerunBodySchema = z.object({
   assetIds: z.array(z.string().uuid()).min(1).max(100),
   promptPrefix: z.string().max(8000).optional(),
   promptSuffix: z.string().max(8000).optional(),
+  providerKeyId: z.string().uuid().nullish(),
   useStoredGeneration: z.boolean().optional(),
-  useStoredProcessing: z.boolean().optional()
+  useStoredProcessing: z.boolean().optional(),
+  folder: z.string().max(255).optional()
 });
 
 export const approveBodySchema = z.object({
   assetId: z.string().uuid(),
+  /** Overrides the name the export is filed under. Optional. */
   name: z.string().max(255).optional(),
   subfolder: z.string().max(255).optional()
 });
 
-export const assetPatchSchema = z.object({
-  name: z.string().max(255).optional(),
-  folder: z.string().max(255).optional(),
-  tags: z.array(z.string().max(64)).max(64).optional(),
-  processing: processingSchema.optional(),
-  approvedName: z.string().max(255).nullish()
-});
+/**
+ * Editable asset fields now live in the project's Yjs document, so the only
+ * thing left to PATCH on the row is nothing -- the route exists solely to
+ * soft-delete. Kept as a schema so a stray body is rejected rather than
+ * silently ignored.
+ */
+export const assetPatchSchema = z.object({});
 
 export const settingsPatchSchema = z.object({
-  promptPrefix: z.string().max(8000).optional(),
-  promptSuffix: z.string().max(8000).optional(),
-  assetSlug: z.string().max(120).optional(),
   generation: generationSchema.optional(),
   processing: processingSchema.optional(),
-  activeCompositionId: z.string().uuid().nullish(),
   cutTemplateBackgroundOnPaste: z.boolean().optional(),
   templateCutTolerance: z.number().min(0).max(1).optional()
 });
 
-const stagedItemSchema = z.object({
-  id: z.string().min(1).max(64),
-  assetId: z.string().min(1).max(64),
-  x: z.number().finite(),
-  y: z.number().finite(),
-  footprint: size,
-  zIndex: z.number().finite(),
-  flipHorizontal: z.boolean(),
-  flipVertical: z.boolean(),
-  showSource: z.boolean(),
-  opacity: z.number().min(0).max(1)
+export const projectBodySchema = z.object({
+  name: z.string().trim().min(1).max(120)
 });
 
-const repeatGroupSchema = z.object({
-  id: z.string().min(1).max(64),
-  assetIds: z.array(z.string().min(1).max(64)).max(500),
-  x: z.number().finite(),
-  y: z.number().finite(),
-  cell: size,
-  marginX: z.number().finite(),
-  marginY: z.number().finite(),
-  countX: z.number().int().min(0).max(1000),
-  countY: z.number().int().min(0).max(1000),
-  fillX: z.boolean(),
-  fillY: z.boolean(),
-  // Added after the first compositions were saved, so absent in older documents.
-  randomRotate: z.boolean().default(false),
-  background: z.string().max(255).default(""),
-  zIndex: z.number().finite(),
-  opacity: z.number().min(0).max(1),
-  seed: z.number().finite()
-});
-
-export const compositionSchema = z.object({
-  id: z.string().uuid(),
-  name: z.string().min(1).max(255),
-  updatedAt: z.string().max(64).default(""),
-  unitsPerCell: z.number().positive().finite(),
-  camera: z.object({
-    x: z.number().finite(),
-    y: z.number().finite(),
-    zoom: z.number().positive().finite()
-  }),
-  items: z.array(stagedItemSchema).max(5000),
-  groups: z.array(repeatGroupSchema).max(500),
-  palettePool: z.array(z.string().max(255)).max(64),
-  palette: z.string().max(255),
-  paletteDither: z.enum(DITHER_MODES),
-  paletteDitherStrength: z.number().min(0).max(4),
-  version: z.number().int().min(0).optional()
-});
+const PROVIDER_ID_VALUES = providerIds() as [string, ...string[]];
 
 export const providerKeyBodySchema = z.object({
-  provider: z.enum(["openai"]),
+  provider: z.enum(PROVIDER_ID_VALUES),
+  label: z.string().trim().max(120).optional(),
   key: z.string().trim().min(8).max(500)
 });
 
@@ -234,7 +295,13 @@ export function validationResponse(error: ValidationError): NextResponse {
   );
 }
 
-/** Wraps a handler so ValidationError becomes a 400 instead of a 500. */
+/**
+ * Wraps a handler so the three "the caller got it wrong" errors become the
+ * status they mean instead of a 500.
+ *
+ * Authorization throws rather than returning a union precisely so that it can
+ * be caught here: a handler cannot forget to check something that aborts.
+ */
 export async function withValidation(
   handler: () => Promise<NextResponse>
 ): Promise<NextResponse> {
@@ -242,6 +309,11 @@ export async function withValidation(
     return await handler();
   } catch (error) {
     if (error instanceof ValidationError) return validationResponse(error);
+
+    if (error instanceof UnauthorizedError || error instanceof ForbiddenError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+
     throw error;
   }
 }

@@ -35,7 +35,8 @@ export interface ProcessingSettings {
   snapAlpha: boolean;
   alphaThreshold: number;
 
-  paletteFile: string;
+  /** A `palettes.id`, or "" for no palette. */
+  paletteId: string;
   dither: DitherMode;
   ditherStrength: number;
   distanceMode: ColorDistanceMode;
@@ -62,13 +63,15 @@ export const DEFAULT_PROCESSING: ProcessingSettings = {
   trimToContent: true,
   trimPadding: 0,
 
-  targetSize: { width: 0, height: 64 },
+  // Both zero means "keep whatever came back". A height of 64 used to be the
+  // default, which quietly downsampled every new asset before anyone asked.
+  targetSize: { width: 0, height: 0 },
   pixelate: "dominantColor",
 
   snapAlpha: true,
   alphaThreshold: 0.5,
 
-  paletteFile: "",
+  paletteId: "",
   dither: "none",
   ditherStrength: 1,
   distanceMode: "oklab"

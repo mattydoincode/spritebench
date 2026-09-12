@@ -2,15 +2,21 @@ import { unzipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import { buildArchive, planZipEntries, zipFilename, type PlannedEntry } from "@/client/export";
 import { DEFAULT_PROCESSING } from "@/core/settings";
-import type { AssetRecord } from "@/shared/model";
+import type { ResolvedAsset } from "@/shared/model";
 
-function asset(overrides: Partial<AssetRecord> & { id: string }): AssetRecord {
+const CONTEXT = { projectId: "p1", projectName: "mygame" };
+
+function asset(
+  overrides: Partial<ResolvedAsset> & { id: string; seq: number }
+): ResolvedAsset {
   return {
-    name: overrides.id,
+    name: "",
+    label: String(overrides.seq).padStart(3, "0"),
     folder: "props",
     tags: [],
     createdAt: "2026-09-05T00:00:00.000Z",
-    sourceFile: `${overrides.id}.png`,
+    createdByUserId: null,
+    hasSource: true,
     sourceWidth: 1024,
     sourceHeight: 1024,
     prompt: { prefix: "", body: "a crate", suffix: "" },
@@ -22,75 +28,96 @@ function asset(overrides: Partial<AssetRecord> & { id: string }): AssetRecord {
       size: "1024x1024",
       imageCount: 1
     },
+    generatedWith: { ...DEFAULT_PROCESSING },
     processing: { ...DEFAULT_PROCESSING },
-    processingDescription: "",
-    approvedPath: null,
-    approvedName: null,
+    sequences: [],
+    edits: [],
+    exported: false,
     rerunOf: null,
     jobId: null,
-    template: null,
+    inputs: null,
     usage: null,
     elapsedSeconds: null,
-    hasSource: true,
     expiresAt: null,
     ...overrides
-  } as AssetRecord;
+  } as ResolvedAsset;
 }
 
 const paths = (entries: { path: string }[]) => entries.map((entry) => entry.path);
 
 describe("planZipEntries", () => {
-  it("lays a single kind out flat", () => {
-    const plan = planZipEntries([asset({ id: "crate" }), asset({ id: "barrel" })], "processed");
+  it("names entries after the project and the asset number", () => {
+    const plan = planZipEntries(
+      CONTEXT,
+      [asset({ id: "a", seq: 1 }), asset({ id: "b", seq: 2 })],
+      "processed"
+    );
 
-    expect(paths(plan)).toEqual(["crate.png", "barrel.png"]);
+    expect(paths(plan)).toEqual(["mygame_001.png", "mygame_002.png"]);
     expect(plan.every((entry) => entry.variant === "processed")).toBe(true);
   });
 
   it("separates the two kinds into folders so they do not collide", () => {
-    const plan = planZipEntries([asset({ id: "crate" })], "both");
+    const plan = planZipEntries(CONTEXT, [asset({ id: "a", seq: 1 })], "both");
 
-    expect(paths(plan)).toEqual(["original/crate.png", "processed/crate.png"]);
+    expect(paths(plan)).toEqual(["original/mygame_001.png", "processed/mygame_001.png"]);
   });
 
   it("emits one entry per asset per requested kind", () => {
-    const three = [asset({ id: "a" }), asset({ id: "b" }), asset({ id: "c" })];
+    const three = [
+      asset({ id: "a", seq: 1 }),
+      asset({ id: "b", seq: 2 }),
+      asset({ id: "c", seq: 3 })
+    ];
 
-    expect(planZipEntries(three, "original")).toHaveLength(3);
-    expect(planZipEntries(three, "processed")).toHaveLength(3);
-    expect(planZipEntries(three, "both")).toHaveLength(6);
+    expect(planZipEntries(CONTEXT, three, "original")).toHaveLength(3);
+    expect(planZipEntries(CONTEXT, three, "processed")).toHaveLength(3);
+    expect(planZipEntries(CONTEXT, three, "both")).toHaveLength(6);
   });
 
-  it("prefers the approved name over the generated one", () => {
+  it("prefers a rename over the number", () => {
     const plan = planZipEntries(
-      [asset({ id: "prop_20260905_1", approvedName: "rusty_crate" })],
+      CONTEXT,
+      [asset({ id: "a", seq: 7, name: "rusty crate" })],
       "original"
     );
 
-    expect(paths(plan)).toEqual(["rusty_crate.png"]);
+    expect(paths(plan)).toEqual(["mygame_rusty_crate.png"]);
+  });
+
+  it("falls back to the number when a rename is cleared", () => {
+    const plan = planZipEntries(CONTEXT, [asset({ id: "a", seq: 7, name: "  " })], "original");
+
+    expect(paths(plan)).toEqual(["mygame_007.png"]);
   });
 
   /**
-   * Two assets can legitimately carry the same approved name, and a ZIP with
+   * Two assets can legitimately carry the same rename, and a ZIP with
    * duplicate entries is malformed -- unpacking silently loses one.
    */
   it("suffixes duplicate names rather than emitting a broken archive", () => {
     const plan = planZipEntries(
+      CONTEXT,
       [
-        asset({ id: "one", approvedName: "crate" }),
-        asset({ id: "two", approvedName: "crate" }),
-        asset({ id: "three", approvedName: "crate" })
+        asset({ id: "one", seq: 1, name: "crate" }),
+        asset({ id: "two", seq: 2, name: "crate" }),
+        asset({ id: "three", seq: 3, name: "crate" })
       ],
       "processed"
     );
 
-    expect(paths(plan)).toEqual(["crate.png", "crate_2.png", "crate_3.png"]);
+    expect(paths(plan)).toEqual([
+      "mygame_crate.png",
+      "mygame_crate_2.png",
+      "mygame_crate_3.png"
+    ]);
     expect(new Set(paths(plan)).size).toBe(3);
   });
 
   it("keeps the suffix before the extension", () => {
     const plan = planZipEntries(
-      [asset({ id: "one", approvedName: "crate" }), asset({ id: "two", approvedName: "crate" })],
+      CONTEXT,
+      [asset({ id: "one", seq: 1, name: "crate" }), asset({ id: "two", seq: 2, name: "crate" })],
       "processed"
     );
 
@@ -99,22 +126,17 @@ describe("planZipEntries", () => {
 
   it("deduplicates within a folder, not across folders", () => {
     const plan = planZipEntries(
-      [asset({ id: "one", approvedName: "crate" }), asset({ id: "two", approvedName: "crate" })],
+      CONTEXT,
+      [asset({ id: "one", seq: 1, name: "crate" }), asset({ id: "two", seq: 2, name: "crate" })],
       "both"
     );
 
     expect(paths(plan)).toEqual([
-      "original/crate.png",
-      "processed/crate.png",
-      "original/crate_2.png",
-      "processed/crate_2.png"
+      "original/mygame_crate.png",
+      "processed/mygame_crate.png",
+      "original/mygame_crate_2.png",
+      "processed/mygame_crate_2.png"
     ]);
-  });
-
-  it("drops a trailing .png rather than doubling it", () => {
-    const plan = planZipEntries([asset({ id: "a", approvedName: "crate.png" })], "original");
-
-    expect(paths(plan)).toEqual(["crate.png"]);
   });
 
   /**
@@ -122,35 +144,65 @@ describe("planZipEntries", () => {
    * path separator or a leading dot-dot decides where the archive unpacks.
    */
   it("strips characters that would let a name escape the archive", () => {
-    expect(paths(planZipEntries([asset({ id: "a", approvedName: "../../etc/passwd" })], "original")))
-      .toEqual(["etc_passwd.png"]);
+    const stems = (name: string) =>
+      paths(planZipEntries(CONTEXT, [asset({ id: "a", seq: 1, name })], "original"));
 
-    expect(paths(planZipEntries([asset({ id: "b", approvedName: "/abs/path" })], "original")))
-      .toEqual(["abs_path.png"]);
-
-    expect(paths(planZipEntries([asset({ id: "c", approvedName: "a/b" })], "original"))).toEqual([
-      "a_b.png"
-    ]);
+    expect(stems("../../etc/passwd")).toEqual(["mygame_etc_passwd.png"]);
+    expect(stems("/abs/path")).toEqual(["mygame_abs_path.png"]);
+    expect(stems("a/b")).toEqual(["mygame_a_b.png"]);
   });
 
-  it("falls back to the asset id when a name sanitizes away entirely", () => {
-    const plan = planZipEntries([asset({ id: "abc123", approvedName: "///" })], "original");
+  it("sanitizes a project name containing a slash", () => {
+    const plan = planZipEntries(
+      { projectId: "p1", projectName: "my/../game" },
+      [asset({ id: "a", seq: 1 })],
+      "original"
+    );
 
-    expect(paths(plan)).toEqual(["abc123.png"]);
+    expect(paths(plan)).toEqual(["my_game_001.png"]);
+  });
+
+  it("falls back to the number when a rename sanitizes away entirely", () => {
+    const plan = planZipEntries(
+      CONTEXT,
+      [asset({ id: "a", seq: 4, name: "///" })],
+      "original"
+    );
+
+    expect(paths(plan)).toEqual(["mygame_004.png"]);
   });
 
   it("applies a name override only when exporting one asset", () => {
-    expect(paths(planZipEntries([asset({ id: "a" })], "original", "chosen"))).toEqual([
-      "chosen.png"
-    ]);
+    expect(
+      paths(planZipEntries(CONTEXT, [asset({ id: "a", seq: 1 })], "original", "chosen"))
+    ).toEqual(["chosen.png"]);
 
     // Across a batch the override would collide on every entry.
-    expect(paths(planZipEntries([asset({ id: "a" }), asset({ id: "b" })], "original", "chosen")))
-      .toEqual(["a.png", "b.png"]);
+    expect(
+      paths(
+        planZipEntries(
+          CONTEXT,
+          [asset({ id: "a", seq: 1 }), asset({ id: "b", seq: 2 })],
+          "original",
+          "chosen"
+        )
+      )
+    ).toEqual(["mygame_001.png", "mygame_002.png"]);
+  });
+
+  it("drops a trailing .png from an override rather than doubling it", () => {
+    const plan = planZipEntries(
+      CONTEXT,
+      [asset({ id: "a", seq: 1 })],
+      "original",
+      "crate.png"
+    );
+
+    expect(paths(plan)).toEqual(["crate.png"]);
   });
 
   it("returns nothing for an empty selection", () => {
-    expect(planZipEntries([], "both")).toEqual([]);
+    expect(planZipEntries(CONTEXT, [], "both")).toEqual([]);
   });
 });
 

@@ -1,6 +1,14 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useState,
+  type CSSProperties,
+  type MouseEvent,
+  type ReactNode
+} from "react";
+import { createPortal } from "react-dom";
+import { type Pane, useUi } from "@/client/stores/ui";
 
 let openModals = 0;
 
@@ -14,7 +22,8 @@ export function Modal({
   children,
   actions,
   footer,
-  width = 760
+  width = 760,
+  variant = "dense"
 }: {
   title: string;
   onClose: () => void;
@@ -22,7 +31,26 @@ export function Modal({
   actions?: ReactNode;
   footer?: ReactNode;
   width?: number;
+  /**
+   * `dense` matches the studio's tool chrome: tiny uppercase label, tight
+   * padding. `plain` is for the pages outside it, where a dialog is something
+   * you read rather than a panel you work in.
+   */
+  variant?: "dense" | "plain";
 }) {
+  const plain = variant === "plain";
+
+  /**
+   * Portalled to the body rather than rendered where it was declared.
+   *
+   * A dialog opened from the scene overlay would otherwise inherit that
+   * overlay's `pointer-events: none` -- it drew correctly and ignored every
+   * click, Cancel included. Where a dialog is written should not decide
+   * whether it works, so it always mounts at the top of the tree.
+   */
+  const [host, setHost] = useState<HTMLElement | null>(null);
+  useEffect(() => setHost(document.body), []);
+
   useEffect(() => {
     openModals++;
 
@@ -38,7 +66,9 @@ export function Modal({
     };
   }, [onClose]);
 
-  return (
+  if (!host) return null;
+
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
       onPointerDown={onClose}
@@ -46,10 +76,22 @@ export function Modal({
       <div
         onPointerDown={(event) => event.stopPropagation()}
         style={{ maxWidth: width }}
-        className="flex max-h-full min-h-0 w-full flex-col rounded border border-[var(--color-edge)] bg-[var(--color-ink-900)] shadow-2xl"
+        className={`flex max-h-full min-h-0 w-full flex-col border border-[var(--color-edge)] bg-[var(--color-ink-900)] shadow-2xl ${
+          plain ? "page-shell rounded-lg" : "rounded"
+        }`}
       >
-        <header className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--color-edge)] px-3 py-2">
-          <h2 className="text-[11px] font-semibold tracking-wider text-slate-300 uppercase">
+        <header
+          className={`flex shrink-0 items-center justify-between gap-2 border-b border-[var(--color-edge)] ${
+            plain ? "px-5 py-3.5" : "px-3 py-2"
+          }`}
+        >
+          <h2
+            className={
+              plain
+                ? "text-lg font-semibold text-white"
+                : "text-[11px] font-semibold tracking-wider text-slate-300 uppercase"
+            }
+          >
             {title}
           </h2>
 
@@ -61,34 +103,247 @@ export function Modal({
           </div>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-3">{children}</div>
+        <div className={`min-h-0 flex-1 overflow-y-auto ${plain ? "px-5 py-4" : "p-3"}`}>
+          {children}
+        </div>
 
         {footer ? (
-          <div className="shrink-0 border-t border-[var(--color-edge)] px-3 py-2">{footer}</div>
+          <div
+            className={`shrink-0 border-t border-[var(--color-edge)] ${
+              plain ? "px-5 py-3.5" : "px-3 py-2"
+            }`}
+          >
+            {footer}
+          </div>
         ) : null}
       </div>
+    </div>,
+    host
+  );
+}
+
+export function PreviewLightbox({
+  title,
+  onClose,
+  children
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const [host, setHost] = useState<HTMLElement | null>(null);
+  useEffect(() => setHost(document.body), []);
+
+  useEffect(() => {
+    openModals++;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      openModals--;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onClose]);
+
+  if (!host) return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex flex-col bg-black/85 p-4"
+      onPointerDown={onClose}
+    >
+      <div className="mb-3 flex shrink-0 items-center justify-between gap-3 text-[11px] text-slate-400">
+        <span className="truncate uppercase tracking-wide">{title}</span>
+        <span className="shrink-0">esc or click to close</span>
+      </div>
+      <div className="flex min-h-0 flex-1 items-center justify-center">{children}</div>
+    </div>,
+    host
+  );
+}
+
+export function ExpandablePreview({
+  title,
+  className = "",
+  style,
+  children,
+  expanded
+}: {
+  title: string;
+  className?: string;
+  style?: CSSProperties;
+  children: ReactNode;
+  expanded: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <button
+        type="button"
+        title={`Expand ${title}`}
+        className={`appearance-none cursor-pointer ${className}`}
+        style={style}
+        onClick={() => setOpen(true)}
+      >
+        {children}
+      </button>
+      {open ? (
+        <PreviewLightbox title={title} onClose={() => setOpen(false)}>
+          {expanded}
+        </PreviewLightbox>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * A floating panel over the scene.
+ *
+ * Scene controls sit on the canvas rather than in a toolbar above it so
+ * that what they act on is unambiguous. A docked toolbar outlives the view it
+ * describes -- "cell 16" in a bar at the top of the screen reads like an app
+ * setting, whereas the same field floating over the grid it divides reads as
+ * a property of this scene, which is what it is.
+ *
+ * Does not position itself. Bubbles live in a flex overlay so that opening one
+ * pushes its neighbour along instead of covering it, and so a tall one is
+ * capped by the row it sits in and scrolls, rather than running off the canvas.
+ */
+export function Bubble({
+  title,
+  className = "",
+  collapsed = false,
+  onToggle,
+  actions,
+  children,
+  width
+}: {
+  title: string;
+  className?: string;
+  collapsed?: boolean;
+  onToggle?: () => void;
+  /** Shown in the title bar even when collapsed, so keep it to a summary. */
+  actions?: ReactNode;
+  children: ReactNode;
+  width?: number;
+}) {
+  return (
+    <div
+      style={width && !collapsed ? { width } : undefined}
+      className={`pointer-events-auto flex max-h-full min-h-0 flex-col rounded-lg border border-[var(--color-edge)] bg-[var(--color-ink-800)]/95 shadow-xl backdrop-blur-sm ${className}`}
+    >
+      {/*
+        The whole title bar is the toggle, not just the chevron: it is the one
+        part of a bubble that never does anything else, and a 12px glyph is a
+        mean target for something you hit as often as getting the canvas back.
+      */}
+      <header
+        onClick={onToggle}
+        role={onToggle ? "button" : undefined}
+        tabIndex={onToggle ? 0 : undefined}
+        aria-expanded={onToggle ? !collapsed : undefined}
+        title={onToggle ? (collapsed ? `Show ${title.toLowerCase()}` : `Hide ${title.toLowerCase()}`) : undefined}
+        onKeyDown={(event) => {
+          if (!onToggle || (event.key !== "Enter" && event.key !== " ")) return;
+          event.preventDefault();
+          onToggle();
+        }}
+        className={`flex shrink-0 items-center gap-1.5 px-2 py-1.5 ${
+          onToggle
+            ? `cursor-pointer rounded-t-lg select-none hover:bg-[var(--color-ink-700)] ${collapsed ? "rounded-b-lg" : ""}`
+            : ""
+        }`}
+      >
+        <span className="text-[10px] font-semibold tracking-wider text-slate-400 uppercase">
+          {title}
+        </span>
+
+        <span className="flex-1" />
+        {actions}
+
+        {onToggle ? (
+          <span className="px-1 leading-none text-slate-500" aria-hidden>
+            {collapsed ? "\u25b8" : "\u25be"}
+          </span>
+        ) : null}
+      </header>
+
+      {collapsed ? null : (
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">{children}</div>
+      )}
     </div>
+  );
+}
+
+/**
+ * Which way a docked panel folds away, so its chevron points at the exit.
+ *
+ * Deliberately double angle quotes rather than the solid triangles the
+ * scene bubbles use. The two collapse in different directions -- a panel
+ * slides out of the layout, a bubble rolls up in place -- and telling them
+ * apart at a glance is worth two glyph families.
+ */
+const COLLAPSE_ARROW: Record<Pane, string> = {
+  left: "\u00ab",
+  right: "\u00bb",
+  library: "\u02c5"
+};
+
+function CollapseChevron({ pane }: { pane: Pane }) {
+  return (
+    <button
+      type="button"
+      title="Collapse this panel"
+      aria-label="Collapse this panel"
+      onClick={() => useUi.getState().togglePane(pane)}
+      className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-[var(--color-edge)] bg-[var(--color-ink-700)] text-[13px] leading-none text-slate-400 transition hover:border-slate-500 hover:bg-[var(--color-ink-500)] hover:text-white"
+    >
+      {COLLAPSE_ARROW[pane]}
+    </button>
   );
 }
 
 export function Panel({
   title,
+  lead,
   children,
   actions,
+  pane,
   className = ""
 }: {
-  title: string;
+  title?: string;
+  /** Replaces the title, for a control that belongs in the header. */
+  lead?: ReactNode;
   children: ReactNode;
   actions?: ReactNode;
+  /** Set to give this panel a collapse chevron in its header. */
+  pane?: Pane;
   className?: string;
 }) {
   return (
-    <section className={`flex min-h-0 flex-col ${className}`}>
+    <section className={`flex h-full min-h-0 flex-col ${className}`}>
       <header className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--color-edge)] bg-[var(--color-ink-800)] px-3 py-2">
-        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-          {title}
-        </h2>
-        <div className="flex items-center gap-1">{actions}</div>
+        {/*
+          The chevron sits on whichever side the panel folds towards, which is
+          the side the scene is on. For the inspector that is the inner
+          edge, so it leads the title rather than trailing the actions.
+        */}
+        <div className="flex min-w-0 items-center gap-1.5">
+          {pane === "right" ? <CollapseChevron pane={pane} /> : null}
+
+          {lead ?? (
+            <h2 className="truncate text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
+              {title}
+            </h2>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1">
+          {actions}
+          {pane && pane !== "right" ? <CollapseChevron pane={pane} /> : null}
+        </div>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">{children}</div>
     </section>
@@ -156,20 +411,63 @@ export function Button({
   );
 }
 
+/**
+ * A title-row action: 10px, no chrome at rest, a real hover so it reads as
+ * clickable. `danger` is for remove / delete.
+ */
+export function TextButton({
+  children,
+  onClick,
+  title,
+  danger = false,
+  disabled,
+  className = ""
+}: {
+  children: ReactNode;
+  onClick?: (event: MouseEvent<HTMLButtonElement>) => void;
+  title?: string;
+  danger?: boolean;
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      disabled={disabled}
+      onClick={onClick}
+      className={`rounded px-1 py-0.5 text-[10px] leading-none transition disabled:cursor-not-allowed disabled:opacity-40 ${
+        danger
+          ? "text-slate-400 hover:bg-[#5a2130] hover:text-rose-200"
+          : "text-slate-400 hover:bg-[var(--color-ink-600)] hover:text-white"
+      } ${className}`}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function Toggle({
   label,
   checked,
-  onChange
+  onChange,
+  disabled
 }: {
   label: string;
   checked: boolean;
   onChange: (value: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
-    <label className="mb-2 flex cursor-pointer items-center gap-2 select-none">
+    <label
+      className={`mb-2 flex items-center gap-2 select-none ${
+        disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+      }`}
+    >
       <input
         type="checkbox"
         checked={checked}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.checked)}
         className="h-3.5 w-3.5 accent-[var(--color-accent)]"
       />

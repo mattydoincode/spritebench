@@ -15,12 +15,15 @@ export function toJobRecord(row: JobRow): JobRecord {
     createdAt: row.createdAt.toISOString(),
     startedAt: row.startedAt?.toISOString() ?? null,
     finishedAt: row.finishedAt?.toISOString() ?? null,
+    userId: row.userId,
+    providerKeyId: row.providerKeyId,
     prompt: row.prompt,
     composedPrompt: row.composedPrompt,
     generation: { ...DEFAULT_GENERATION, ...(row.generation ?? {}) },
     processing: withDefaults(row.processing),
     folder: row.folder,
-    template: row.template ?? null,
+    inputs: row.inputs ?? null,
+    sequencePlan: row.sequencePlan ?? null,
     rerunOf: row.rerunOf,
     assetIds: row.assetIds ?? [],
     resolvedSize: row.resolvedSize ?? null,
@@ -28,11 +31,15 @@ export function toJobRecord(row: JobRow): JobRecord {
   };
 }
 
-export async function listJobs(userId: string): Promise<JobRecord[]> {
+/**
+ * Every job in the project, whoever queued it. A collaborator needs to see
+ * that four images are already generating, or they will queue four more.
+ */
+export async function listJobs(projectId: string): Promise<JobRecord[]> {
   const rows = await db()
     .select()
     .from(jobs)
-    .where(eq(jobs.userId, userId))
+    .where(eq(jobs.projectId, projectId))
     .orderBy(desc(jobs.createdAt))
     .limit(200);
 
@@ -45,7 +52,11 @@ export async function getJobRow(id: string): Promise<JobRow | null> {
 }
 
 export interface NewJob {
+  projectId: string;
+  /** Who pressed Generate. One of the owner's keys pays regardless. */
   userId: string;
+  /** Which of the owner's keys pays. Null on the environment-key dev path. */
+  providerKeyId: string | null;
   label: string;
   batchId: string | null;
   batchIndex: number;
@@ -55,8 +66,10 @@ export interface NewJob {
   generation: JobRecord["generation"];
   processing: JobRecord["processing"];
   folder: string;
-  template: JobRecord["template"];
+  inputs: JobRecord["inputs"];
+  sequencePlan: JobRecord["sequencePlan"];
   rerunOf: string | null;
+  status?: JobStatus;
 }
 
 export async function insertJob(
@@ -66,8 +79,10 @@ export async function insertJob(
   const [row] = await connection
     .insert(jobs)
     .values({
+      projectId: input.projectId,
       userId: input.userId,
-      status: "queued",
+      providerKeyId: input.providerKeyId,
+      status: input.status ?? "queued",
       label: input.label,
       batchId: input.batchId,
       batchIndex: input.batchIndex,
@@ -77,7 +92,8 @@ export async function insertJob(
       generation: input.generation,
       processing: input.processing,
       folder: input.folder,
-      template: input.template,
+      inputs: input.inputs,
+      sequencePlan: input.sequencePlan,
       rerunOf: input.rerunOf
     })
     .returning();
@@ -88,12 +104,12 @@ export async function insertJob(
 /**
  * Images that queued and running jobs are already going to produce.
  *
- * The asset count alone understates what a user has committed to: a queued
+ * The asset count alone understates what a project has committed to: a queued
  * batch has not written its rows yet, so without this a burst of requests
  * could each pass the quota check and collectively blow past the limit.
  */
 export async function pendingImages(
-  userId: string,
+  projectId: string,
   connection: Transaction = db()
 ): Promise<number> {
   const [row] = await connection
@@ -101,7 +117,7 @@ export async function pendingImages(
       value: sql<number>`coalesce(sum(greatest(1, (${jobs.generation} ->> 'imageCount')::int)), 0)`
     })
     .from(jobs)
-    .where(and(eq(jobs.userId, userId), inArray(jobs.status, ["queued", "running"])));
+    .where(and(eq(jobs.projectId, projectId), inArray(jobs.status, ["queued", "blocked", "running"])));
 
   return Number(row?.value ?? 0);
 }
@@ -170,23 +186,73 @@ export async function finishJob(
     .where(eq(jobs.id, id));
 }
 
-export async function cancelJob(userId: string, id: string): Promise<boolean> {
+export async function cancelJob(projectId: string, id: string): Promise<boolean> {
   const [row] = await db()
     .update(jobs)
     .set({ status: "cancelled", finishedAt: new Date() })
-    .where(and(eq(jobs.id, id), eq(jobs.userId, userId), eq(jobs.status, "queued")))
+    .where(
+      and(
+        eq(jobs.id, id),
+        eq(jobs.projectId, projectId),
+        inArray(jobs.status, ["queued", "blocked"])
+      )
+    )
     .returning({ id: jobs.id });
 
   return row !== undefined;
 }
 
-export async function clearFinishedJobs(userId: string): Promise<void> {
+export async function cancelBlockedInBatch(projectId: string, batchId: string): Promise<number> {
+  const rows = await db()
+    .update(jobs)
+    .set({ status: "cancelled", finishedAt: new Date() })
+    .where(
+      and(eq(jobs.projectId, projectId), eq(jobs.batchId, batchId), eq(jobs.status, "blocked"))
+    )
+    .returning({ id: jobs.id });
+
+  return rows.length;
+}
+
+export async function findBlockedLoopStep(
+  projectId: string,
+  batchId: string,
+  index: number
+): Promise<JobRow | null> {
+  const rows = await db()
+    .select()
+    .from(jobs)
+    .where(and(eq(jobs.projectId, projectId), eq(jobs.batchId, batchId), eq(jobs.status, "blocked")));
+
+  return (
+    rows.find((row) => {
+      const loop = row.inputs?.loop;
+      return loop != null && "index" in loop && loop.index === index;
+    }) ?? null
+  );
+}
+
+export async function unblockJob(
+  id: string,
+  inputs: JobRecord["inputs"]
+): Promise<JobRow | null> {
+  const [row] = await db()
+    .update(jobs)
+    .set({ status: "queued", inputs, error: null })
+    .where(and(eq(jobs.id, id), eq(jobs.status, "blocked")))
+    .returning();
+
+  return row ?? null;
+}
+
+export async function clearFinishedJobs(projectId: string): Promise<void> {
   await db()
     .delete(jobs)
     .where(
       and(
-        eq(jobs.userId, userId),
+        eq(jobs.projectId, projectId),
         ne(jobs.status, "queued"),
+        ne(jobs.status, "blocked"),
         ne(jobs.status, "running")
       )
     );
@@ -205,7 +271,14 @@ export async function failOrphanedJobs(): Promise<number> {
       finishedAt: new Date()
     })
     .where(and(eq(jobs.status, "running"), isNull(jobs.providerCallCompletedAt)))
-    .returning({ id: jobs.id });
+    .returning({ id: jobs.id, projectId: jobs.projectId, batchId: jobs.batchId });
+
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (!row.batchId || seen.has(row.batchId)) continue;
+    seen.add(row.batchId);
+    await cancelBlockedInBatch(row.projectId, row.batchId);
+  }
 
   return rows.length;
 }

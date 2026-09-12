@@ -10,7 +10,7 @@ import {
 } from "@/queue/boss";
 import type { GenerateJobPayload } from "@/queue/dispatch";
 import { configProblems, workerConcurrency } from "@/server/config";
-import { pruneExpiredSources } from "./prune";
+import { compactProjectDocs, pruneExpiredSources } from "./prune";
 import { runJob } from "./runJob";
 
 /** Nightly, at 04:00 UTC. */
@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   // Refuse to start rather than accepting jobs it cannot finish. A worker with
   // no R2 credentials would claim a job, call the provider, spend the user's
   // money and then fail to store the result.
-  const problems = configProblems();
+  const problems = configProblems({ web: false });
   if (problems.length > 0) {
     for (const problem of problems) console.error(`[worker] config: ${problem}`);
     throw new Error(`${problems.length} configuration problem(s)`);
@@ -85,6 +85,9 @@ async function main(): Promise<void> {
   await instance.work(PRUNE_QUEUE, { batchSize: 1 }, async () => {
     const pruned = await pruneExpiredSources();
     if (pruned > 0) console.log(`[worker] rolled off ${pruned} source(s)`);
+
+    const compacted = await compactProjectDocs();
+    if (compacted > 0) console.log(`[worker] compacted ${compacted} project document(s)`);
   });
 
   await instance.schedule(PRUNE_QUEUE, PRUNE_SCHEDULE);

@@ -55,18 +55,19 @@ describe("withDefaults", () => {
     expect(withDefaults({ edits: null as never }).edits).toEqual([]);
   });
 
-  // Historical shapes that have been persisted to disk over the life of the tool.
-  // withDefaults() is the only migration path these records get.
-  const historicalShapes: Array<[string, Record<string, unknown>]> = [
-    ["earliest known shape", { cutout: "edgeFloodFill", targetSize: { width: 0, height: 64 } }],
-    ["before edits existed", { cutout: "none", trimToContent: true, snapAlpha: true }],
-    ["before orientation existed", { flipHorizontal: true, paletteFile: "apollo-1x.png" }],
-    ["before despeckle existed", { erodePixels: 2, alphaThreshold: 0.5 }],
-    ["with unknown future keys", { somethingNew: 42, cutout: "chromaKey" }],
+  // Partial shapes reach withDefaults() from the Yjs document, where a
+  // collaborator on an older build writes only the fields it knows about.
+  // This is the only place those get completed.
+  const partialShapes: Array<[string, Record<string, unknown>]> = [
+    ["a cutout and one dimension", { cutout: "edgeFloodFill", targetSize: { width: 0, height: 64 } }],
+    ["flags with no edits array", { cutout: "none", trimToContent: true, snapAlpha: true }],
+    ["orientation only", { flipHorizontal: true, paletteId: "7f3c" }],
+    ["despeckle only", { erodePixels: 2, alphaThreshold: 0.5 }],
+    ["unknown future keys", { somethingNew: 42, cutout: "chromaKey" }],
     ["fully populated", { ...DEFAULT_PROCESSING }]
   ];
 
-  for (const [label, shape] of historicalShapes) {
+  for (const [label, shape] of partialShapes) {
     it(`fills in a complete settings object for the ${label}`, () => {
       const result = withDefaults(shape as never);
 
@@ -81,7 +82,7 @@ describe("withDefaults", () => {
   }
 
   it("is idempotent", () => {
-    for (const [, shape] of historicalShapes) {
+    for (const [, shape] of partialShapes) {
       const once = withDefaults(shape as never);
       expect(withDefaults(once)).toEqual(once);
     }
@@ -105,7 +106,7 @@ describe("hashSettings", () => {
     const baseHash = hashSettings(base);
 
     expect(hashSettings({ ...base, erodePixels: 1 })).not.toBe(baseHash);
-    expect(hashSettings({ ...base, paletteFile: "apollo-1x.png" })).not.toBe(baseHash);
+    expect(hashSettings({ ...base, paletteId: "7f3c" })).not.toBe(baseHash);
     expect(hashSettings({ ...base, targetSize: { width: 0, height: 32 } })).not.toBe(baseHash);
     expect(hashSettings({ ...base, dither: "atkinson" })).not.toBe(baseHash);
   });

@@ -130,6 +130,29 @@ export function snapLegacySize(requested: Size): Size {
   return best;
 }
 
+/**
+ * Longest edge of the stored preview the library grid renders from.
+ *
+ * Here rather than next to the sharp call that produces it, because the
+ * client has to be able to work out a thumbnail's dimensions to map a
+ * source-space rectangle into it, and it cannot import sharp.
+ */
+export const THUMB_MAX_EDGE = 256;
+
+/** The dimensions `buildThumbnail` will have produced for a given source. */
+export function thumbnailSize(source: Size): Size {
+  const scale = Math.min(
+    1,
+    THUMB_MAX_EDGE / Math.max(1, source.width),
+    THUMB_MAX_EDGE / Math.max(1, source.height)
+  );
+
+  return {
+    width: Math.max(1, Math.round(source.width * scale)),
+    height: Math.max(1, Math.round(source.height * scale))
+  };
+}
+
 export function fitToAspect(template: Size, budget: Size): Size {
   const aspect = Math.max(0.0001, template.width / Math.max(1, template.height));
   const total = Math.max(1, budget.width * budget.height);

@@ -1,6 +1,7 @@
 import sharp from "sharp";
+import { THUMB_MAX_EDGE } from "@/core/size";
 
-export const THUMB_MAX_EDGE = 256;
+export { THUMB_MAX_EDGE };
 
 /**
  * A small WebP preview, generated once on ingest.

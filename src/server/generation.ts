@@ -1,29 +1,53 @@
 import crypto from "node:crypto";
+import { processingForJob } from "@/core/pixelMask";
 import { withDefaults, type ProcessingSettings } from "@/core/settings";
+import { snapRequestSize } from "@/providers/models";
+import type { Size } from "@/core/types";
 import { db, type Transaction } from "@/db";
-import { countAssets } from "@/db/repo/assets";
+import { countAssets, getAssetRow } from "@/db/repo/assets";
 import { insertJob, pendingImages, setQueueJobId, toJobRecord } from "@/db/repo/jobs";
-import { lockUser } from "@/db/repo/users";
+import { lockProject } from "@/db/repo/projects";
+import { dispatchJob } from "@/queue/dispatch";
 import {
   composePrompt,
   type GenerationParams,
+  type JobInputs,
   type JobRecord,
   type PromptSpec,
-  type TemplateSpec
+  type SequencePlan
 } from "@/shared/model";
+import {
+  InvalidInputsError,
+  isExpandingChunk,
+  planFanout,
+  startingAssetId,
+  validateGenerateInputs
+} from "@/shared/multistep";
+import { expandPrompt, loopReservedSlots, promptForJob, type PromptVariable } from "@/shared/promptVars";
 import { freeAssetLimit, maxImagesPerRequest } from "./config";
-import { dispatchJob } from "@/queue/dispatch";
+
+export { InvalidInputsError };
 
 export interface EnqueueRequest {
+  projectId: string;
+  /** Who pressed Generate. One of the owner's keys pays for it. */
   userId: string;
+  /**
+   * Which of the owner's keys to bill, already validated by
+   * `resolveKeySelection`. Null means the environment-key dev path.
+   */
+  providerKeyId: string | null;
   prompt: PromptSpec;
   generation: GenerationParams;
   processing: ProcessingSettings;
   folder: string;
   label?: string;
-  template?: TemplateSpec | null;
+  inputs?: JobInputs | null;
+  sequencePlan?: SequencePlan | null;
   rerunOf?: string | null;
   batches: number;
+  /** `{color}` rows. Empty or omitted means one prompt, as before. */
+  variables?: PromptVariable[];
   /** Set when this job belongs to a batch created by the caller, as reruns do. */
   batch?: { id: string; index: number; size: number } | null;
 }
@@ -39,8 +63,15 @@ export class QuotaExceededError extends Error {
         ? `${stored} of ${limit} images, with ${pending} more already generating`
         : `${stored} of ${limit} images`;
 
-    super(`you are storing ${held}. Delete some before generating more.`);
+    super(`this project is storing ${held}. Delete some before generating more.`);
     this.name = "QuotaExceededError";
+  }
+}
+
+export class EmptyExpansionError extends Error {
+  constructor() {
+    super("give every {slot} in the prompt at least one value");
+    this.name = "EmptyExpansionError";
   }
 }
 
@@ -55,18 +86,21 @@ export class FanOutExceededError extends Error {
 }
 
 /**
- * Rejects a request that would take the user past their storage quota or fan
+ * Rejects a request that would take the project past its storage quota or fan
  * out further than one request is allowed to.
  *
- * Checked before anything is dispatched: users pay for their own generations,
- * so refusing after the provider call would spend their money on an image we
- * then throw away.
+ * Counted per project rather than per user because the project owner's key
+ * pays: a shared project with three collaborators is one bill, not three
+ * allowances.
+ *
+ * Checked before anything is dispatched, since refusing after the provider
+ * call would spend real money on an image we then throw away.
  *
  * Pass the enqueue transaction to make the check binding. Called without one
  * it is only an early, friendlier rejection -- see `enqueueGeneration`.
  */
 export async function assertCapacity(
-  userId: string,
+  projectId: string,
   images: number,
   connection?: Transaction
 ): Promise<void> {
@@ -76,8 +110,8 @@ export async function assertCapacity(
 
   const limit = freeAssetLimit();
   const [stored, pending] = await Promise.all([
-    countAssets(userId, connection),
-    pendingImages(userId, connection)
+    countAssets(projectId, connection),
+    pendingImages(projectId, connection)
   ]);
 
   if (stored + pending + images > limit) {
@@ -85,57 +119,109 @@ export async function assertCapacity(
   }
 }
 
+async function originSizeFor(request: EnqueueRequest): Promise<Size | null> {
+  const assetId = startingAssetId(request.inputs);
+  if (!assetId) return null;
+
+  const row = await getAssetRow(request.projectId, assetId);
+  if (!row) throw new InvalidInputsError("starting image not found");
+  if (!row.sourceKey) throw new InvalidInputsError("starting image source has been rolled off");
+
+  if (!isExpandingChunk(request.inputs)) return null;
+  return { width: row.sourceWidth, height: row.sourceHeight };
+}
+
 /**
  * Creates job rows and hands them to the queue.
  *
  * The whole fan-out is one transaction: the quota check, every row insert, and
  * every queue send. That makes the check binding rather than advisory -- two
- * concurrent requests serialize on the user's row lock, so the second one sees
- * what the first committed to -- and it makes the request all-or-nothing
+ * concurrent requests serialize on the project's row lock, so the second one
+ * sees what the first committed to -- and it makes the request all-or-nothing
  * instead of leaving half a batch behind when the limit is hit midway.
  */
 export async function enqueueGeneration(request: EnqueueRequest): Promise<JobRecord[]> {
-  const batches = Math.max(1, Math.min(20, Math.floor(request.batches)));
-  const perBatch = Math.max(1, Math.floor(request.generation.imageCount));
+  validateGenerateInputs(request);
 
-  const composed = composePrompt(request.prompt);
-  const batchId = request.batch?.id ?? (batches > 1 ? crypto.randomUUID() : null);
-  const label =
-    request.label?.trim() || request.prompt.body.trim().slice(0, 60) || "untitled";
+  const reserved = loopReservedSlots(Boolean(request.inputs?.loop));
+  const expansions = expandPrompt(request.prompt, request.variables ?? [], reserved);
+  if (expansions.length === 0) throw new EmptyExpansionError();
+
+  const originSize = await originSizeFor(request);
+  const groupsByExpansion = expansions.map(() =>
+    planFanout({
+      generation: request.generation,
+      inputs: request.inputs ?? null,
+      batches: request.batches,
+      originSize
+    })
+  );
+
+  const images = groupsByExpansion.reduce(
+    (total, groups) =>
+      total +
+      groups.reduce(
+        (groupTotal, group) =>
+          groupTotal + group.rows.reduce((sum, row) => sum + Math.max(1, row.generation.imageCount), 0),
+        0
+      ),
+    0
+  );
 
   const rows = await db().transaction(async (transaction) => {
-    await lockUser(request.userId, transaction);
-    await assertCapacity(request.userId, batches * perBatch, transaction);
+    await lockProject(request.projectId, transaction);
+    await assertCapacity(request.projectId, images, transaction);
 
     const inserted = [];
 
-    for (let index = 0; index < batches; index++) {
-      const row = await insertJob(
-        {
-          userId: request.userId,
-          label,
-          batchId,
-          batchIndex: request.batch?.index ?? index + 1,
-          batchSize: request.batch?.size ?? batches,
-          prompt: request.prompt,
-          composedPrompt: composed,
-          generation: request.generation,
-          // Edits are per-asset and meaningless for a fresh generation.
-          processing: { ...withDefaults(request.processing), edits: [] },
-          folder: request.folder,
-          template: request.template ?? null,
-          rerunOf: request.rerunOf ?? null
-        },
-        transaction
-      );
+    for (const [expansionIndex, expansion] of expansions.entries()) {
+      const groups = groupsByExpansion[expansionIndex];
+      const label =
+        request.label?.trim() || expansion.label || expansion.prompt.body.trim().slice(0, 60) || "untitled";
 
-      // Enqueued in the same transaction, so there is no window where a job
-      // row exists that nothing will ever pick up, and none where the queue
-      // references a row that was rolled back.
-      const queueJobId = await dispatchJob(row.id, transaction);
-      if (queueJobId) await setQueueJobId(row.id, queueJobId, transaction);
+      for (const group of groups) {
+        const batchId =
+          request.batch?.id ??
+          (expansions.length > 1 || groups.length > 1 || group.rows.length > 1
+            ? crypto.randomUUID()
+            : null);
 
-      inserted.push(row);
+        for (const planned of group.rows) {
+          const prompt = promptForJob(expansion.prompt, planned.inputs);
+          const row = await insertJob(
+            {
+              projectId: request.projectId,
+              userId: request.userId,
+              providerKeyId: request.providerKeyId,
+              status: planned.status,
+              label,
+              batchId,
+              batchIndex: request.batch?.index ?? planned.batchIndex,
+              batchSize: request.batch?.size ?? planned.batchSize,
+              prompt,
+              composedPrompt: composePrompt(prompt),
+              generation: planned.generation,
+              processing: processingForJob(
+                withDefaults(request.processing),
+                planned.inputs,
+                snapRequestSize(planned.generation.size, planned.generation.model)
+              ),
+              folder: request.folder,
+              inputs: planned.inputs,
+              sequencePlan: request.sequencePlan ?? null,
+              rerunOf: request.rerunOf ?? null
+            },
+            transaction
+          );
+
+          if (planned.dispatch) {
+            const queueJobId = await dispatchJob(row.id, transaction);
+            if (queueJobId) await setQueueJobId(row.id, queueJobId, transaction);
+          }
+
+          inserted.push(row);
+        }
+      }
     }
 
     return inserted;

@@ -7,10 +7,10 @@ import {
   basename,
   exportKey,
   paletteKey,
+  projectPrefix,
   sourceKey,
   templateKey,
-  thumbKey,
-  uniqueKey
+  thumbKey
 } from "@/storage/keys";
 import { ObjectNotFoundError, assertSafeKey } from "@/storage/types";
 import { buildThumbnail } from "@/server/thumbnails";
@@ -44,36 +44,41 @@ describe("assertSafeKey", () => {
 
 describe("key layout", () => {
   it("puts each kind of object under its own prefix", () => {
-    expect(sourceKey("a.png")).toBe("sources/a.png");
-    expect(thumbKey("a")).toBe("thumbs/a.webp");
-    expect(templateKey("t.png")).toBe("templates/t.png");
-    expect(paletteKey("p.png")).toBe("palettes/p.png");
-    expect(exportKey("props", "a.png")).toBe("exports/props/a.png");
-    expect(exportKey("", "a.png")).toBe("exports/a.png");
+    expect(sourceKey("p1", "a1")).toBe("p/p1/sources/a1.png");
+    expect(thumbKey("p1", "a1")).toBe("p/p1/thumbs/a1.webp");
+    expect(templateKey("p1", "t1")).toBe("p/p1/templates/t1.png");
+    expect(paletteKey("p1", "pal1")).toBe("p/p1/palettes/pal1");
+    expect(exportKey("p1", "props", "mygame_001")).toBe("p/p1/exports/props/mygame_001.png");
+    expect(exportKey("p1", "", "mygame_001")).toBe("p/p1/exports/mygame_001.png");
+  });
+
+  /**
+   * A tenant is one prefix, which is what makes deleting a project a single
+   * prefix delete rather than a walk over five key shapes.
+   */
+  it("keeps every key for a project under that project's prefix", () => {
+    const prefix = projectPrefix("p1");
+
+    for (const key of [
+      sourceKey("p1", "a1"),
+      thumbKey("p1", "a1"),
+      templateKey("p1", "t1"),
+      paletteKey("p1", "pal1"),
+      exportKey("p1", "props", "s")
+    ]) {
+      expect(key.startsWith(`${prefix}/`)).toBe(true);
+    }
+
+    expect(sourceKey("p2", "a1").startsWith(`${prefix}/`)).toBe(false);
+  });
+
+  it("gives two projects different keys for the same id", () => {
+    expect(templateKey("p1", "t1")).not.toBe(templateKey("p2", "t1"));
   });
 
   it("reads the filename back off a key", () => {
-    expect(basename("sources/a.png")).toBe("a.png");
+    expect(basename("p/p1/sources/a.png")).toBe("a.png");
     expect(basename("a.png")).toBe("a.png");
-  });
-});
-
-describe("uniqueKey", () => {
-  it("returns the key untouched when it is free", async () => {
-    expect(await uniqueKey("sources/a.png", async () => false)).toBe("sources/a.png");
-  });
-
-  it("suffixes before the extension, not after", async () => {
-    const taken = new Set(["sources/a.png", "sources/a_2.png"]);
-
-    expect(await uniqueKey("sources/a.png", async (key) => taken.has(key))).toBe(
-      "sources/a_3.png"
-    );
-  });
-
-  it("handles a name with no extension", async () => {
-    const taken = new Set(["sources/a"]);
-    expect(await uniqueKey("sources/a", async (key) => taken.has(key))).toBe("sources/a_2");
   });
 });
 

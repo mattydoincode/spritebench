@@ -1,0 +1,12 @@
+---
+description: Product idea backlog lives in ideas.md — read it when asked about ideas or what to build next
+alwaysApply: true
+---
+
+# Ideas
+
+Product thoughts live in `ideas.md` at the repo root. Not a schedule and not
+work to start unless asked.
+
+When the user mentions ideas, the backlog, future features, or "what should we
+build", read that file first. Add to it when they want something captured.

@@ -26,9 +26,9 @@ exports[`applyPipeline golden output > sprite-1.png > cutout, despeckle, erode, 
 
 exports[`applyPipeline golden output > sprite-1.png > defaults 1`] = `
 {
-  "description": "cutout skipped, border is 100% transparent already · trim 192x189 to 85x163 · 33x64 dominantColor · snap alpha",
-  "sha256": "9fef6d2311974694",
-  "size": "33x64",
+  "description": "cutout skipped, border is 100% transparent already · trim 192x189 to 85x163 · snap alpha",
+  "sha256": "4711176006e7b2df",
+  "size": "85x163",
 }
 `;
 
@@ -114,9 +114,9 @@ exports[`applyPipeline golden output > sprite-2.png > cutout, despeckle, erode, 
 
 exports[`applyPipeline golden output > sprite-2.png > defaults 1`] = `
 {
-  "description": "cutout skipped, border is 100% transparent already · trim 192x93 to 78x81 · 62x64 dominantColor · snap alpha",
-  "sha256": "b914a2ac8924b9d7",
-  "size": "62x64",
+  "description": "cutout skipped, border is 100% transparent already · trim 192x93 to 78x81 · snap alpha",
+  "sha256": "7b192caa23066fcb",
+  "size": "78x81",
 }
 `;
 
@@ -202,9 +202,9 @@ exports[`applyPipeline golden output > sprite-3.png > cutout, despeckle, erode, 
 
 exports[`applyPipeline golden output > sprite-3.png > defaults 1`] = `
 {
-  "description": "cutout skipped, border is 100% transparent already · trim 192x189 to 80x138 · 37x64 dominantColor · snap alpha",
-  "sha256": "2e124c4122b40e08",
-  "size": "37x64",
+  "description": "cutout skipped, border is 100% transparent already · trim 192x189 to 80x138 · snap alpha",
+  "sha256": "8db60955cb60a55c",
+  "size": "80x138",
 }
 `;
 

@@ -1,56 +1,44 @@
 /**
  * Storage key layout. Every key is a forward-slash path relative to the bucket
- * root. Keys stay flat and predictable so a driver swap is a no-op.
+ * root, and every key starts with the project it belongs to -- so a tenant is
+ * one prefix, and deleting a project is one prefix delete.
+ *
+ * Keys are derived from ids, never from names. A name-derived key has to be
+ * probed for collisions before use (a HEAD request per attempt) and still
+ * collides across tenants; an id-derived key is known-free the moment the row
+ * exists. Names are display data and live in the Yjs document.
  */
 
-export const SOURCES = "sources";
-export const THUMBS = "thumbs";
-export const TEMPLATES = "templates";
-export const PALETTES = "palettes";
-export const EXPORTS = "exports";
-
-export function sourceKey(file: string): string {
-  return `${SOURCES}/${file}`;
+export function projectPrefix(projectId: string): string {
+  return `p/${projectId}`;
 }
 
-export function thumbKey(assetId: string): string {
-  return `${THUMBS}/${assetId}.webp`;
+export function sourceKey(projectId: string, assetId: string): string {
+  return `${projectPrefix(projectId)}/sources/${assetId}.png`;
 }
 
-export function templateKey(file: string): string {
-  return `${TEMPLATES}/${file}`;
+export function thumbKey(projectId: string, assetId: string): string {
+  return `${projectPrefix(projectId)}/thumbs/${assetId}.webp`;
 }
 
-export function paletteKey(file: string): string {
-  return `${PALETTES}/${file}`;
+export function templateKey(projectId: string, templateId: string): string {
+  return `${projectPrefix(projectId)}/templates/${templateId}.png`;
 }
 
-export function exportKey(folder: string, file: string): string {
-  return folder.length > 0 ? `${EXPORTS}/${folder}/${file}` : `${EXPORTS}/${file}`;
+export function paletteKey(projectId: string, paletteId: string): string {
+  return `${projectPrefix(projectId)}/palettes/${paletteId}`;
+}
+
+/**
+ * Exports are the one place a name reaches storage, because the point of an
+ * export is a file someone can find. `stem` must already be sanitized --
+ * `exportStem` in `src/shared/naming.ts` is what produces it.
+ */
+export function exportKey(projectId: string, folder: string, stem: string): string {
+  const dir = folder.length > 0 ? `${folder}/` : "";
+  return `${projectPrefix(projectId)}/exports/${dir}${stem}.png`;
 }
 
 export function basename(key: string): string {
   return key.slice(key.lastIndexOf("/") + 1);
-}
-
-/** Appends `_2`, `_3`, ... until `taken` reports the key as free. */
-export async function uniqueKey(
-  key: string,
-  taken: (candidate: string) => Promise<boolean>
-): Promise<string> {
-  if (!(await taken(key))) return key;
-
-  const slash = key.lastIndexOf("/");
-  const dir = slash >= 0 ? key.slice(0, slash + 1) : "";
-  const name = key.slice(slash + 1);
-  const dot = name.lastIndexOf(".");
-  const stem = dot > 0 ? name.slice(0, dot) : name;
-  const extension = dot > 0 ? name.slice(dot) : "";
-
-  for (let counter = 2; counter < 10_000; counter++) {
-    const candidate = `${dir}${stem}_${counter}${extension}`;
-    if (!(await taken(candidate))) return candidate;
-  }
-
-  throw new Error(`could not find a free key for ${key}`);
 }

@@ -1,3 +1,4 @@
+import { samplePixelConstraintGrid } from "./pixelMask";
 import type { RgbaImage, Size } from "./types";
 
 export interface CropEdit {
@@ -8,7 +9,18 @@ export interface CropEdit {
   height: number;
 }
 
-export type ImageEdit = CropEdit;
+export interface PixelGridEdit {
+  kind: "pixelGrid";
+  columns: number;
+  rows: number;
+  canvasWidth?: number;
+  canvasHeight?: number;
+  originX?: number;
+  originY?: number;
+  cell?: number;
+}
+
+export type ImageEdit = CropEdit | PixelGridEdit;
 
 export function cropImage(image: RgbaImage, rect: CropEdit): RgbaImage {
   const width = Math.max(1, Math.round(rect.width));
@@ -44,12 +56,17 @@ export function applyEdits(image: RgbaImage, edits: ImageEdit[]): RgbaImage {
 
   for (const edit of edits) {
     if (edit.kind === "crop") working = cropImage(working, edit);
+    if (edit.kind === "pixelGrid") working = samplePixelConstraintGrid(working, edit);
   }
 
   return working;
 }
 
 export function describeEdit(edit: ImageEdit): string {
+  if (edit.kind === "pixelGrid") {
+    return `pixel grid ${Math.max(1, Math.round(edit.columns))}x${Math.max(1, Math.round(edit.rows))}`;
+  }
+
   return `crop ${Math.round(edit.width)}x${Math.round(edit.height)} at ${Math.round(
     edit.x
   )},${Math.round(edit.y)}`;
@@ -60,13 +77,18 @@ export function describeEdits(edits: ImageEdit[]): string {
 }
 
 export function editedSize(size: Size, edits: ImageEdit[]): Size {
-  return edits.reduce(
-    (current, edit) =>
-      edit.kind === "crop"
-        ? { width: Math.max(1, Math.round(edit.width)), height: Math.max(1, Math.round(edit.height)) }
-        : current,
-    size
-  );
+  return edits.reduce((current, edit) => {
+    if (edit.kind === "crop") {
+      return { width: Math.max(1, Math.round(edit.width)), height: Math.max(1, Math.round(edit.height)) };
+    }
+    if (edit.kind === "pixelGrid") {
+      return {
+        width: Math.max(1, Math.round(edit.columns)),
+        height: Math.max(1, Math.round(edit.rows))
+      };
+    }
+    return current;
+  }, size);
 }
 
 export function normalizeEdits(value: unknown): ImageEdit[] {
@@ -75,7 +97,34 @@ export function normalizeEdits(value: unknown): ImageEdit[] {
   return value.flatMap((entry): ImageEdit[] => {
     if (!entry || typeof entry !== "object") return [];
 
-    const candidate = entry as Partial<CropEdit>;
+    const candidate = entry as Partial<CropEdit> | Partial<PixelGridEdit>;
+    if (candidate.kind === "pixelGrid") {
+      const columns = Math.round(Number(candidate.columns));
+      const rows = Math.round(Number(candidate.rows));
+      if (!Number.isFinite(columns) || !Number.isFinite(rows) || columns < 1 || rows < 1) return [];
+
+      const canvasWidth = Math.round(Number(candidate.canvasWidth));
+      const canvasHeight = Math.round(Number(candidate.canvasHeight));
+      const originX = Math.round(Number(candidate.originX));
+      const originY = Math.round(Number(candidate.originY));
+      const cell = Math.round(Number(candidate.cell));
+      const hasLayout =
+        Number.isFinite(canvasWidth) &&
+        canvasWidth > 0 &&
+        Number.isFinite(canvasHeight) &&
+        canvasHeight > 0 &&
+        Number.isFinite(originX) &&
+        Number.isFinite(originY) &&
+        Number.isFinite(cell) &&
+        cell > 0;
+
+      return [
+        hasLayout
+          ? { kind: "pixelGrid", columns, rows, canvasWidth, canvasHeight, originX, originY, cell }
+          : { kind: "pixelGrid", columns, rows }
+      ];
+    }
+
     if (candidate.kind !== "crop") return [];
 
     const width = Math.round(Number(candidate.width));

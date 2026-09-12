@@ -4,7 +4,7 @@
  *
  * Point DATABASE_URL at a throwaway database -- it writes and deletes rows:
  *
- *   DATABASE_URL=postgres://.../art_studio_verify \
+ *   DATABASE_URL=postgres://.../spritebench_verify \
  *   SPRITEBENCH_DATA_DIR=/tmp/art-verify tsx scripts/verify-lifecycle.ts
  */
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -17,7 +17,8 @@ import {
   softDeleteAsset
 } from "@/db/repo/assets";
 import { insertJob } from "@/db/repo/jobs";
-import { currentUserId } from "@/db/repo/users";
+import { createProject } from "@/db/repo/projects";
+import { users } from "@/db/schema";
 import { recordUsage, usageSince } from "@/db/repo/usage";
 import { assertCapacity, QuotaExceededError } from "@/server/generation";
 import { freeAssetLimit, maxImagesPerRequest } from "@/server/config";
@@ -38,34 +39,35 @@ function check(label: string, condition: boolean, detail = ""): void {
 }
 
 async function seedAsset(
+  projectId: string,
   userId: string,
-  name: string,
+  label: string,
   expiresAt: Date | null
 ): Promise<{ id: string; source: string; thumb: string }> {
-  const source = sourceKey(`${name}.png`);
-  const thumb = thumbKey(name);
+  const id = crypto.randomUUID();
+  const source = sourceKey(projectId, id);
+  const thumb = thumbKey(projectId, id);
 
   await storage().put(source, PNG, { contentType: "image/png" });
   await storage().put(thumb, WEBP, { contentType: "image/webp" });
 
   const asset = await insertAsset({
-    userId,
-    name,
-    folder: "verify",
-    tags: [],
+    id,
+    projectId,
+    createdByUserId: userId,
     sourceKey: source,
     thumbKey: thumb,
     sourceWidth: 1024,
     sourceHeight: 1024,
     byteSize: PNG.length,
-    prompt: { prefix: "", body: name, suffix: "" },
-    composedPrompt: name,
+    prompt: { prefix: "", body: label, suffix: "" },
+    composedPrompt: label,
     generation: DEFAULT_GENERATION,
     processing: DEFAULT_PROCESSING,
-    processingDescription: "",
     rerunOf: null,
     jobId: null,
-    template: null,
+    inputs: null,
+    sequencePlan: null,
     usage: null,
     elapsedSeconds: null,
     expiresAt
@@ -79,17 +81,25 @@ async function main(): Promise<void> {
   await migrate(db(), { migrationsFolder: "./drizzle" });
   check("migrations run from empty", true);
 
-  const userId = await currentUserId();
-  check("seeded user exists", Boolean(userId));
-  check("starts with no assets", (await countAssets(userId)) === 0);
+  const [user] = await db()
+    .insert(users)
+    .values({ email: `verify+${Date.now()}@example.com`, name: "Verify" })
+    .returning();
+
+  const userId = user.id;
+  const project = await createProject(userId, "verify");
+  const projectId = project.id;
+
+  check("scratch user and project exist", Boolean(userId && projectId));
+  check("starts with no assets", (await countAssets(projectId)) === 0);
 
   // --- roll-off ---------------------------------------------------------
   const yesterday = new Date(Date.now() - 86_400_000);
   const nextMonth = new Date(Date.now() + 30 * 86_400_000);
 
-  const expired = await seedAsset(userId, "expired", yesterday);
-  const fresh = await seedAsset(userId, "fresh", nextMonth);
-  const forever = await seedAsset(userId, "no-expiry", null);
+  const expired = await seedAsset(projectId, userId, "expired", yesterday);
+  const fresh = await seedAsset(projectId, userId, "fresh", nextMonth);
+  const forever = await seedAsset(projectId, userId, "no-expiry", null);
 
   const due = await listExpiredSources(500);
   check("only the past-due asset is listed", due.length === 1 && due[0].id === expired.id, `${due.length} due`);
@@ -101,7 +111,7 @@ async function main(): Promise<void> {
   check("fresh source is untouched", await storage().exists(fresh.source));
   check("source with no expiry is untouched", await storage().exists(forever.source));
 
-  check("rolled-off row survives", (await countAssets(userId)) === 3);
+  check("rolled-off row survives", (await countAssets(projectId)) === 3);
 
   const rolled = await listExpiredSources(500);
   check("a second run finds nothing", rolled.length === 0);
@@ -119,19 +129,21 @@ async function main(): Promise<void> {
     );
   }
 
-  await assertCapacity(userId, headroom);
+  await assertCapacity(projectId, headroom);
   check("quota allows exactly the remaining headroom", true, `${headroom} of ${limit}`);
 
-  const over = await assertCapacity(userId, headroom + 1)
+  const over = await assertCapacity(projectId, headroom + 1)
     .then(() => null)
     .catch((error: unknown) => error);
   check("quota refuses one image too many", over instanceof QuotaExceededError);
 
   // A rolled-off asset still counts: the row and thumbnail remain.
-  check("rolled-off assets still count against the quota", (await countAssets(userId)) === 3);
+  check("rolled-off assets still count against the quota", (await countAssets(projectId)) === 3);
 
   await insertJob({
+    projectId,
     userId,
+    providerKeyId: null,
     label: "pending",
     batchId: null,
     batchIndex: 1,
@@ -141,11 +153,12 @@ async function main(): Promise<void> {
     generation: { ...DEFAULT_GENERATION, imageCount: 5 },
     processing: DEFAULT_PROCESSING,
     folder: "verify",
-    template: null,
+    inputs: null,
+    sequencePlan: null,
     rerunOf: null
   });
 
-  const withPending = await assertCapacity(userId, headroom)
+  const withPending = await assertCapacity(projectId, headroom)
     .then(() => null)
     .catch((error: unknown) => error);
   check(
@@ -155,11 +168,12 @@ async function main(): Promise<void> {
   );
 
   // --- soft delete ------------------------------------------------------
-  await softDeleteAsset(userId, fresh.id);
-  check("a deleted asset frees quota", (await countAssets(userId)) === 2);
+  await softDeleteAsset(projectId, fresh.id);
+  check("a deleted asset frees quota", (await countAssets(projectId)) === 2);
 
   // --- metering ---------------------------------------------------------
   await recordUsage({
+    projectId,
     userId,
     jobId: null,
     provider: "openai",
@@ -172,6 +186,7 @@ async function main(): Promise<void> {
     elapsedSeconds: 4.5
   });
   await recordUsage({
+    projectId,
     userId,
     jobId: null,
     provider: "openai",
@@ -184,7 +199,7 @@ async function main(): Promise<void> {
     elapsedSeconds: 2
   });
 
-  const totals = await usageSince(userId, new Date(Date.now() - 3600_000));
+  const totals = await usageSince(projectId, new Date(Date.now() - 3600_000));
   check("usage rows are counted", totals.calls === 2, `${totals.calls} calls`);
   check("usage images are summed", totals.images === 3, `${totals.images} images`);
   check("usage tokens are summed", totals.totalTokens === 450, `${totals.totalTokens} tokens`);

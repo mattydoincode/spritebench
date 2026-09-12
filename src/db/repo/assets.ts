@@ -1,35 +1,32 @@
 import { and, asc, count, desc, eq, isNotNull, isNull, lt, sum } from "drizzle-orm";
-import { withDefaults, type ProcessingSettings } from "@/core/settings";
+import { withDefaults } from "@/core/settings";
 import { DEFAULT_GENERATION, type AssetRecord } from "@/shared/model";
-import { basename } from "@/storage/keys";
 import { db, type Transaction } from "../index";
 import { assets, type AssetRow } from "../schema";
+import { nextAssetSeq } from "./projects";
 
 /**
- * Rows carry storage keys; the wire shape the client already understands
- * carries filenames. `sourceFile` stays in the payload for compatibility and
- * is derived from the key.
+ * The wire shape carries provenance only. Everything editable -- name,
+ * folder, tags, live processing settings -- comes from the project's Yjs
+ * document instead, and the client merges the two with `resolveAsset`.
  */
 export function toAssetRecord(row: AssetRow): AssetRecord {
   return {
     id: row.id,
-    name: row.name,
-    folder: row.folder,
-    tags: row.tags ?? [],
+    seq: row.seq,
     createdAt: row.createdAt.toISOString(),
-    sourceFile: row.sourceKey ? basename(row.sourceKey) : "",
+    createdByUserId: row.createdByUserId,
     sourceWidth: row.sourceWidth,
     sourceHeight: row.sourceHeight,
     prompt: row.prompt,
     composedPrompt: row.composedPrompt,
     generation: { ...DEFAULT_GENERATION, ...(row.generation ?? {}) },
-    processing: withDefaults(row.processing),
-    processingDescription: row.processingDescription,
-    approvedPath: row.exportKey,
-    approvedName: row.exportName,
+    generatedWith: withDefaults(row.processing),
+    exportPath: row.exportKey,
     rerunOf: row.rerunOf,
     jobId: row.jobId,
-    template: row.template ?? null,
+    inputs: row.inputs ?? null,
+    sequencePlan: row.sequencePlan ?? null,
     usage: row.usage ?? null,
     elapsedSeconds: row.elapsedSeconds,
     hasSource: row.sourceKey !== null,
@@ -37,36 +34,36 @@ export function toAssetRecord(row: AssetRow): AssetRecord {
   };
 }
 
-export async function listAssets(userId: string): Promise<AssetRecord[]> {
+export async function listAssets(projectId: string): Promise<AssetRecord[]> {
   const rows = await db()
     .select()
     .from(assets)
-    .where(and(eq(assets.userId, userId), isNull(assets.deletedAt)))
-    .orderBy(asc(assets.createdAt));
+    .where(and(eq(assets.projectId, projectId), isNull(assets.deletedAt)))
+    .orderBy(asc(assets.seq));
 
   return rows.map(toAssetRecord);
 }
 
-export async function getAsset(userId: string, id: string): Promise<AssetRecord | null> {
-  const row = await getAssetRow(userId, id);
+export async function getAsset(projectId: string, id: string): Promise<AssetRecord | null> {
+  const row = await getAssetRow(projectId, id);
   return row ? toAssetRecord(row) : null;
 }
 
-export async function getAssetRow(userId: string, id: string): Promise<AssetRow | null> {
+export async function getAssetRow(projectId: string, id: string): Promise<AssetRow | null> {
   const [row] = await db()
     .select()
     .from(assets)
-    .where(and(eq(assets.id, id), eq(assets.userId, userId), isNull(assets.deletedAt)))
+    .where(and(eq(assets.id, id), eq(assets.projectId, projectId), isNull(assets.deletedAt)))
     .limit(1);
 
   return row ?? null;
 }
 
 export interface NewAsset {
-  userId: string;
-  name: string;
-  folder: string;
-  tags?: string[];
+  projectId: string;
+  createdByUserId: string | null;
+  /** Pre-allocated so the caller can name the storage key before inserting. */
+  id: string;
   sourceKey: string;
   thumbKey?: string | null;
   sourceWidth: number;
@@ -75,28 +72,37 @@ export interface NewAsset {
   prompt: AssetRecord["prompt"];
   composedPrompt: string;
   generation: AssetRecord["generation"];
-  processing: AssetRecord["processing"];
-  processingDescription?: string;
+  processing: AssetRecord["generatedWith"];
   rerunOf?: string | null;
   jobId?: string | null;
-  template?: AssetRecord["template"];
+  inputs?: AssetRecord["inputs"];
+  sequencePlan?: AssetRecord["sequencePlan"];
   usage?: AssetRecord["usage"];
   elapsedSeconds?: number | null;
   expiresAt?: Date | null;
-  createdAt?: Date;
 }
 
+/**
+ * Inserts an asset, allocating its per-project number as it goes.
+ *
+ * The id comes from the caller because the storage key is derived from it, so
+ * the bytes have to be written before the row exists. A crash in between
+ * leaves an orphaned object, which the nightly prune sweeps; the reverse
+ * order would leave a row pointing at nothing, which the UI cannot render.
+ */
 export async function insertAsset(
   input: NewAsset,
   connection: Transaction = db()
 ): Promise<AssetRecord> {
+  const seq = await nextAssetSeq(input.projectId, connection);
+
   const [row] = await connection
     .insert(assets)
     .values({
-      userId: input.userId,
-      name: input.name,
-      folder: input.folder,
-      tags: input.tags ?? [],
+      id: input.id,
+      projectId: input.projectId,
+      createdByUserId: input.createdByUserId,
+      seq,
       sourceKey: input.sourceKey,
       thumbKey: input.thumbKey ?? null,
       sourceWidth: input.sourceWidth,
@@ -106,90 +112,77 @@ export async function insertAsset(
       composedPrompt: input.composedPrompt,
       generation: input.generation,
       processing: input.processing,
-      processingDescription: input.processingDescription ?? "",
       rerunOf: input.rerunOf ?? null,
       jobId: input.jobId ?? null,
-      template: input.template ?? null,
+      inputs: input.inputs ?? null,
+      sequencePlan: input.sequencePlan ?? null,
       usage: input.usage ?? null,
       elapsedSeconds: input.elapsedSeconds ?? null,
-      expiresAt: input.expiresAt ?? null,
-      ...(input.createdAt ? { createdAt: input.createdAt } : {})
+      expiresAt: input.expiresAt ?? null
     })
     .returning();
 
   return toAssetRecord(row);
 }
 
-export type AssetPatch = Partial<
-  Pick<AssetRecord, "name" | "folder" | "tags" | "processingDescription">
-> & {
-  /** Merged over the stored settings, then run through `withDefaults`. */
-  processing?: Partial<ProcessingSettings>;
-  exportKey?: string | null;
-  exportName?: string | null;
-  thumbKey?: string | null;
-};
-
-export async function updateAsset(
-  userId: string,
+/** Records where an approved export landed. The only mutable field left. */
+export async function setAssetExport(
+  projectId: string,
   id: string,
-  patch: AssetPatch
+  exportKey: string
 ): Promise<AssetRecord | null> {
   const [row] = await db()
     .update(assets)
-    .set({
-      ...(patch.name !== undefined ? { name: patch.name } : {}),
-      ...(patch.folder !== undefined ? { folder: patch.folder } : {}),
-      ...(patch.tags !== undefined ? { tags: patch.tags } : {}),
-      ...(patch.processing !== undefined ? { processing: withDefaults(patch.processing) } : {}),
-      ...(patch.processingDescription !== undefined
-        ? { processingDescription: patch.processingDescription }
-        : {}),
-      ...(patch.exportKey !== undefined ? { exportKey: patch.exportKey } : {}),
-      ...(patch.exportName !== undefined ? { exportName: patch.exportName } : {}),
-      ...(patch.thumbKey !== undefined ? { thumbKey: patch.thumbKey } : {}),
-      updatedAt: new Date()
-    })
-    .where(and(eq(assets.id, id), eq(assets.userId, userId), isNull(assets.deletedAt)))
+    .set({ exportKey, updatedAt: new Date() })
+    .where(and(eq(assets.id, id), eq(assets.projectId, projectId), isNull(assets.deletedAt)))
     .returning();
 
   return row ? toAssetRecord(row) : null;
 }
 
 /** Soft delete, so an "undo" toast and support recovery both stay possible. */
-export async function softDeleteAsset(userId: string, id: string): Promise<AssetRow | null> {
+export async function softDeleteAsset(projectId: string, id: string): Promise<AssetRow | null> {
   const [row] = await db()
     .update(assets)
     .set({ deletedAt: new Date(), updatedAt: new Date() })
-    .where(and(eq(assets.id, id), eq(assets.userId, userId), isNull(assets.deletedAt)))
+    .where(and(eq(assets.id, id), eq(assets.projectId, projectId), isNull(assets.deletedAt)))
     .returning();
 
   return row ?? null;
 }
 
-export async function countAssets(userId: string, connection: Transaction = db()): Promise<number> {
+export async function countAssets(
+  projectId: string,
+  connection: Transaction = db()
+): Promise<number> {
   const [row] = await connection
     .select({ value: count() })
     .from(assets)
-    .where(and(eq(assets.userId, userId), isNull(assets.deletedAt)));
+    .where(and(eq(assets.projectId, projectId), isNull(assets.deletedAt)));
 
   return Number(row?.value ?? 0);
 }
 
-export async function storedBytes(userId: string): Promise<number> {
+export async function storedBytes(projectId: string): Promise<number> {
   const [row] = await db()
     .select({ value: sum(assets.byteSize) })
     .from(assets)
-    .where(and(eq(assets.userId, userId), isNull(assets.deletedAt), isNotNull(assets.sourceKey)));
+    .where(
+      and(
+        eq(assets.projectId, projectId),
+        isNull(assets.deletedAt),
+        isNotNull(assets.sourceKey)
+      )
+    );
 
   return Number(row?.value ?? 0);
 }
 
-export async function listSourceKeys(userId: string): Promise<string[]> {
+export async function listSourceKeys(projectId: string): Promise<string[]> {
   const rows = await db()
     .select({ sourceKey: assets.sourceKey })
     .from(assets)
-    .where(and(eq(assets.userId, userId), isNotNull(assets.sourceKey)));
+    .where(and(eq(assets.projectId, projectId), isNotNull(assets.sourceKey)));
 
   return rows.map((row) => row.sourceKey).filter((key): key is string => key !== null);
 }
@@ -201,7 +194,9 @@ export async function listExpiredSources(
   const rows = await db()
     .select({ id: assets.id, sourceKey: assets.sourceKey })
     .from(assets)
-    .where(and(isNotNull(assets.sourceKey), isNotNull(assets.expiresAt), lt(assets.expiresAt, new Date())))
+    .where(
+      and(isNotNull(assets.sourceKey), isNotNull(assets.expiresAt), lt(assets.expiresAt, new Date()))
+    )
     .orderBy(asc(assets.expiresAt))
     .limit(limit);
 

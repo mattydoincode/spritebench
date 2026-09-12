@@ -1,4 +1,4 @@
-# Spritebench
+# SpriteBench
 
 A pipeline for generating, processing, and exporting game art — prompt an image
 model, cut the background, quantize to a palette, downsample to a sprite, and
@@ -60,7 +60,7 @@ filesystem that disappears on the next deploy. The cost is that a fresh clone
 needs `.env.local`:
 
 ```
-DATABASE_URL=postgres://art:art@localhost:5433/art_studio
+DATABASE_URL=postgres://spritebench:spritebench@localhost:5433/spritebench
 DATABASE_SSL=disable
 STORAGE_DRIVER=local
 SPRITEBENCH_DATA_DIR=./data-pg
@@ -75,7 +75,7 @@ resolved before doing anything:
 
 ```
 [env] .env .env.local
-      db      art@localhost/art_studio
+      db      spritebench@localhost/spritebench
       storage local dir=./data-pg
 ```
 

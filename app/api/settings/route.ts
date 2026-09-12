@@ -1,26 +1,28 @@
 import { NextResponse } from "next/server";
 import { listProviderKeys } from "@/db/repo/providerKeys";
-import { currentUserId, readSettings, writeSettings } from "@/db/repo/users";
+import { readSettings, writeSettings } from "@/db/repo/users";
+import { requireUser } from "@/server/session";
 import { parseBody, settingsPatchSchema, withValidation } from "@/server/validation";
 
 export const dynamic = "force-dynamic";
 
+/** Per-user, not per-project: these are one person's working preferences. */
 export async function GET() {
-  const userId = await currentUserId();
-  const [settings, keys] = await Promise.all([readSettings(userId), listProviderKeys(userId)]);
+  return withValidation(async () => {
+    const userId = await requireUser();
+    const [settings, providerKeys] = await Promise.all([
+      readSettings(userId),
+      listProviderKeys(userId)
+    ]);
 
-  return NextResponse.json({
-    settings,
-    providerKeys: keys,
-    // Retained for the existing client, which only checks whether a key exists.
-    hasApiKey: keys.some((key) => key.provider === "openai")
+    return NextResponse.json({ settings, providerKeys });
   });
 }
 
 export async function PUT(request: Request) {
   return withValidation(async () => {
+    const userId = await requireUser();
     const body = await parseBody(request, settingsPatchSchema);
-    const userId = await currentUserId();
 
     return NextResponse.json({ settings: await writeSettings(userId, body) });
   });

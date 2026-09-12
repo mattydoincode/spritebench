@@ -1,86 +1,55 @@
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { DEFAULT_PROCESSING, withDefaults, type ProcessingSettings } from "@/core/settings";
+import { clampGeneration } from "@/providers/models";
 import {
   DEFAULT_GENERATION,
   type GenerationParams,
   type StudioSettings
 } from "@/shared/model";
-import { SINGLE_USER_EMAIL, singleUserId } from "@/server/config";
-import { db, type Transaction } from "../index";
-import { userSettings, users, type UserSettingsRow } from "../schema";
-
-export const DEFAULT_PROMPT_PREFIX =
-  "You are generating game art from a 100% top-down perspective. This means we'll only see the tops of objects, never the sides. Schematic like, no perspective, perfectly top down.";
-
-export const DEFAULT_PROMPT_SUFFIX = "Transparent Background";
-
-let cachedUserId: string | null = null;
+import { db } from "../index";
+import { projectMembers, users, userSettings, type UserSettingsRow } from "../schema";
+import { createProject } from "./projects";
 
 /**
- * Takes a row lock on the user for the rest of the transaction.
+ * Gives an account the two things the auth adapter knows nothing about:
+ * default settings, and somewhere to put images.
  *
- * Quota checks read a count and then act on it, which is only sound if
- * concurrent requests for the same user take turns. Two tabs pressing Create
- * at once would otherwise both see room for one more batch.
+ * Takes only a user id, and reads the name itself, because the id has to be
+ * the one in our `users` table. The obvious place to call this from is the
+ * `signIn` callback, and that is wrong: `signIn` is the authorization gate
+ * and runs *before* the adapter writes the row, so the id it carries is the
+ * provider's subject rather than ours. Inserting against that fails the
+ * foreign key, and Auth.js reports a throwing `signIn` callback as
+ * `AccessDenied` -- a permission error for what is really a load-order bug.
+ *
+ * Idempotent, so both the `createUser` event and a later request can call it
+ * without coordinating.
  */
-export async function lockUser(userId: string, connection: Transaction): Promise<void> {
-  await connection.execute(sql`select 1 from ${users} where ${users.id} = ${userId} for update`);
-}
+export async function ensureBootstrap(userId: string): Promise<void> {
+  await ensureSettings(userId);
 
-/**
- * Resolves the acting user. Until auth exists this is a single row, created on
- * first use so a fresh database boots without a seed step.
- */
-export async function currentUserId(): Promise<string> {
-  if (cachedUserId) return cachedUserId;
+  const [membership] = await db()
+    .select({ projectId: projectMembers.projectId })
+    .from(projectMembers)
+    .where(eq(projectMembers.userId, userId))
+    .limit(1);
 
-  const configured = singleUserId();
-  if (configured) {
-    cachedUserId = configured;
-    await ensureSettings(configured);
-    return configured;
-  }
+  if (membership) return;
 
-  const existing = await db().select({ id: users.id }).from(users).limit(1);
-  if (existing.length > 0) {
-    cachedUserId = existing[0].id;
-    await ensureSettings(cachedUserId);
-    return cachedUserId;
-  }
+  const [user] = await db()
+    .select({ name: users.name })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
 
-  const [created] = await db()
-    .insert(users)
-    .values({ email: SINGLE_USER_EMAIL, name: "Local" })
-    .onConflictDoNothing()
-    .returning({ id: users.id });
-
-  if (created) {
-    cachedUserId = created.id;
-  } else {
-    const [found] = await db()
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.email, SINGLE_USER_EMAIL))
-      .limit(1);
-    cachedUserId = found.id;
-  }
-
-  await ensureSettings(cachedUserId);
-  return cachedUserId;
-}
-
-export function resetUserCache(): void {
-  cachedUserId = null;
+  const first = (user?.name ?? "").trim().split(/\s+/)[0];
+  await createProject(userId, first ? `${first}'s project` : "My project");
 }
 
 function toStudioSettings(row: UserSettingsRow): StudioSettings {
   return {
-    promptPrefix: row.promptPrefix,
-    promptSuffix: row.promptSuffix,
-    assetSlug: row.assetSlug,
-    generation: { ...DEFAULT_GENERATION, ...(row.generation ?? {}) },
+    generation: clampGeneration({ ...DEFAULT_GENERATION, ...(row.generation ?? {}) }),
     processing: withDefaults(row.processing),
-    activeCompositionId: row.activeCompositionId,
     cutTemplateBackgroundOnPaste: row.cutTemplateBackgroundOnPaste,
     templateCutTolerance: row.templateCutTolerance
   };
@@ -99,9 +68,6 @@ async function ensureSettings(userId: string): Promise<UserSettingsRow> {
     .insert(userSettings)
     .values({
       userId,
-      promptPrefix: DEFAULT_PROMPT_PREFIX,
-      promptSuffix: DEFAULT_PROMPT_SUFFIX,
-      assetSlug: "prop",
       generation: DEFAULT_GENERATION,
       processing: DEFAULT_PROCESSING
     })
@@ -137,19 +103,15 @@ export async function writeSettings(
   const next: StudioSettings = {
     ...current,
     ...patch,
-    generation: { ...current.generation, ...(patch.generation ?? {}) },
+    generation: clampGeneration({ ...current.generation, ...(patch.generation ?? {}) }),
     processing: withDefaults({ ...current.processing, ...(patch.processing ?? {}) })
   };
 
   const [updated] = await db()
     .update(userSettings)
     .set({
-      promptPrefix: next.promptPrefix,
-      promptSuffix: next.promptSuffix,
-      assetSlug: next.assetSlug,
       generation: next.generation,
       processing: next.processing,
-      activeCompositionId: next.activeCompositionId,
       cutTemplateBackgroundOnPaste: next.cutTemplateBackgroundOnPaste,
       templateCutTolerance: next.templateCutTolerance,
       updatedAt: new Date()

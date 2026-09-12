@@ -1,13 +1,19 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useStudio } from "@/client/store";
+import { useAsset } from "@/client/stores/assets";
+import { useDoc } from "@/client/stores/doc";
+import { useServer } from "@/client/stores/server";
+import { useUi } from "@/client/stores/ui";
 import { applyEdits, describeEdit, type CropEdit } from "@/core/edits";
-import type { RgbaImage } from "@/core/types";
+import type { ImageEdit } from "@/core/edits";
+import { insetRect } from "@/shared/sequence";
+import { fitCamera, type ViewCamera } from "@/core/viewport";
+import { ImageViewport, ViewControls, viewPoint } from "./ImageViewport";
+import { useSource } from "./SourceCanvas";
 import { Button, Divider, Field, NumberInput, Modal, Row } from "./ui";
 
-const VIEW_WIDTH = 620;
-const VIEW_HEIGHT = 460;
+const VIEW = { width: 620, height: 460 };
 
 interface Selection {
   x: number;
@@ -16,115 +22,105 @@ interface Selection {
   height: number;
 }
 
-async function loadSource(url: string): Promise<RgbaImage> {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`could not load the source image (${response.status})`);
-
-  const bitmap = await createImageBitmap(await response.blob());
-  const canvas = document.createElement("canvas");
-  canvas.width = bitmap.width;
-  canvas.height = bitmap.height;
-
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) throw new Error("no 2d canvas context available");
-
-  context.drawImage(bitmap, 0, 0);
-  bitmap.close();
-
-  const frame = context.getImageData(0, 0, canvas.width, canvas.height);
-  return { width: frame.width, height: frame.height, data: frame.data };
-}
-
-function fitScale(image: RgbaImage): number {
-  const raw = Math.min(VIEW_WIDTH / image.width, VIEW_HEIGHT / image.height);
-  return raw >= 1 ? Math.floor(raw) : raw;
-}
-
-function ImageCanvas({ image, scale }: { image: RgbaImage; scale: number }) {
-  const ref = useRef<HTMLCanvasElement | null>(null);
-
-  useEffect(() => {
-    const canvas = ref.current;
-    if (!canvas) return;
-
-    canvas.width = image.width;
-    canvas.height = image.height;
-
-    const context = canvas.getContext("2d");
-    if (!context) return;
-
-    context.clearRect(0, 0, image.width, image.height);
-    context.putImageData(new ImageData(image.data, image.width, image.height), 0, 0);
-  }, [image]);
-
-  return (
-    <canvas
-      ref={ref}
-      className="pointer-events-none block"
-      style={{
-        width: Math.round(image.width * scale),
-        height: Math.round(image.height * scale),
-        imageRendering: scale >= 1 ? "pixelated" : "auto"
-      }}
-    />
-  );
-}
-
 export function ImageEditModal() {
-  const assetId = useStudio((state) => state.editingAssetId);
-  const asset = useStudio((state) =>
-    state.assets.find((entry) => entry.id === state.editingAssetId)
-  );
-  const store = useStudio.getState;
+  const assetId = useUi((state) => state.editingAssetId);
+  const editingFrame = useUi((state) => state.editingFrame);
+  const projectId = useServer((state) => state.project?.id ?? null);
+  const asset = useAsset(assetId);
 
-  const [source, setSource] = useState<RgbaImage | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { source, error } = useSource(projectId, assetId);
   const [selection, setSelection] = useState<Selection | null>(null);
+  const [undone, setUndone] = useState<ImageEdit[]>([]);
+  const [camera, setCamera] = useState<ViewCamera>({ zoom: 1, panX: 0, panY: 0 });
 
   const dragRef = useRef<{ originX: number; originY: number } | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
 
+  const sequence =
+    asset?.sequences.find((entry) => entry.id === editingFrame?.sequenceId) ?? null;
+  const frameIndex = sequence
+    ? sequence.frames.findIndex((entry) => entry.id === editingFrame?.frameId)
+    : -1;
+  const frame = frameIndex >= 0 ? sequence!.frames[frameIndex] : null;
+
+  // In frame mode the whole tool is scoped to one cell: the base image is the
+  // frame's rectangle out of the sheet, and edits land on the frame rather
+  // than on the asset, so cropping frame 3 leaves the other fifteen alone.
+  const edits = frame ? frame.edits : asset?.processing.edits ?? [];
+
+  const setEdits = (next: ImageEdit[]) => {
+    if (!asset) return;
+
+    if (frame && sequence) {
+      useDoc.getState().patchSequenceFrame(asset.id, sequence.id, frame.id, { edits: next });
+    } else {
+      useDoc.getState().patchProcessing(asset.id, { edits: next });
+    }
+  };
+
+  // Clearing the drag box when the target changes: keeping a rectangle drawn
+  // over frame 2 while looking at frame 3 would apply it to the wrong one.
+  useEffect(() => {
+    setSelection(null);
+    setUndone([]);
+  }, [assetId, frame?.id]);
+
+  const base = useMemo(() => {
+    if (!source) return null;
+    if (!frame || !sequence) return source;
+
+    return applyEdits(source, [{ kind: "crop", ...insetRect(frame.rect, sequence.inset) }]);
+  }, [source, frame, sequence]);
+
+  const edited = useMemo(
+    () => (base ? applyEdits(base, edits) : null),
+    [base, edits]
+  );
+
+  useEffect(() => {
+    if (!edited) return;
+    setCamera(fitCamera(edited, VIEW));
+  }, [edited?.width, edited?.height, assetId, frame?.id]);
+
   useEffect(() => {
     if (!assetId) return;
 
-    let cancelled = false;
-    setSource(null);
-    setError(null);
-    setSelection(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "z") return;
 
-    loadSource(`/api/assets/${assetId}/source`)
-      .then((image) => {
-        if (!cancelled) setSource(image);
-      })
-      .catch((reason: Error) => {
-        if (!cancelled) setError(reason.message);
-      });
+      event.preventDefault();
+      if (event.shiftKey) {
+        const last = undone[undone.length - 1];
+        if (!last) return;
+        setUndone((was) => was.slice(0, -1));
+        setEdits([...edits, last]);
+        return;
+      }
 
-    return () => {
-      cancelled = true;
+      const last = edits[edits.length - 1];
+      if (!last) return;
+      setUndone((was) => [...was, last]);
+      setEdits(edits.slice(0, -1));
     };
-  }, [assetId]);
 
-  const edits = asset?.processing.edits ?? [];
-
-  const edited = useMemo(
-    () => (source ? applyEdits(source, edits) : null),
-    [source, edits]
-  );
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [assetId, edits, undone]);
 
   if (!asset || !assetId) return null;
-
-  const scale = edited ? fitScale(edited) : 1;
 
   const toImagePoint = (clientX: number, clientY: number) => {
     const surface = surfaceRef.current;
     if (!surface || !edited) return { x: 0, y: 0 };
 
-    const bounds = surface.getBoundingClientRect();
+    const point = viewPoint(surface, camera, clientX, clientY);
 
     return {
-      x: Math.max(0, Math.min(edited.width, Math.round((clientX - bounds.left) / scale))),
-      y: Math.max(0, Math.min(edited.height, Math.round((clientY - bounds.top) / scale)))
+      x: Math.max(0, Math.min(edited.width, Math.round(point.imageX))),
+      y: Math.max(0, Math.min(edited.height, Math.round(point.imageY)))
     };
   };
 
@@ -168,36 +164,67 @@ export function ImageEditModal() {
       height: selection.height
     };
 
-    store().setEdits(asset.id, [...edits, crop]);
+    setEdits([...edits, crop]);
+    setUndone([]);
     setSelection(null);
+  };
+
+  const undoEdit = () => {
+    const last = edits[edits.length - 1];
+    if (!last) return;
+    setUndone((was) => [...was, last]);
+    setEdits(edits.slice(0, -1));
+  };
+
+  const redoEdit = () => {
+    const last = undone[undone.length - 1];
+    if (!last) return;
+    setUndone((was) => was.slice(0, -1));
+    setEdits([...edits, last]);
   };
 
   return (
     <Modal
-      title={`Edit ${asset.name}`}
-      onClose={() => store().closeImageEditor()}
+      title={
+        frame && sequence
+          ? `Edit ${asset.label} \u00b7 ${sequence.name} frame ${frameIndex + 1}`
+          : `Edit ${asset.label}`
+      }
+      onClose={() => useUi.getState().closeImageEditor()}
       width={980}
       footer={
         <Row className="justify-between">
           <span className="text-[10px] text-slate-500">
-            Edits sit on top of the raw generated PNG, so every instance in the playground and the
-            exported file follow along. Nothing here touches the original file.
+            {frame
+              ? "Wheel zooms, Space/Alt-drag pans, drag a box to crop. Edits apply to this frame alone."
+              : "Wheel zooms, Space/Alt-drag pans. Edits sit on the raw PNG — the original file is untouched."}
           </span>
 
           <Row>
             <Button
               disabled={edits.length === 0}
-              title="Remove the last edit"
-              onClick={() => store().setEdits(asset.id, edits.slice(0, -1))}
+              title="Remove the last edit (Ctrl+Z)"
+              onClick={undoEdit}
             >
               undo
+            </Button>
+
+            <Button
+              disabled={undone.length === 0}
+              title="Restore the last undone edit (Ctrl+Shift+Z)"
+              onClick={redoEdit}
+            >
+              redo
             </Button>
 
             <Button
               variant="danger"
               disabled={edits.length === 0}
               title="Drop every edit and go back to the raw image"
-              onClick={() => store().setEdits(asset.id, [])}
+              onClick={() => {
+                setEdits([]);
+                setUndone([]);
+              }}
             >
               reset
             </Button>
@@ -205,19 +232,43 @@ export function ImageEditModal() {
         </Row>
       }
     >
+      {sequence && sequence.frames.length > 1 ? (
+        <Row className="mb-2 overflow-x-auto pb-1">
+          <span className="shrink-0 text-[10px] uppercase tracking-wide text-slate-400">
+            frame
+          </span>
+
+          {sequence.frames.map((entry, index) => (
+            <Button
+              key={entry.id}
+              variant={entry.id === frame?.id ? "primary" : "ghost"}
+              title={entry.edits.length > 0 ? `${entry.edits.length} edits` : "no edits"}
+              onClick={() => useUi.getState().openFrameEditor(asset.id, sequence.id, entry.id)}
+            >
+              {index + 1}
+              {entry.edits.length > 0 ? "*" : ""}
+            </Button>
+          ))}
+        </Row>
+      ) : null}
+
       <div className="flex gap-3">
         <div className="min-w-0 flex-1">
-          <div className="checkerboard flex min-h-[300px] items-center justify-center rounded p-3">
+          <div className="flex min-h-[300px] items-center justify-center">
             {error ? <span className="text-[11px] text-rose-300">{error}</span> : null}
             {!error && !edited ? (
               <span className="text-[11px] text-slate-500">loading image...</span>
             ) : null}
 
             {edited ? (
-              <div
-                ref={surfaceRef}
-                className="relative cursor-crosshair overflow-hidden"
-                style={{ touchAction: "none" }}
+              <ImageViewport
+                image={edited}
+                width={VIEW.width}
+                height={VIEW.height}
+                camera={camera}
+                onCameraChange={setCamera}
+                cursor="crosshair"
+                viewportRef={surfaceRef}
                 onPointerDown={(event) => {
                   event.preventDefault();
                   const point = toImagePoint(event.clientX, event.clientY);
@@ -237,35 +288,34 @@ export function ImageEditModal() {
                   dragRef.current = null;
                 }}
               >
-                <ImageCanvas image={edited} scale={scale} />
-
                 {selection && selection.width > 0 && selection.height > 0 ? (
                   <div
                     className="pointer-events-none absolute border border-[var(--color-accent)]"
                     style={{
-                      left: Math.round(selection.x * scale),
-                      top: Math.round(selection.y * scale),
-                      width: Math.round(selection.width * scale),
-                      height: Math.round(selection.height * scale),
+                      left: selection.x * camera.zoom,
+                      top: selection.y * camera.zoom,
+                      width: selection.width * camera.zoom,
+                      height: selection.height * camera.zoom,
                       boxShadow: "0 0 0 9999px rgba(0,0,0,0.55)"
                     }}
                   />
                 ) : null}
-              </div>
+              </ImageViewport>
             ) : null}
           </div>
 
+          {edited ? <ViewControls image={edited} view={VIEW} camera={camera} onCameraChange={setCamera} /> : null}
+
           <p className="mt-2 text-[10px] text-slate-500">
-            {source && edited ? (
+            {base && edited ? (
               <>
-                raw {source.width}x{source.height}
+                {frame ? "frame" : "raw"} {base.width}x{base.height}
                 {edits.length > 0 ? (
                   <>
                     {" "}
                     &rarr; edited {edited.width}x{edited.height}
                   </>
                 ) : null}
-                {scale !== 1 ? ` \u00b7 shown at ${scale >= 1 ? `${scale}x` : `${Math.round(scale * 100)}%`}` : ""}
               </>
             ) : null}
           </p>
@@ -350,7 +400,7 @@ export function ImageEditModal() {
 
           {edits.length === 0 ? (
             <p className="text-[10px] text-slate-500">
-              No edits yet. The playground shows the raw image.
+              No edits yet. The scene shows the raw image.
             </p>
           ) : (
             <ol className="flex flex-col gap-1">

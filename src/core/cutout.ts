@@ -73,6 +73,40 @@ export function transparentBorderFraction(image: RgbaImage, alphaThreshold: numb
   return samples === 0 ? 0 : clear / samples;
 }
 
+/**
+ * Gemini's layout plate uses #fff for "draw here" and #000 for unused canvas,
+ * and the model often copies both into the result. Those two extremes are
+ * treated as one void so a black frame can reach leftover white, without
+ * letting a white background eat a dark sprite (white does not walk into
+ * black).
+ */
+const GUIDE_VOID = 4;
+
+function isNearBlack(r: number, g: number, b: number): boolean {
+  return r <= GUIDE_VOID && g <= GUIDE_VOID && b <= GUIDE_VOID;
+}
+
+function isNearWhite(r: number, g: number, b: number): boolean {
+  return r >= 255 - GUIDE_VOID && g >= 255 - GUIDE_VOID && b >= 255 - GUIDE_VOID;
+}
+
+function isGuideVoid(r: number, g: number, b: number): boolean {
+  return isNearBlack(r, g, b) || isNearWhite(r, g, b);
+}
+
+function canWalkGuideVoid(
+  fromR: number,
+  fromG: number,
+  fromB: number,
+  r: number,
+  g: number,
+  b: number
+): boolean {
+  if (!isGuideVoid(fromR, fromG, fromB) || !isGuideVoid(r, g, b)) return false;
+  if (isNearBlack(r, g, b)) return isNearBlack(fromR, fromG, fromB);
+  return true;
+}
+
 function edgeFloodFill(
   image: RgbaImage,
   tolerance: number,
@@ -102,20 +136,28 @@ function edgeFloodFill(
     const g = data[i + 1];
     const b = data[i + 2];
 
-    if (normalizedDistance(r, g, b, reference.r, reference.g, reference.b) > tolerance) return;
-    if (normalizedDistance(r, g, b, fromR, fromG, fromB) > localTolerance) return;
+    const matchesReference =
+      normalizedDistance(r, g, b, reference.r, reference.g, reference.b) <= tolerance &&
+      normalizedDistance(r, g, b, fromR, fromG, fromB) <= localTolerance;
+
+    if (!matchesReference && !canWalkGuideVoid(fromR, fromG, fromB, r, g, b)) return;
 
     visited[pixel] = 1;
     stack[top++] = pixel;
   };
 
+  const seed = (x: number, y: number) => {
+    const i = (y * width + x) * 4;
+    tryPush(x, y, data[i], data[i + 1], data[i + 2]);
+  };
+
   for (let x = 0; x < width; x++) {
-    tryPush(x, 0, reference.r, reference.g, reference.b);
-    tryPush(x, height - 1, reference.r, reference.g, reference.b);
+    seed(x, 0);
+    seed(x, height - 1);
   }
   for (let y = 0; y < height; y++) {
-    tryPush(0, y, reference.r, reference.g, reference.b);
-    tryPush(width - 1, y, reference.r, reference.g, reference.b);
+    seed(0, y);
+    seed(width - 1, y);
   }
 
   while (top > 0) {

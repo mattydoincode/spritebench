@@ -21,7 +21,34 @@ body {
   color: #d7dee7;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: 13px;
+}
+
+/**
+ * The studio is the only screen that must never scroll: it is a fixed
+ * viewport whose panels each manage their own overflow, and a scrolling body
+ * underneath them turns a drag near the edge into a page pan. Everywhere else
+ * is an ordinary document and scrolls normally.
+ */
+.studio-root {
   overflow: hidden;
+}
+
+/**
+ * The pages outside the studio. 13px is right when you are packing a
+ * generation panel into 320 pixels; it is needlessly cramped for a list of
+ * projects, so the outer pages set a friendlier base and everything inside
+ * them inherits it.
+ */
+.page-shell {
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.page-shell input,
+.page-shell select,
+.page-shell textarea {
+  padding: 7px 9px;
+  border-radius: 6px;
 }
 
 input,
@@ -32,8 +59,12 @@ button {
   color: inherit;
 }
 
-input[type="number"],
-input[type="text"],
+/**
+ * Every text-entry control, by exclusion rather than by listing the types we
+ * happen to use. Enumerating them meant a `type="password"` silently rendered
+ * as an unstyled 20-character box.
+ */
+input:not([type="range"], [type="checkbox"], [type="radio"], [type="file"]),
 select,
 textarea {
   background: var(--color-ink-800);
@@ -43,8 +74,7 @@ textarea {
   width: 100%;
 }
 
-input[type="number"]:focus,
-input[type="text"]:focus,
+input:not([type="range"], [type="checkbox"], [type="radio"], [type="file"]):focus,
 select:focus,
 textarea:focus {
   outline: 1px solid var(--color-accent-dim);

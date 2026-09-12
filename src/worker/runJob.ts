@@ -1,4 +1,4 @@
-import { describeSettings } from "@/core/describe";
+import crypto from "node:crypto";
 import { insertAsset } from "@/db/repo/assets";
 import {
   appendAssetId,
@@ -7,24 +7,28 @@ import {
   markProviderCallComplete,
   requeueJob
 } from "@/db/repo/jobs";
-import { getPaletteColors } from "@/db/repo/palettes";
-import { resolveProviderKey } from "@/db/repo/providerKeys";
-import { readSettings } from "@/db/repo/users";
+import { applyLoopFollowUp } from "@/server/loop";
+import { loopOutcome } from "@/shared/loop";
+import { keyForJob } from "@/db/repo/providerKeys";
 import { recordUsage } from "@/db/repo/usage";
 import { providerForModel } from "@/providers";
 import { isRetryable, type ProviderResult } from "@/providers/types";
 import { assetRetentionDays } from "@/server/config";
-import { sanitizeName, timestamp } from "@/server/naming";
 import { readPngSize } from "@/server/png";
-import { buildEditInputs } from "@/server/template";
+import { editInputsForJob, jobUsesEdit } from "@/server/template";
 import { buildThumbnail } from "@/server/thumbnails";
-import { basename, sourceKey, thumbKey, uniqueKey } from "@/storage/keys";
+import { sourceKey, thumbKey } from "@/storage/keys";
 import { storage } from "@/storage";
 import type { JobRow } from "@/db/schema";
 
+/**
+ * The key chosen at enqueue is gone by the time the job runs -- the owner
+ * deleted it, or it failed to decrypt. Not retryable: waiting will not bring
+ * it back.
+ */
 export class MissingProviderKeyError extends Error {
   constructor(provider: string) {
-    super(`no ${provider} API key is configured. Add one in settings.`);
+    super(`the ${provider} key this job was going to bill no longer exists`);
     this.name = "MissingProviderKeyError";
   }
 }
@@ -33,10 +37,15 @@ async function callProvider(job: JobRow, apiKey: string): Promise<ProviderResult
   const provider = providerForModel(job.generation.model);
   const request = { apiKey, prompt: job.composedPrompt, generation: job.generation };
 
-  if (job.template?.useAsMask) {
-    const inputs = await buildEditInputs(job.userId, job.template, job.generation);
-
-    return provider.edit({ ...request, base: inputs.base, mask: inputs.mask, size: inputs.size });
+  const inputs = await editInputsForJob(job.projectId, job);
+  if (inputs) {
+    return provider.edit({
+      ...request,
+      base: inputs.base,
+      mask: inputs.mask,
+      plate: inputs.plate ?? null,
+      size: inputs.size
+    });
   }
 
   return provider.generate(request);
@@ -46,9 +55,9 @@ async function callProvider(job: JobRow, apiKey: string): Promise<ProviderResult
  * Runs one generation job.
  *
  * Ordering matters for correctness: the provider call is the only step that
- * costs the user money, so everything that can fail cheaply happens before it,
- * and the source bytes plus the asset row are committed before the job is
- * marked done. A crash between the call and the commit used to mean a paid
+ * costs money, so everything that can fail cheaply happens before it, and the
+ * source bytes plus the asset row are committed before the job is marked
+ * done. A crash between the call and the commit used to mean a paid
  * generation with nothing to show for it.
  *
  * Claiming the row is what makes a duplicate delivery safe: only one caller
@@ -57,7 +66,7 @@ async function callProvider(job: JobRow, apiKey: string): Promise<ProviderResult
  *
  * Returns whether the queue should retry. Retrying a deterministic failure --
  * a content-policy refusal, a bad key, an unknown model -- just spends the
- * user's quota on the same answer, so only transient failures come back.
+ * project's quota on the same answer, so only transient failures come back.
  */
 export async function runJob(jobId: string, attemptsLeft = 0): Promise<{ retry: boolean }> {
   const job = await claimJob(jobId);
@@ -66,6 +75,8 @@ export async function runJob(jobId: string, attemptsLeft = 0): Promise<{ retry: 
     console.log(`[worker] job ${jobId} is not claimable, skipping`);
     return { retry: false };
   }
+
+  let follow: ReturnType<typeof loopOutcome> | null = null;
 
   if (job.providerCallCompletedAt) {
     // A retry of a job that already paid for its images. Never call again; the
@@ -83,104 +94,121 @@ export async function runJob(jobId: string, attemptsLeft = 0): Promise<{ retry: 
           }
     );
 
-    return { retry: false };
-  }
+    follow = loopOutcome(job.assetIds?.[0] ?? null);
+  } else {
+    try {
+      // The model decides the provider, which decides the key. Hardcoding one
+      // provider here is what made adding a second model a code change.
+      const provider = providerForModel(job.generation.model);
+      const apiKey = await keyForJob(job.providerKeyId, provider.id);
+      if (!apiKey) throw new MissingProviderKeyError(provider.id);
 
-  try {
-    const apiKey = await resolveProviderKey(job.userId, "openai");
-    if (!apiKey) throw new MissingProviderKeyError("openai");
+      const result = await callProvider(job, apiKey);
+      await markProviderCallComplete(jobId);
 
-    const settings = await readSettings(job.userId);
-    const slug = sanitizeName(settings.assetSlug, "asset");
-    const stamp = timestamp();
-
-    const result = await callProvider(job, apiKey);
-    await markProviderCallComplete(jobId);
-
-    await recordUsage({
-      userId: job.userId,
-      jobId,
-      provider: "openai",
-      model: job.generation.model,
-      operation: job.template?.useAsMask ? "edit" : "generate",
-      images: result.images.length,
-      totalTokens: result.usage?.totalTokens ?? 0,
-      inputTokens: result.usage?.inputTokens ?? 0,
-      outputTokens: result.usage?.outputTokens ?? 0,
-      elapsedSeconds: result.elapsedSeconds
-    });
-
-    const palette = job.processing.paletteFile
-      ? await getPaletteColors(job.userId, job.processing.paletteFile)
-      : [];
-
-    const expiresAt = new Date(Date.now() + assetRetentionDays() * 86_400_000);
-
-    for (const [index, bytes] of result.images.entries()) {
-      const key = await uniqueKey(sourceKey(`${slug}_${stamp}_${index + 1}.png`), (candidate) =>
-        storage().exists(candidate)
-      );
-
-      await storage().put(key, bytes, {
-        contentType: "image/png",
-        cacheControl: "public, max-age=31536000, immutable"
+      await recordUsage({
+        projectId: job.projectId,
+        userId: job.userId,
+        jobId,
+        provider: provider.id,
+        model: job.generation.model,
+        operation: jobUsesEdit(job) ? "edit" : "generate",
+        images: result.images.length,
+        totalTokens: result.usage?.totalTokens ?? 0,
+        inputTokens: result.usage?.inputTokens ?? 0,
+        outputTokens: result.usage?.outputTokens ?? 0,
+        elapsedSeconds: result.elapsedSeconds
       });
 
-      const name = basename(key).slice(0, -".png".length);
-      const size = readPngSize(bytes);
+      const expiresAt = new Date(Date.now() + assetRetentionDays() * 86_400_000);
+      let firstAssetId: string | null = null;
 
-      // A failed thumbnail must not lose the image the user just paid for.
-      let thumb: string | null = null;
-      try {
-        await storage().put(thumbKey(name), await buildThumbnail(bytes), {
-          contentType: "image/webp",
+      for (const bytes of result.images) {
+        // The id names the storage key, so it is minted before the write. No
+        // probing for a free key: an id nobody has used cannot collide, which
+        // is one fewer HEAD request per image than the old name-derived keys.
+        const assetId = crypto.randomUUID();
+        const key = sourceKey(job.projectId, assetId);
+
+        await storage().put(key, bytes, {
+          contentType: "image/png",
           cacheControl: "public, max-age=31536000, immutable"
         });
-        thumb = thumbKey(name);
-      } catch (error) {
-        console.error(`[worker] could not build a thumbnail for ${key}`, error);
+
+        const size = readPngSize(bytes);
+
+        // A failed thumbnail must not lose the image the project just paid for.
+        let thumb: string | null = null;
+        try {
+          const key = thumbKey(job.projectId, assetId);
+          await storage().put(key, await buildThumbnail(bytes), {
+            contentType: "image/webp",
+            cacheControl: "public, max-age=31536000, immutable"
+          });
+          thumb = key;
+        } catch (error) {
+          console.error(`[worker] could not build a thumbnail for ${key}`, error);
+        }
+
+        const asset = await insertAsset({
+          id: assetId,
+          projectId: job.projectId,
+          createdByUserId: job.userId,
+          sourceKey: key,
+          thumbKey: thumb,
+          sourceWidth: size.width,
+          sourceHeight: size.height,
+          byteSize: bytes.length,
+          prompt: job.prompt,
+          composedPrompt: job.composedPrompt,
+          generation: job.generation,
+          processing: job.processing,
+          rerunOf: job.rerunOf,
+          jobId,
+          inputs: job.inputs,
+          sequencePlan: job.sequencePlan,
+          usage: result.usage,
+          elapsedSeconds: result.elapsedSeconds,
+          expiresAt
+        });
+
+        await appendAssetId(jobId, asset.id);
+        firstAssetId ??= asset.id;
       }
 
-      const asset = await insertAsset({
-        userId: job.userId,
-        name,
-        folder: job.folder,
-        tags: [],
-        sourceKey: key,
-        thumbKey: thumb,
-        sourceWidth: size.width,
-        sourceHeight: size.height,
-        byteSize: bytes.length,
-        prompt: job.prompt,
-        composedPrompt: job.composedPrompt,
-        generation: job.generation,
-        processing: job.processing,
-        processingDescription: describeSettings(job.processing, size, palette),
-        rerunOf: job.rerunOf,
-        jobId,
-        template: job.template,
-        usage: result.usage,
-        elapsedSeconds: result.elapsedSeconds,
-        expiresAt
-      });
+      if (!firstAssetId) {
+        await finishJob(jobId, {
+          status: "error",
+          error: "the provider returned no images",
+          resolvedSize: result.resolvedSize
+        });
+        follow = loopOutcome(null);
+      } else {
+        await finishJob(jobId, { status: "done", resolvedSize: result.resolvedSize });
+        follow = loopOutcome(firstAssetId);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const retry = isRetryable(error) && attemptsLeft > 0;
 
-      await appendAssetId(jobId, asset.id);
-    }
+      if (retry) {
+        console.warn(`[worker] job ${jobId} failed transiently, will retry: ${message}`);
+        await requeueJob(jobId, message);
+        return { retry: true };
+      }
 
-    await finishJob(jobId, { status: "done", resolvedSize: result.resolvedSize });
-
-    return { retry: false };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const retry = isRetryable(error) && attemptsLeft > 0;
-
-    if (retry) {
-      console.warn(`[worker] job ${jobId} failed transiently, will retry: ${message}`);
-      await requeueJob(jobId, message);
-    } else {
       await finishJob(jobId, { status: "error", error: message });
+      follow = loopOutcome(null);
     }
-
-    return { retry };
   }
+
+  if (follow) {
+    try {
+      await applyLoopFollowUp(job.projectId, job.batchId, job.inputs, follow);
+    } catch (error) {
+      console.error(`[worker] job ${jobId} settled but the next loop step could not start`, error);
+    }
+  }
+
+  return { retry: false };
 }

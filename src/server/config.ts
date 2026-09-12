@@ -1,13 +1,13 @@
-import { count, optional, str } from "./env";
+import { bool, count, optional, str } from "./env";
 
 /**
- * The single seeded user the app runs as until auth exists. Every query is
- * already scoped by this, so adding real sessions means replacing one function.
+ * Whether a signed-in user with no stored key may fall back to
+ * `OPENAI_API_KEY` / `GEMINI_API_KEY`. Convenient on one machine, a standing
+ * invitation to spend the operator's money once anyone can sign up, so it is
+ * opt-in and off in `.env`.
  */
-export const SINGLE_USER_EMAIL = "local@art-studio.invalid";
-
-export function singleUserId(): string | null {
-  return optional("SINGLE_USER_ID") ?? null;
+export function allowEnvProviderKey(): boolean {
+  return bool("ALLOW_ENV_PROVIDER_KEY");
 }
 
 /** Provider calls in flight at once, per worker process. */
@@ -57,6 +57,13 @@ const REQUIRED = ["DATABASE_URL", "ENCRYPTION_KEY"];
 const REQUIRED_FOR_R2 = ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"];
 
 /**
+ * Sign-in credentials. Only the web service needs them -- the worker never
+ * serves a request -- so demanding them there would fail a deploy over
+ * variables that component cannot use.
+ */
+const REQUIRED_FOR_WEB = ["AUTH_SECRET", "AUTH_GOOGLE_ID", "AUTH_GOOGLE_SECRET"];
+
+/**
  * Configuration that is missing or malformed, by name only -- values never
  * appear, so this is safe to log and to serve from `/api/health`.
  *
@@ -65,8 +72,9 @@ const REQUIRED_FOR_R2 = ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_
  * boots, serves pages and passes a health check, then fails the first time
  * someone saves a provider key, long after the deploy looked successful.
  */
-export function configProblems(): string[] {
+export function configProblems({ web = true }: { web?: boolean } = {}): string[] {
   const names = [...REQUIRED];
+  if (web) names.push(...REQUIRED_FOR_WEB);
   if (optional("STORAGE_DRIVER") === "r2") names.push(...REQUIRED_FOR_R2);
 
   const problems = names.filter((name) => !optional(name)).map((name) => `${name} is not set`);

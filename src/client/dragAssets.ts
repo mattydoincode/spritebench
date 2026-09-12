@@ -23,3 +23,29 @@ export function readAssetDrag(event: React.DragEvent): string[] {
     return [];
   }
 }
+
+export type TemplateDrop = { kind: "file"; file: File } | { kind: "asset"; assetId: string };
+
+export function isTemplateDrop(event: React.DragEvent): boolean {
+  return isAssetDrag(event) || event.dataTransfer.types.includes("Files");
+}
+
+/**
+ * Whether a drop zone should call preventDefault on dragover.
+ *
+ * Payload is not readable until drop — browsers empty getData during
+ * dragover — so this only looks at `types`. `assetsOnly` is the starting-
+ * image slot: files are refused, library assets are not.
+ */
+export function canAcceptTemplateDrop(types: readonly string[], assetsOnly = false): boolean {
+  if (types.includes(MIME)) return true;
+  return !assetsOnly && types.includes("Files");
+}
+
+export function readTemplateDrop(event: React.DragEvent): TemplateDrop | null {
+  const [assetId] = readAssetDrag(event);
+  if (assetId) return { kind: "asset", assetId };
+
+  const file = [...event.dataTransfer.files].find((entry) => entry.type.startsWith("image/"));
+  return file ? { kind: "file", file } : null;
+}

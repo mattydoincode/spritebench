@@ -9,6 +9,20 @@ export interface Size {
   height: number;
 }
 
+export interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface Inset {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
 export type ImageOrientation = "none" | "rotate90cw" | "rotate180" | "rotate90ccw";
 
 export type CutoutMode =

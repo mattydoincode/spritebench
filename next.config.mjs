@@ -4,6 +4,13 @@ const nextConfig = {
   serverExternalPackages: ["pngjs", "sharp", "pg", "pg-boss"],
 
   /**
+   * Lets a build run without fighting the dev server for `.next`. Sharing the
+   * directory makes `next build` fail with a bogus "Cannot find module for
+   * page" on whichever route it reads while dev rewrites the manifest.
+   */
+  distDir: process.env.NEXT_DIST_DIR || ".next",
+
+  /**
    * Sends www to the apex, so there is one canonical origin.
    *
    * This lives here because neither layer above it can do the job. App

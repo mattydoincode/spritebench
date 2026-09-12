@@ -7,12 +7,13 @@
  *   SPRITEBENCH_DATA_DIR=./data-pg R2_ENDPOINT=... R2_BUCKET=... \
  *   tsx scripts/mirror-storage.ts
  */
-import { EXPORTS, PALETTES, SOURCES, TEMPLATES, THUMBS } from "@/storage/keys";
 import { LocalFsStorage } from "@/storage/local";
 import { R2Storage } from "@/storage/r2";
 import { dataRoot } from "@/storage";
 
-const PREFIXES = [SOURCES, THUMBS, TEMPLATES, PALETTES, EXPORTS];
+// Everything is under one prefix now that keys are project-scoped, so there is
+// no per-kind list to keep in sync with `src/storage/keys.ts`.
+const PREFIXES = ["p"];
 
 const CONTENT_TYPES: Record<string, string> = {
   png: "image/png",

@@ -1,10 +1,11 @@
+import crypto from "node:crypto";
 import { parsePaletteText, uniqueOpaqueColors } from "@/core/palette";
 import type { Rgb } from "@/core/types";
 import {
   deletePalette as deletePaletteRow,
   getPaletteColors,
+  insertPalette,
   listPalettes as listPaletteRows,
-  upsertPalette,
   type PaletteInfo
 } from "@/db/repo/palettes";
 import { basename, paletteKey } from "@/storage/keys";
@@ -42,16 +43,16 @@ export function parsePalette(filename: string, bytes: Uint8Array): Rgb[] {
 }
 
 /** Colours come from the database, parsed once at upload time. */
-export async function loadPalette(userId: string, file: string): Promise<Rgb[]> {
-  return getPaletteColors(userId, basename(file));
+export async function loadPalette(projectId: string, paletteId: string): Promise<Rgb[]> {
+  return getPaletteColors(projectId, paletteId);
 }
 
-export async function listPalettes(userId: string): Promise<PaletteInfo[]> {
-  return listPaletteRows(userId);
+export async function listPalettes(projectId: string): Promise<PaletteInfo[]> {
+  return listPaletteRows(projectId);
 }
 
 export async function savePalette(
-  userId: string,
+  projectId: string,
   name: string,
   bytes: Uint8Array
 ): Promise<PaletteInfo> {
@@ -65,19 +66,23 @@ export async function savePalette(
     .replace(/[^a-zA-Z0-9-_ ]/g, "")
     .trim();
 
-  const filename = `${stem.length > 0 ? stem : "palette"}${extension}`;
+  const label = `${stem.length > 0 ? stem : "palette"}${extension}`;
 
-  const colors = parsePalette(filename, bytes);
+  const colors = parsePalette(label, bytes);
   if (colors.length === 0) throw new Error(`no colours could be read out of ${name}`);
 
-  await storage().put(paletteKey(filename), bytes, {
+  // The id names the object, so uploading the same filename twice yields two
+  // palettes rather than one silently replacing the other's bytes.
+  const id = crypto.randomUUID();
+
+  await storage().put(paletteKey(projectId, id), bytes, {
     contentType: extension === ".png" ? "image/png" : "text/plain"
   });
 
-  return upsertPalette(userId, filename, colors);
+  return insertPalette(projectId, id, label, colors);
 }
 
-export async function deletePalette(userId: string, file: string): Promise<void> {
-  const key = await deletePaletteRow(userId, basename(file));
+export async function deletePalette(projectId: string, paletteId: string): Promise<void> {
+  const key = await deletePaletteRow(projectId, paletteId);
   if (key) await storage().delete(key);
 }

@@ -12,6 +12,7 @@ import {
   snapLegacySize
 } from "@/core/size";
 import { MODEL_REGISTRY, snapRequestSize } from "@/providers/models";
+import { snapRatioRequest, snapRatioSize } from "@/providers/ratio";
 
 describe("snapFlexibleSize", () => {
   const inputs = [
@@ -121,13 +122,41 @@ describe("snapLegacySize", () => {
   });
 });
 
+describe("snapRatioSize", () => {
+  it("maps a square to 1K 1:1", () => {
+    expect(snapRatioRequest({ width: 1024, height: 1024 })).toEqual({
+      aspectRatio: "1:1",
+      imageSize: "1K",
+      size: { width: 1024, height: 1024 }
+    });
+  });
+
+  it("picks the closest aspect and bucket", () => {
+    expect(snapRatioRequest({ width: 1920, height: 1080 })).toEqual({
+      aspectRatio: "16:9",
+      imageSize: "2K",
+      size: { width: 2048, height: 1152 }
+    });
+    expect(snapRatioSize({ width: 900, height: 1600 })).toEqual({ width: 1152, height: 2048 });
+  });
+
+  it("is idempotent on its own output", () => {
+    const once = snapRatioSize({ width: 1600, height: 900 });
+    expect(snapRatioSize(once)).toEqual(once);
+  });
+});
+
 describe("snapRequestSize", () => {
   const requested = { width: 1920, height: 1088 };
 
   it("routes each model through the snapper its sizing mode calls for", () => {
     for (const model of MODEL_REGISTRY) {
       const expected =
-        model.sizing === "flexible" ? snapFlexibleSize(requested) : snapLegacySize(requested);
+        model.sizing === "flexible"
+          ? snapFlexibleSize(requested)
+          : model.sizing === "ratio"
+            ? snapRatioSize(requested)
+            : snapLegacySize(requested);
 
       expect(snapRequestSize(requested, model.id)).toEqual(expected);
     }
@@ -135,7 +164,7 @@ describe("snapRequestSize", () => {
 
   it("falls back to the default model for an unknown id", () => {
     expect(snapRequestSize(requested, "not-a-real-model")).toEqual(
-      snapRequestSize(requested, "gpt-image-2")
+      snapRequestSize(requested, "gpt-image-2.5-sunburst")
     );
   });
 });

@@ -3,7 +3,10 @@ import { db } from "../index";
 import { usageEvents } from "../schema";
 
 export interface NewUsageEvent {
-  userId: string;
+  /** Whose bill it lands on: the project's owner pays. */
+  projectId: string;
+  /** Who pressed the button. Null once that account is deleted. */
+  userId: string | null;
   jobId: string | null;
   provider: string;
   model: string;
@@ -24,7 +27,7 @@ export async function recordUsage(event: NewUsageEvent): Promise<void> {
 }
 
 export async function usageSince(
-  userId: string,
+  projectId: string,
   since: Date
 ): Promise<{ calls: number; images: number; totalTokens: number }> {
   const [row] = await db()
@@ -34,16 +37,16 @@ export async function usageSince(
       totalTokens: sql<number>`coalesce(sum(${usageEvents.totalTokens}), 0)::int`
     })
     .from(usageEvents)
-    .where(and(eq(usageEvents.userId, userId), gte(usageEvents.createdAt, since)));
+    .where(and(eq(usageEvents.projectId, projectId), gte(usageEvents.createdAt, since)));
 
   return row ?? { calls: 0, images: 0, totalTokens: 0 };
 }
 
-export async function recentUsage(userId: string, limit = 50) {
+export async function recentUsage(projectId: string, limit = 50) {
   return db()
     .select()
     .from(usageEvents)
-    .where(eq(usageEvents.userId, userId))
+    .where(eq(usageEvents.projectId, projectId))
     .orderBy(desc(usageEvents.createdAt))
     .limit(limit);
 }

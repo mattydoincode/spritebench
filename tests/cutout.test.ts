@@ -76,6 +76,25 @@ describe("cut, edgeFloodFill", () => {
 
     expect(countOpaque(corners)).toBe(countOpaque(wholeEdge));
   });
+
+  it("clears a black Gemini frame and leftover white connected to it", () => {
+    const image = framed(24, BLACK, WHITE, 4);
+    const subject: Rgb = { r: 40, g: 160, b: 70 };
+    for (let y = 8; y < 16; y++) {
+      for (let x = 8; x < 16; x++) {
+        const i = (y * 24 + x) * 4;
+        image.data[i] = subject.r;
+        image.data[i + 1] = subject.g;
+        image.data[i + 2] = subject.b;
+      }
+    }
+
+    const result = cut(image, "edgeFloodFill", MAGENTA, 0.2, 0.1, 0.85, false);
+
+    expect(alphaAt(result, 0, 0)).toBe(0);
+    expect(alphaAt(result, 5, 5)).toBe(0);
+    expect(alphaAt(result, 12, 12)).toBe(255);
+  });
 });
 
 describe("cut, other modes", () => {

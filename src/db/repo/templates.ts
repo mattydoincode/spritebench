@@ -3,58 +3,70 @@ import { templateKey } from "@/storage/keys";
 import { db } from "../index";
 import { templates, type TemplateRow } from "../schema";
 
+/** `id` addresses the template; `name` is only ever displayed. */
 export interface TemplateInfo {
-  file: string;
+  id: string;
+  name: string;
   width: number;
   height: number;
 }
 
 export function toTemplateInfo(row: TemplateRow): TemplateInfo {
-  return { file: row.filename, width: row.width, height: row.height };
+  return { id: row.id, name: row.filename, width: row.width, height: row.height };
 }
 
-export async function listTemplates(userId: string): Promise<TemplateInfo[]> {
+export async function listTemplates(projectId: string): Promise<TemplateInfo[]> {
   const rows = await db()
     .select()
     .from(templates)
-    .where(eq(templates.userId, userId))
+    .where(eq(templates.projectId, projectId))
     .orderBy(desc(templates.createdAt));
 
   return rows.map(toTemplateInfo);
 }
 
-export async function getTemplate(userId: string, filename: string): Promise<TemplateRow | null> {
+export async function getTemplate(
+  projectId: string,
+  templateId: string
+): Promise<TemplateRow | null> {
   const [row] = await db()
     .select()
     .from(templates)
-    .where(and(eq(templates.userId, userId), eq(templates.filename, filename)))
+    .where(and(eq(templates.projectId, projectId), eq(templates.id, templateId)))
     .limit(1);
 
   return row ?? null;
 }
 
-export async function upsertTemplate(
-  userId: string,
-  filename: string,
+export async function insertTemplate(
+  projectId: string,
+  id: string,
+  name: string,
   width: number,
   height: number
 ): Promise<TemplateInfo> {
   const [row] = await db()
     .insert(templates)
-    .values({ userId, filename, storageKey: templateKey(filename), width, height })
-    .onConflictDoUpdate({
-      target: [templates.userId, templates.filename],
-      set: { storageKey: templateKey(filename), width, height }
+    .values({
+      id,
+      projectId,
+      filename: name,
+      storageKey: templateKey(projectId, id),
+      width,
+      height
     })
     .returning();
 
   return toTemplateInfo(row);
 }
 
-export async function deleteTemplate(userId: string, filename: string): Promise<string | null> {
+export async function deleteTemplate(
+  projectId: string,
+  templateId: string
+): Promise<string | null> {
   const [row] = await db()
     .delete(templates)
-    .where(and(eq(templates.userId, userId), eq(templates.filename, filename)))
+    .where(and(eq(templates.projectId, projectId), eq(templates.id, templateId)))
     .returning({ storageKey: templates.storageKey });
 
   return row?.storageKey ?? null;

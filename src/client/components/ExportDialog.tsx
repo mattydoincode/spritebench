@@ -5,13 +5,15 @@ import {
   EXPORT_KINDS,
   EXPORT_KIND_LABELS,
   downloadAsset,
+  isSequenceKind,
   downloadZip,
   zipFilename,
   type ExportKind,
   type ExportProgress
 } from "@/client/export";
-import { useStudio } from "@/client/store";
-import type { AssetRecord } from "@/shared/model";
+import { useServer } from "@/client/stores/server";
+import { useUi } from "@/client/stores/ui";
+import type { ResolvedAsset } from "@/shared/model";
 import { Button, Field, Modal, Row, Select } from "./ui";
 
 /**
@@ -24,10 +26,12 @@ export function ExportDialog({
   nameOverride,
   onClose
 }: {
-  assets: AssetRecord[];
+  assets: ResolvedAsset[];
   nameOverride?: string;
   onClose: () => void;
 }) {
+  const project = useServer((state) => state.project);
+
   const [kind, setKind] = useState<ExportKind>("processed");
   const [progress, setProgress] = useState<ExportProgress | null>(null);
   const [failures, setFailures] = useState<string[]>([]);
@@ -39,23 +43,32 @@ export function ExportDialog({
 
   // An asset whose original has rolled off can still be processed from its
   // thumbnail, but there is no original left to hand over.
-  const blocked = kind !== "processed" && rolledOff.length === assets.length && assets.length > 0;
+  const animated = assets.filter((asset) => asset.sequences.some((s) => s.frames.length > 0));
+  const wantsSequence = isSequenceKind(kind);
+
+  const blocked =
+    (kind !== "processed" && rolledOff.length === assets.length && assets.length > 0) ||
+    (wantsSequence && animated.length === 0);
 
   const run = async () => {
+    if (!project) return;
+
     setError(null);
     setFailures([]);
     setProgress({ done: 0, total: assets.length, label: "" });
 
-    const lookup = (file: string) => useStudio.getState().ensurePalette(file);
+    const context = { projectId: project.id, projectName: project.name };
+    const lookup = (paletteId: string) => useServer.getState().ensurePalette(paletteId);
 
     try {
-      if (single) {
-        await downloadAsset(assets[0], kind, lookup, nameOverride);
+      if (single && !wantsSequence) {
+        await downloadAsset(context, assets[0], kind, lookup, nameOverride);
         onClose();
         return;
       }
 
       const result = await downloadZip(
+        context,
         assets,
         kind,
         lookup,
@@ -69,7 +82,7 @@ export function ExportDialog({
       }
 
       setFailures(result.failures);
-      useStudio
+      useUi
         .getState()
         .setNotice(
           `downloaded ${result.entries} file(s); ${result.failures.length} could not be exported`
@@ -105,9 +118,23 @@ export function ExportDialog({
           ? "The image exactly as the model returned it, before any cutout, downsampling or palette work."
           : kind === "processed"
             ? "The image as you see it in the studio, with this asset's saved processing applied."
-            : "Both, in separate folders inside the archive."}
-        {single ? null : " Packaged as a single zip, built in your browser."}
+            : kind === "both"
+              ? "Both, in separate folders inside the archive."
+              : kind === "sequenceSheet"
+                ? "Each animation packed into one PNG on a uniform grid, with a JSON manifest giving every frame's rectangle and duration."
+                : "Each animation as a folder of numbered PNGs, with a JSON manifest listing them in order."}
+        {single && !wantsSequence ? null : " Packaged as a single zip, built in your browser."}
       </p>
+
+      {wantsSequence ? (
+        <p className="mb-3 text-[10px] leading-snug text-amber-400">
+          {animated.length === 0
+            ? "None of these have an animation yet. Slice one in the inspector first."
+            : animated.length < assets.length
+              ? `${animated.length} of ${assets.length} have an animation; the rest are skipped.`
+              : `${animated.reduce((sum, asset) => sum + asset.sequences.length, 0)} animation(s) across ${animated.length} asset(s).`}
+        </p>
+      ) : null}
 
       {rolledOff.length > 0 && kind !== "processed" ? (
         <p className="mb-3 text-[10px] leading-snug text-amber-400">

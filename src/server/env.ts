@@ -51,3 +51,12 @@ export function num(name: string): number {
 export function count(name: string): number {
   return Math.max(1, Math.floor(num(name)));
 }
+
+/**
+ * Only "true" is true. Anything else -- "1", "yes", a typo -- reads as false,
+ * because the flags this gates are the kind you want off when you got the
+ * spelling wrong.
+ */
+export function bool(name: string): boolean {
+  return str(name).toLowerCase() === "true";
+}

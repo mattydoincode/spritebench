@@ -1,3 +1,4 @@
+import { sourceUrl } from "@/client/api";
 import { hashSettings, type ProcessingSettings } from "@/core/settings";
 import type { Rgb } from "@/core/types";
 
@@ -16,7 +17,12 @@ interface Pending {
   reject: (reason: Error) => void;
 }
 
-const MAX_CACHED = 60;
+/**
+ * Bitmaps to keep. Sized for a library page plus a couple of open sequences:
+ * a sixteen-frame animation is sixteen entries, and at sixty the inspector
+ * would evict the library grid every time you scrubbed.
+ */
+const MAX_CACHED = 180;
 
 /**
  * Which stored image to run the pipeline over. `thumb` is a small WebP
@@ -24,12 +30,6 @@ const MAX_CACHED = 60;
  * business downloading multi-megabyte sources to do it.
  */
 export type SourceVariant = "source" | "thumb";
-
-export function sourceUrlFor(assetId: string, variant: SourceVariant): string {
-  return variant === "thumb"
-    ? `/api/assets/${assetId}/source?variant=thumb`
-    : `/api/assets/${assetId}/source`;
-}
 
 class Processor {
   private worker: Worker | null = null;
@@ -86,6 +86,7 @@ class Processor {
   }
 
   async process(
+    projectId: string,
     assetId: string,
     settings: ProcessingSettings,
     palette: Rgb[],
@@ -93,7 +94,7 @@ class Processor {
     variant: SourceVariant = "source"
   ): Promise<ProcessedPreview> {
     const cacheKey = this.cacheKeyFor(assetId, settings, palette.length, variant);
-    const sourceUrl = sourceUrlFor(assetId, variant);
+    const url = sourceUrl(projectId, assetId, variant);
 
     const cached = this.cache.get(cacheKey);
     if (cached && (!wantSource || cached.sourceBitmap)) return cached;
@@ -110,7 +111,7 @@ class Processor {
         type: "process",
         requestId,
         cacheKey,
-        sourceUrl,
+        sourceUrl: url,
         settings,
         palette,
         wantSource
@@ -136,9 +137,12 @@ class Processor {
   }
 
   /** Drops both variants of an asset, in the worker and in the bitmap cache. */
-  evictAsset(assetId: string): void {
+  evictAsset(projectId: string, assetId: string): void {
     for (const variant of ["source", "thumb"] as const) {
-      this.worker?.postMessage({ type: "evict", cacheKey: sourceUrlFor(assetId, variant) });
+      this.worker?.postMessage({
+        type: "evict",
+        cacheKey: sourceUrl(projectId, assetId, variant)
+      });
     }
 
     for (const key of [...this.cache.keys()]) {

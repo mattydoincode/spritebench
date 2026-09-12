@@ -17,14 +17,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-SESSION="art-studio"
-PG_CONTAINER="art-studio-postgres"
-PG_VOLUME="art-studio-pgdata"
+SESSION="spritebench"
+PG_CONTAINER="spritebench-postgres"
+PG_VOLUME="spritebench-pgdata"
 PG_IMAGE="docker.io/library/postgres:17-alpine"
 PG_PORT="5433"
-PG_USER="art"
-PG_PASSWORD="art"
-PG_DB="art_studio"
+PG_USER="spritebench"
+PG_PASSWORD="spritebench"
+PG_DB="spritebench"
 WEB_PORT="4300"
 
 say() { printf '\033[36m▸\033[0m %s\n' "$*"; }
@@ -141,7 +141,7 @@ cmd_up() {
   tmux send-keys -t "$SESSION:dev.2" \
     "clear && echo 'web :$WEB_PORT | postgres :$PG_PORT | ./scripts/dev.sh down to stop'" C-m
 
-  tmux select-layout -t "$SESSION:dev" main-vertical
+  tmux select-layout -t "$SESSION:dev" even-vertical
   tmux select-pane -t "$SESSION:dev.2"
 
   say "waiting for the web server"
@@ -227,6 +227,36 @@ cmd_psql() {
   exec "$RUNTIME" exec -it "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB"
 }
 
+# Drops the database and replays migrations from scratch.
+#
+# The schema is still moving, and a change that drops a table or a column
+# cannot be replayed onto an existing database from a squashed 0000 migration.
+# Rather than hand-patch, start over: local data is disposable, and the one
+# thing worth protecting is doing this to the wrong database, hence the
+# hostname check.
+cmd_reset() {
+  [ "$(container_state)" = "running" ] || die "Postgres is not running. Run: ./scripts/dev.sh up"
+
+  case "${DATABASE_URL:-}" in
+    *localhost*|*127.0.0.1*|"") ;;
+    *) die "DATABASE_URL does not look local. Refusing to drop it." ;;
+  esac
+
+  warn "dropping and recreating the \"$PG_DB\" database on :$PG_PORT"
+  printf 'type the database name to confirm: '
+  read -r answer
+  [ "$answer" = "$PG_DB" ] || die "no match, nothing dropped"
+
+  "$RUNTIME" exec "$PG_CONTAINER" psql -U "$PG_USER" -d postgres \
+    -c "drop database if exists \"$PG_DB\" with (force);" \
+    -c "create database \"$PG_DB\";" >/dev/null
+
+  say "applying migrations"
+  npm run --silent db:migrate
+
+  say "done. Restart the app so it reconnects: npm run dev:restart"
+}
+
 cmd_help() {
   cat <<'USAGE'
 The whole local stack in one tmux session.
@@ -237,11 +267,12 @@ The whole local stack in one tmux session.
   npm run dev:status    Postgres, tmux and /api/health at a glance
   npm run dev:attach    reattach to a running session
   npm run dev:psql      a psql shell on the dev database
+  npm run dev:reset     drop the database and replay migrations (asks first)
 
 Panes:  0 web (:4300)   1 worker   2 free shell
 tmux:   detach with Ctrl-b d, move between panes with Ctrl-b arrow
 
-Postgres data lives in the named volume "art-studio-pgdata" and survives
+Postgres data lives in the named volume "spritebench-pgdata" and survives
 `down`. Every variable declared in .env is stripped from the panes'
 environment, so .env.local is the only thing that configures the app.
 
@@ -259,6 +290,7 @@ case "${1:-up}" in
   status | ps) cmd_status ;;
   attach) cmd_attach ;;
   psql | db) cmd_psql ;;
+  reset) cmd_reset ;;
   help | -h | --help) cmd_help ;;
   *)
     cmd_help >&2
