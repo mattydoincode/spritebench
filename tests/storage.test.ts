@@ -1,6 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import sharp from "sharp";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LocalFsStorage } from "@/storage/local";
 import {
@@ -182,5 +183,23 @@ describe("buildThumbnail", () => {
   it("leaves an image already smaller than the box alone", async () => {
     const thumb = await buildThumbnail(encodePng(framed(64, BORDER, FILL, 16)));
     expect(thumb.length).toBeGreaterThan(0);
+  });
+
+  it("keeps binary alpha instead of smearing it", async () => {
+    const image = framed(512, { r: 0, g: 0, b: 0 }, FILL, 64);
+    for (let i = 0; i < image.data.length; i += 4) {
+      if (image.data[i] === 0 && image.data[i + 1] === 0 && image.data[i + 2] === 0) {
+        image.data[i + 3] = 0;
+      }
+    }
+
+    const decoded = await sharp(await buildThumbnail(encodePng(image)))
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    for (let i = 3; i < decoded.data.length; i += 4) {
+      expect([0, 255]).toContain(decoded.data[i]);
+    }
   });
 });

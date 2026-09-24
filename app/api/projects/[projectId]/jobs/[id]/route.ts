@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { cancelBlockedInBatch, cancelJob, getJobRow } from "@/db/repo/jobs";
+import { cancelBlockedInBatch, cancelJob, deleteFailedJob, getJobRow } from "@/db/repo/jobs";
 import { projectContext } from "@/server/access";
 import { isLoopSpec } from "@/shared/model";
 import { withValidation } from "@/server/validation";
@@ -14,14 +14,28 @@ export async function DELETE(_request: Request, { params }: Params) {
     const { id } = await params;
 
     const job = await getJobRow(id);
-    if (!(await cancelJob(projectId, id))) {
-      return NextResponse.json({ error: "only queued or blocked jobs can be cancelled" }, { status: 409 });
+    if (!job || job.projectId !== projectId) {
+      return NextResponse.json({ error: "not found" }, { status: 404 });
     }
 
-    if (job?.batchId && isLoopSpec(job.inputs?.loop)) {
-      await cancelBlockedInBatch(projectId, job.batchId);
+    if (job.status === "queued" || job.status === "blocked") {
+      await cancelJob(projectId, id);
+
+      if (job.batchId && isLoopSpec(job.inputs?.loop)) {
+        await cancelBlockedInBatch(projectId, job.batchId);
+      }
+
+      return NextResponse.json({ ok: true });
     }
 
-    return NextResponse.json({ ok: true });
+    if (job.status === "error" || job.status === "cancelled") {
+      await deleteFailedJob(projectId, id);
+      return NextResponse.json({ ok: true });
+    }
+
+    return NextResponse.json(
+      { error: "only queued, blocked, failed, or cancelled jobs can be removed" },
+      { status: 409 }
+    );
   });
 }

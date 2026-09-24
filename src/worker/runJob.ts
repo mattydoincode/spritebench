@@ -44,6 +44,7 @@ async function callProvider(job: JobRow, apiKey: string): Promise<ProviderResult
       base: inputs.base,
       mask: inputs.mask,
       plate: inputs.plate ?? null,
+      start: inputs.start ?? null,
       size: inputs.size
     });
   }

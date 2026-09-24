@@ -1,8 +1,8 @@
 /// <reference lib="webworker" />
 
 import { applyPipeline } from "@/core/pipeline";
-import type { ProcessingSettings } from "@/core/settings";
-import type { Rgb, RgbaImage } from "@/core/types";
+import { scaleProcessing, type ProcessingSettings } from "@/core/settings";
+import type { Rgb, RgbaImage, Size } from "@/core/types";
 
 interface ProcessRequest {
   type: "process";
@@ -12,6 +12,7 @@ interface ProcessRequest {
   settings: ProcessingSettings;
   palette: Rgb[];
   wantSource: boolean;
+  sourceSize?: Size;
 }
 
 interface EvictRequest {
@@ -30,7 +31,9 @@ async function loadSource(url: string): Promise<RgbaImage> {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`could not load source (${response.status})`);
 
-  const bitmap = await createImageBitmap(await response.blob());
+  const bitmap = await createImageBitmap(await response.blob(), {
+    premultiplyAlpha: "none"
+  });
   const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
   const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) throw new Error("no 2d context available in worker");
@@ -73,7 +76,15 @@ self.onmessage = async (event: MessageEvent<Incoming>) => {
 
   try {
     const source = await loadSource(message.sourceUrl);
-    const { image, description } = applyPipeline(source, message.settings, message.palette);
+    const recorded = message.sourceSize;
+    const settings =
+      recorded && (recorded.width !== source.width || recorded.height !== source.height)
+        ? scaleProcessing(message.settings, recorded, {
+            width: source.width,
+            height: source.height
+          })
+        : message.settings;
+    const { image, description } = applyPipeline(source, settings, message.palette);
 
     const processed = toBitmap(image);
     const transfer: Transferable[] = [processed];

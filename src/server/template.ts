@@ -1,10 +1,18 @@
 import { cropImage } from "@/core/edits";
 import { buildMask, conformToSize } from "@/core/mask";
 import {
+  buildSheetFramesMask,
+  buildSheetFramesTemplate,
+  isSheetFramesTemplate
+} from "@/core/frameMask";
+import {
   DEFAULT_PIXEL_WINDOW,
   buildPixelConstraintMask,
   buildPixelConstraintTemplate,
-  isPixelConstraintTemplate
+  buildSheetPixelConstraintMask,
+  buildSheetPixelConstraintTemplate,
+  isPixelConstraintTemplate,
+  pixelConstraintWindow
 } from "@/core/pixelMask";
 import { createImage } from "@/core/pixels";
 import { fitToAspect } from "@/core/size";
@@ -12,7 +20,9 @@ import { buildSheetMask } from "@/core/slice";
 import type { RgbaImage, Size } from "@/core/types";
 import { getAssetRow } from "@/db/repo/assets";
 import { snapRequestSize } from "@/providers/models";
+import { loopSendsStart } from "@/shared/loop";
 import {
+  imageSourceKey,
   isChunkSpec,
   jobUsesEdit,
   type GenerationParams,
@@ -34,6 +44,8 @@ export interface EditInputs {
   mask: Bytes | null;
   /** Checkerboard plate when a starting image is also present. */
   plate?: Bytes | null;
+  /** Original loop start, when it is sent again alongside the previous output. */
+  start?: Bytes | null;
   size: Size;
 }
 
@@ -98,6 +110,21 @@ export function buildEditFromImages(
   return { base: asBytes(encodePng(base)), mask: asBytes(encodePng(mask)), size };
 }
 
+async function attachLoopStart(
+  projectId: string,
+  inputs: JobInputs,
+  edit: EditInputs
+): Promise<EditInputs> {
+  if (!loopSendsStart(inputs.loop) || !inputs.start) return edit;
+  if (inputs.base && imageSourceKey(inputs.start.source) === imageSourceKey(inputs.base.source)) {
+    return edit;
+  }
+
+  const image = decodePng(Buffer.from(await loadImageSource(projectId, inputs.start.source)));
+  const fitted = conformToSize(image, edit.size, inputs.start.fit, true);
+  return { ...edit, start: asBytes(encodePng(fitted)) };
+}
+
 export async function editInputsForJob(
   projectId: string,
   job: {
@@ -109,6 +136,35 @@ export async function editInputsForJob(
   const plan = job.sequencePlan;
   if (plan?.actions?.length) {
     const size = snapRequestSize(job.generation.size, job.generation.model);
+    const pixel =
+      job.inputs?.mask?.source.kind === "template" &&
+      isPixelConstraintTemplate(job.inputs.mask.source.templateId);
+    if (pixel && job.inputs?.mask) {
+      const cells = pixelConstraintWindow(job.inputs.mask.window ?? DEFAULT_PIXEL_WINDOW);
+      const plate = buildSheetPixelConstraintTemplate(size, cells, plan);
+      const plateBytes = asBytes(encodePng(plate));
+      return {
+        base: plateBytes,
+        mask: asBytes(encodePng(buildSheetPixelConstraintMask(size, cells, plan))),
+        plate: plateBytes,
+        size
+      };
+    }
+
+    if (
+      job.inputs?.mask?.source.kind === "template" &&
+      isSheetFramesTemplate(job.inputs.mask.source.templateId)
+    ) {
+      const plate = buildSheetFramesTemplate(size, plan);
+      const plateBytes = asBytes(encodePng(plate));
+      return {
+        base: plateBytes,
+        mask: asBytes(encodePng(buildSheetFramesMask(size, plan))),
+        plate: plateBytes,
+        size
+      };
+    }
+
     const base = createImage(size.width, size.height);
     const mask = buildSheetMask(size, plan.columns, plan.rows, plan.actions);
     return {
@@ -145,16 +201,16 @@ export async function editInputsForJob(
     // base; the checkerboard goes out as its own attachment so Gemini does
     // not flatten the character into a white hole.
     if (!baseImage) {
-      return { base: asBytes(encodePng(plate)), mask: null, size };
+      return attachLoopStart(projectId, inputs, { base: asBytes(encodePng(plate)), mask: null, size });
     }
 
     const base = conformToSize(baseImage, size, inputs.base?.fit ?? "contain", true);
-    return {
+    return attachLoopStart(projectId, inputs, {
       base: asBytes(encodePng(base)),
       mask: asBytes(encodePng(buildPixelConstraintMask(size, cells))),
       plate: asBytes(encodePng(plate)),
       size
-    };
+    });
   }
 
   const maskImage = inputs.mask
@@ -163,5 +219,9 @@ export async function editInputsForJob(
 
   if (!baseImage && maskImage) baseImage = maskImage;
 
-  return buildEditFromImages(baseImage, maskImage, inputs, job.generation);
+  return attachLoopStart(
+    projectId,
+    inputs,
+    buildEditFromImages(baseImage, maskImage, inputs, job.generation)
+  );
 }

@@ -97,6 +97,8 @@ export interface EditRequest extends GenerateRequest {
   mask: Bytes | null;
   /** Extra layout plate (pixel grid). Sent as its own image, not flattened into base. */
   plate?: Bytes | null;
+  /** Original loop start, sent again next to the previous output. */
+  start?: Bytes | null;
   size: Size;
 }
 

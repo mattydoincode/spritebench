@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_GENERATION, isChunkSpec, isLoopSpec } from "@/shared/model";
 import {
   InvalidInputsError,
+  attachFanoutAnimation,
   chunkRects,
   isExpandingMultistep,
   nextLoopIndex,
@@ -52,6 +53,18 @@ describe("planFanout", () => {
     expect(group.rows.map((row) => row.batchIndex)).toEqual([1, 2, 3]);
   });
 
+  it("keeps the each flag on still jobs", () => {
+    const [group] = planFanout({
+      generation: DEFAULT_GENERATION,
+      inputs: { base: START.base, each: true },
+      batches: 2
+    });
+
+    expect(group.rows).toHaveLength(2);
+    expect(group.rows.every((row) => row.inputs?.each === true)).toBe(true);
+    expect(group.rows.every((row) => row.inputs?.base)).toBeTruthy();
+  });
+
   it("inserts a loop chain: first queued, the rest blocked", () => {
     const groups = planFanout({
       generation: { ...DEFAULT_GENERATION, imageCount: 4 },
@@ -65,6 +78,22 @@ describe("planFanout", () => {
     expect(groups[0].rows.map((row) => row.dispatch)).toEqual([true, false, false, false]);
     expect(groups[0].rows.every((row) => row.generation.imageCount === 1)).toBe(true);
     expect(groups[0].rows[2].inputs?.loop).toEqual({ steps: 4, index: 3 });
+    expect(groups[0].rows[2].inputs?.start).toEqual(START.base);
+  });
+
+  it("copies sendStart and includeStart onto every step", () => {
+    const groups = planFanout({
+      generation: DEFAULT_GENERATION,
+      inputs: { ...START, loop: { steps: 3, sendStart: true, includeStart: true } },
+      batches: 1
+    });
+
+    expect(groups[0].rows.map((row) => row.inputs?.loop)).toEqual([
+      { steps: 3, index: 1, sendStart: true, includeStart: true },
+      { steps: 3, index: 2, sendStart: true, includeStart: true },
+      { steps: 3, index: 3, sendStart: true, includeStart: true }
+    ]);
+    expect(groups[0].rows[0].inputs?.start).toEqual(START.base);
   });
 
   it("gives each loop batch copy its own chain", () => {
@@ -182,6 +211,71 @@ describe("validateGenerateInputs", () => {
     ).toThrow(/starting image/);
   });
 
+  it("rejects a template in a loop start list", () => {
+    expect(() =>
+      validateGenerateInputs({
+        inputs: { loop: { steps: 3 } },
+        bases: [
+          START.base,
+          {
+            source: { kind: "template", templateId: "t1" },
+            fit: "contain",
+            matchAspect: true
+          }
+        ]
+      })
+    ).toThrow(/starting image/);
+  });
+
+  it("accepts several starting assets on the request", () => {
+    expect(() =>
+      validateGenerateInputs({
+        inputs: { loop: { steps: 3 } },
+        bases: [
+          START.base,
+          {
+            source: { kind: "asset", assetId: "22222222-2222-2222-2222-222222222222" },
+            fit: "contain",
+            matchAspect: true
+          }
+        ]
+      })
+    ).not.toThrow();
+  });
+
+  it("rejects each without images, or with loop or a sheet", () => {
+    expect(() => validateGenerateInputs({ inputs: { each: true } })).toThrow(/add images/);
+
+    expect(() =>
+      validateGenerateInputs({
+        inputs: { ...START, each: true, loop: { steps: 3 } }
+      })
+    ).toThrow(/each cannot run with loop/);
+
+    expect(() =>
+      validateGenerateInputs({
+        inputs: { ...START, each: true },
+        sequencePlan: { columns: 4, rows: 1, fps: 8, actions: [{ name: "walk", frames: 3 }] }
+      })
+    ).toThrow(/each cannot run with a sheet/);
+  });
+
+  it("accepts each with a template or asset start", () => {
+    expect(() =>
+      validateGenerateInputs({
+        inputs: { each: true },
+        bases: [
+          {
+            source: { kind: "template", templateId: "t1" },
+            fit: "contain",
+            matchAspect: true
+          },
+          START.base
+        ]
+      })
+    ).not.toThrow();
+  });
+
   it("lets a concrete replay through without a start check", () => {
     expect(() =>
       validateGenerateInputs({
@@ -197,7 +291,57 @@ describe("shouldRememberGeneration", () => {
     expect(shouldRememberGeneration({ sheet: true })).toBe(false);
     expect(shouldRememberGeneration({ loop: true })).toBe(false);
     expect(shouldRememberGeneration({ chunk: true })).toBe(false);
+    expect(shouldRememberGeneration({ animate: true })).toBe(false);
     expect(shouldRememberGeneration({ remember: false })).toBe(false);
+  });
+});
+
+describe("attachFanoutAnimation", () => {
+  it("tags stills with one id per batch copy and the expansion as the frame", () => {
+    const planned = [
+      planFanout({ generation: DEFAULT_GENERATION, inputs: {}, batches: 2 }),
+      planFanout({
+        generation: { ...DEFAULT_GENERATION, imageCount: 3 },
+        inputs: {},
+        batches: 2
+      })
+    ];
+    const tagged = attachFanoutAnimation(planned, true);
+    const first = tagged[0][0].rows;
+    const second = tagged[1][0].rows;
+
+    expect(first[0].inputs?.animate).toMatchObject({ index: 0, count: 2 });
+    expect(second[0].inputs?.animate).toMatchObject({ index: 1, count: 2 });
+    expect(first[0].inputs?.animate?.id).toBe(second[0].inputs?.animate?.id);
+    expect(first[1].inputs?.animate?.id).toBe(second[1].inputs?.animate?.id);
+    expect(first[0].inputs?.animate?.id).not.toBe(first[1].inputs?.animate?.id);
+    expect(first.every((row) => row.generation.imageCount === 1)).toBe(true);
+  });
+
+  it("leaves loop rows alone", () => {
+    const planned = [
+      planFanout({
+        generation: DEFAULT_GENERATION,
+        inputs: { ...START, loop: { steps: 2 } },
+        batches: 1
+      }),
+      planFanout({
+        generation: DEFAULT_GENERATION,
+        inputs: { ...START, loop: { steps: 2 } },
+        batches: 1
+      })
+    ];
+
+    expect(attachFanoutAnimation(planned, true)[0][0].rows[0].inputs?.animate).toBeUndefined();
+  });
+
+  it("is a no-op when disabled or there is only one expansion", () => {
+    const planned = [planFanout({ generation: DEFAULT_GENERATION, inputs: {}, batches: 1 })];
+    expect(attachFanoutAnimation(planned, true)).toBe(planned);
+    expect(attachFanoutAnimation([planned[0], planned[0]], false)).toEqual([
+      planned[0],
+      planned[0]
+    ]);
   });
 });
 

@@ -67,6 +67,14 @@ export function ProjectBar() {
         redo
       </Button>
 
+      <Button
+        variant="ghost"
+        title="Cutout and other defaults for this project"
+        onClick={() => useUi.getState().openProjectSettings()}
+      >
+        project
+      </Button>
+
       <Link
         href="/settings"
         title="Your keys and prompt defaults"

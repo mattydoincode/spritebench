@@ -4,6 +4,7 @@ import { create } from "zustand";
 import type { ProcessingSettings } from "@/core/settings";
 import { DocSync } from "@/client/doc/sync";
 import {
+  loopOriginMember,
   setIdForJob,
   setSpecFromInputs,
   type AssetSet,
@@ -11,15 +12,12 @@ import {
 } from "@/shared/assetSet";
 import * as doc from "@/shared/doc";
 import {
-  DEFAULT_PROJECT_SETTINGS,
   paletteBakeAssetIds,
   type AssetEdits,
   type AssetRecord,
   type JobRecord,
   type Scene,
-  type ProjectSettings,
   type PromptSnippet,
-  type PromptSnippetKind,
   type RepeatGroup,
   type StagedItem,
   type TerrainGroup,
@@ -27,6 +25,11 @@ import {
 } from "@/shared/model";
 import { sequencesFromPlan } from "@/shared/animationPrompt";
 import type { Sequence, SequenceFrame } from "@/shared/sequence";
+import {
+  DEFAULT_PROJECT_SETTINGS,
+  type ProjectSettings,
+  type ProjectSettingsPatch
+} from "@/shared/projectSettings";
 import { useUi } from "./ui";
 
 /**
@@ -51,18 +54,17 @@ interface DocState {
   scenes: Scene[];
   edits: Record<string, AssetEdits>;
   sets: AssetSet[];
-  /** The project's prompt wrapper. Shared, so editing it is undoable. */
-  project: ProjectSettings;
   snippets: PromptSnippet[];
+  settings: ProjectSettings;
   canUndo: boolean;
   canRedo: boolean;
 
   open: (projectId: string, canEdit: boolean) => void;
   close: () => void;
 
-  patchProjectSettings: (patch: Partial<ProjectSettings>) => void;
-  savePromptSnippet: (kind: PromptSnippetKind, name: string, text: string) => void;
+  savePromptSnippet: (name: string, text: string) => void;
   deletePromptSnippet: (id: string) => void;
+  patchSettings: (patch: ProjectSettingsPatch) => void;
 
   undo: () => void;
   redo: () => void;
@@ -160,8 +162,8 @@ export const useDoc = create<DocState>((set, get) => {
       revision: get().revision + 1,
       ready: sync.ready,
       scenes: doc.listScenes(sync.doc),
-      project: doc.readProjectSettings(sync.doc),
       snippets: doc.listPromptSnippets(sync.doc),
+      settings: doc.readProjectSettings(sync.doc),
       edits: Object.fromEntries(
         [...doc.assetEditsMap(sync.doc).keys()].flatMap((assetId) => {
           const entry = doc.readAssetEdits(sync.doc, assetId);
@@ -181,8 +183,8 @@ export const useDoc = create<DocState>((set, get) => {
     scenes: [],
     edits: {},
     sets: [],
-    project: DEFAULT_PROJECT_SETTINGS,
     snippets: [],
+    settings: DEFAULT_PROJECT_SETTINGS,
     canUndo: false,
     canRedo: false,
 
@@ -202,8 +204,8 @@ export const useDoc = create<DocState>((set, get) => {
         scenes: [],
         edits: {},
         sets: [],
-        project: DEFAULT_PROJECT_SETTINGS,
-        snippets: []
+        snippets: [],
+        settings: DEFAULT_PROJECT_SETTINGS
       });
       void sync.start();
     },
@@ -216,24 +218,18 @@ export const useDoc = create<DocState>((set, get) => {
         scenes: [],
         edits: {},
         sets: [],
-        project: DEFAULT_PROJECT_SETTINGS,
-        snippets: []
+        snippets: [],
+        settings: DEFAULT_PROJECT_SETTINGS
       });
     },
 
-    patchProjectSettings(patch) {
-      const { sync } = get();
-      if (sync) doc.patchProjectSettings(sync.doc, patch);
-    },
-
-    savePromptSnippet(kind, name, text) {
+    savePromptSnippet(name, text) {
       const { sync } = get();
       if (!sync) return;
 
       doc.putPromptSnippet(sync.doc, {
         id: crypto.randomUUID(),
         name,
-        kind,
         text
       });
     },
@@ -241,6 +237,11 @@ export const useDoc = create<DocState>((set, get) => {
     deletePromptSnippet(id) {
       const { sync } = get();
       if (sync) doc.deletePromptSnippet(sync.doc, id);
+    },
+
+    patchSettings(patch) {
+      const { sync } = get();
+      if (sync) doc.patchProjectSettings(sync.doc, patch);
     },
 
     undo() {
@@ -414,12 +415,23 @@ export const useDoc = create<DocState>((set, get) => {
         });
 
         if (spec && job) {
-          doc.upsertSetMember(sync.doc, { id: setIdForJob(job), ...spec }, {
+          const setId = setIdForJob(job);
+          doc.upsertSetMember(sync.doc, { id: setId, ...spec }, {
             assetId: asset.id,
             index: spec.index,
             col: spec.col,
             row: spec.row
           });
+
+          const origin = loopOriginMember(job.inputs ?? asset.inputs);
+          if (origin) {
+            doc.ensureAssetEdits(sync.doc, origin.assetId, {
+              folder: (asset.jobId && folders[asset.jobId]) || "",
+              processing: asset.generatedWith,
+              hidden: true
+            });
+            doc.upsertSetMember(sync.doc, { id: setId, kind: spec.kind, columns: spec.columns, rows: spec.rows }, origin);
+          }
         }
 
         // A sheet generated as an animation arrives already sliced: the grid

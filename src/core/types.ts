@@ -82,6 +82,14 @@ export const CUTOUT_MODES: CutoutMode[] = [
   "luminanceBelow"
 ];
 
+export const CUTOUT_LABELS: Record<CutoutMode, string> = {
+  none: "keep the background",
+  edgeFloodFill: "flood fill from the edges",
+  chromaKey: "chroma key colours",
+  luminanceAbove: "clear pixels brighter than",
+  luminanceBelow: "clear pixels darker than"
+};
+
 export const DITHER_MODES: DitherMode[] = [
   "none",
   "bayer2x2",

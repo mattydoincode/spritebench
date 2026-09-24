@@ -1,10 +1,12 @@
 import { normalizeEdits, type ImageEdit } from "./edits";
+import { scaleRect } from "./slice";
 import type {
   ColorDistanceMode,
   CutoutMode,
   DitherMode,
   ImageOrientation,
   PixelateMode,
+  Rgb,
   Size
 } from "./types";
 
@@ -16,7 +18,7 @@ export interface ProcessingSettings {
   flipVertical: boolean;
 
   cutout: CutoutMode;
-  chromaKey: string;
+  chromaKeys: string[];
   cutoutTolerance: number;
   cutoutLocalTolerance: number;
   cutoutLuminanceThreshold: number;
@@ -26,9 +28,16 @@ export interface ProcessingSettings {
   despeckleMinimumNeighbors: number;
   fillHoles: boolean;
   erodePixels: number;
+  /**
+   * Punch through pixels outside the diamond that fills the frame.
+   * Canvas size stays the source size. Wins over `trimToContent`.
+   */
+  clipToIso: boolean;
   trimToContent: boolean;
   trimPadding: number;
 
+  /** When false, `targetSize` is kept as a parked value and not applied. */
+  downsample: boolean;
   targetSize: Size;
   pixelate: PixelateMode;
 
@@ -42,6 +51,8 @@ export interface ProcessingSettings {
   distanceMode: ColorDistanceMode;
 }
 
+export const MAX_CHROMA_KEYS = 16;
+
 export const DEFAULT_PROCESSING: ProcessingSettings = {
   edits: [],
 
@@ -50,7 +61,7 @@ export const DEFAULT_PROCESSING: ProcessingSettings = {
   flipVertical: false,
 
   cutout: "edgeFloodFill",
-  chromaKey: "#ff00ff",
+  chromaKeys: ["#ff00ff"],
   cutoutTolerance: 0.18,
   cutoutLocalTolerance: 0.08,
   cutoutLuminanceThreshold: 0.85,
@@ -60,12 +71,13 @@ export const DEFAULT_PROCESSING: ProcessingSettings = {
   despeckleMinimumNeighbors: 0,
   fillHoles: false,
   erodePixels: 0,
+  clipToIso: false,
   trimToContent: true,
   trimPadding: 0,
 
-  // Both zero means "keep whatever came back". A height of 64 used to be the
-  // default, which quietly downsampled every new asset before anyone asked.
-  targetSize: { width: 0, height: 0 },
+  downsample: false,
+  // Parked pixel-art size. Applied only when `downsample` is on.
+  targetSize: { width: 32, height: 32 },
   pixelate: "dominantColor",
 
   snapAlpha: true,
@@ -78,13 +90,77 @@ export const DEFAULT_PROCESSING: ProcessingSettings = {
 };
 
 export function withDefaults(partial?: Partial<ProcessingSettings> | null): ProcessingSettings {
-  const merged = { ...DEFAULT_PROCESSING, ...(partial ?? {}) };
+  const from = partial ?? {};
+  const merged = { ...DEFAULT_PROCESSING, ...from };
   merged.edits = normalizeEdits(merged.edits);
+  merged.chromaKeys = normalizeChromaKeys(from.chromaKeys);
+  const size = from.targetSize ?? DEFAULT_PROCESSING.targetSize;
   merged.targetSize = {
-    width: Math.max(0, Math.floor(merged.targetSize?.width ?? 0)),
-    height: Math.max(0, Math.floor(merged.targetSize?.height ?? 0))
+    width: Math.max(0, Math.floor(size?.width ?? 0)),
+    height: Math.max(0, Math.floor(size?.height ?? 0))
   };
+  if (!("downsample" in from) && from.targetSize) {
+    merged.downsample = merged.targetSize.width > 0 || merged.targetSize.height > 0;
+  }
   return merged;
+}
+
+function normalizeChromaKeys(value: unknown): string[] {
+  if (!Array.isArray(value)) return [...DEFAULT_PROCESSING.chromaKeys];
+  return value
+    .filter((entry): entry is string => typeof entry === "string")
+    .slice(0, MAX_CHROMA_KEYS);
+}
+
+export function effectiveTargetSize(settings: Pick<ProcessingSettings, "downsample" | "targetSize">): Size {
+  return settings.downsample ? settings.targetSize : { width: 0, height: 0 };
+}
+
+/** Clip owns the frame. Trim after it would crop the diamond's transparent corners. */
+export function trimsToContent(settings: Pick<ProcessingSettings, "clipToIso" | "trimToContent">): boolean {
+  return settings.trimToContent && !settings.clipToIso;
+}
+
+/**
+ * Maps source-space processing onto a differently sized image.
+ *
+ * Crops, erode, and trim padding are stored against the raw source. The
+ * library runs the same pipeline over a 256-pixel thumbnail; without this
+ * those rectangles land off the edge (blank thumb) and a 2px erode eats a
+ * much larger fraction of the sprite.
+ *
+ * Pixel-grid edits keep their stored canvas size: the sampler already maps
+ * that onto whatever image it is given.
+ */
+export function scaleProcessing(
+  settings: ProcessingSettings,
+  from: Size,
+  to: Size
+): ProcessingSettings {
+  if (from.width === to.width && from.height === to.height) return settings;
+  if (from.width <= 0 || from.height <= 0 || to.width <= 0 || to.height <= 0) {
+    return settings;
+  }
+
+  const scale = Math.min(to.width / from.width, to.height / from.height);
+
+  return {
+    ...settings,
+    edits: settings.edits.map((edit) =>
+      edit.kind === "crop" ? { kind: "crop", ...scaleRect(edit, from, to) } : edit
+    ),
+    erodePixels: settings.erodePixels * scale,
+    trimPadding: Math.round(settings.trimPadding * scale)
+  };
+}
+
+function fnv1a(text: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
 }
 
 export function hashSettings(settings: ProcessingSettings): string {
@@ -97,11 +173,9 @@ export function hashSettings(settings: ProcessingSettings): string {
     })
     .join("|");
 
-  let hash = 2166136261;
-  for (let i = 0; i < ordered.length; i++) {
-    hash ^= ordered.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
+  return fnv1a(ordered);
+}
 
-  return (hash >>> 0).toString(36);
+export function hashPalette(palette: ReadonlyArray<Rgb>): string {
+  return fnv1a(palette.map((color) => `${color.r},${color.g},${color.b}`).join("|"));
 }

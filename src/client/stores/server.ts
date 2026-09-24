@@ -4,24 +4,39 @@ import { create } from "zustand";
 import type { ProcessingSettings } from "@/core/settings";
 import { DEFAULT_PROCESSING } from "@/core/settings";
 import type { Rgb } from "@/core/types";
-import { ApiError, api, projectApi, sourceUrl } from "@/client/api";
+import { ApiError, api, projectApi, rejectIfNotOk, sourceUrl } from "@/client/api";
+import { processor } from "@/client/processor";
 import type { PaletteInfo } from "@/db/repo/palettes";
 import type { TemplateInfo } from "@/db/repo/templates";
-import { clampGeneration } from "@/providers/models";
+import { clampGeneration, findModel, snapRequestSize } from "@/providers/models";
+import { attachSheetFramePlate, isSheetFramesTemplate } from "@/core/frameMask";
+import { attachSheetPixelPlate, isPixelConstraintTemplate, pixelConstraintWindow } from "@/core/pixelMask";
 import {
   DEFAULT_GENERATION,
   type AssetRecord,
   type GenerationParams,
   type JobRecord,
   type ProjectSummary,
+  type ResolvedAsset,
   type StudioSettings
 } from "@/shared/model";
-import { isPixelConstraintTemplate, pixelConstraintWindow } from "@/core/pixelMask";
 import { planAnimation, planItemGrid } from "@/shared/animationPrompt";
-import { normalizeLayoutGuideInputs, workingPrompt } from "@/shared/featurePrompt";
+import { normalizeLayoutGuideInputs } from "@/shared/featurePrompt";
 import { foldersByJobId, resolveJobFolder, suggestedFolder } from "@/shared/folder";
+import { remapSelection } from "@/shared/libraryItems";
 import { shouldRememberGeneration } from "@/shared/multistep";
 import { expandPrompt } from "@/shared/promptVars";
+import { defaultGenerateSetup, restoreGeneration } from "@/shared/restoreGeneration";
+import {
+  applyAssignStreamEvent,
+  consumeAssignEvents,
+  emptyAssignProgress
+} from "@/shared/assignStream";
+import {
+  mergeSlotAssignment,
+  replaceSlotAssignment,
+  type EngineSlotRecord
+} from "@/shared/engineSlot";
 import { useDoc } from "./doc";
 import { useUi } from "./ui";
 
@@ -65,6 +80,14 @@ async function toPngFile(file: File): Promise<File> {
 
 let settingsTimer: ReturnType<typeof setTimeout> | null = null;
 
+export interface ApiTokenStatus {
+  id: string;
+  name: string;
+  prefix: string;
+  lastUsedAt: string | null;
+  createdAt: string;
+}
+
 export interface ProviderKeyStatus {
   id: string;
   provider: string;
@@ -93,6 +116,10 @@ interface ServerState {
   palettes: PaletteInfo[];
   paletteColors: Record<string, Rgb[]>;
   templates: TemplateInfo[];
+  apiTokens: ApiTokenStatus[];
+  /** Plaintext PAT, only after mint, only until dismissed. */
+  mintedToken: string | null;
+  slots: EngineSlotRecord[];
 
   loadProjects: () => Promise<ProjectSummary[]>;
   openProject: (projectId: string) => Promise<void>;
@@ -110,10 +137,13 @@ interface ServerState {
   setDefaultProcessing: (patch: Partial<ProcessingSettings>) => void;
 
   generate: () => Promise<void>;
+  restoreFromAsset: (asset: Pick<ResolvedAsset, "prompt" | "generation" | "generatedWith" | "inputs" | "sequencePlan" | "folder" | "label">) => void;
+  resetGenerateDefaults: () => void;
   rerunSelected: () => Promise<void>;
   retryJob: (id: string) => Promise<void>;
   cancelJob: (id: string) => Promise<void>;
-  clearJobs: () => Promise<void>;
+  dismissJob: (id: string) => Promise<void>;
+  clearFailedJobs: () => Promise<void>;
 
   deleteAsset: (id: string) => Promise<void>;
   approve: (id: string, name?: string) => Promise<void>;
@@ -126,14 +156,41 @@ interface ServerState {
     file: File,
     options?: { cutBackground?: boolean; slot?: "base" | "mask" }
   ) => Promise<void>;
+  uploadTemplates: (
+    files: File[],
+    options?: { cutBackground?: boolean; slot?: "base" | "mask" }
+  ) => Promise<void>;
   uploadTemplateFromAsset: (assetId: string, slot?: "base" | "mask") => Promise<void>;
   deleteTemplate: (templateId: string) => Promise<void>;
 
   addProviderKey: (provider: string, label: string, key: string) => Promise<void>;
   removeProviderKey: (id: string) => Promise<void>;
   refreshProjectKeys: () => Promise<void>;
+  loadApiTokens: () => Promise<void>;
+  createApiToken: (name: string) => Promise<string | null>;
+  revokeApiToken: (id: string) => Promise<void>;
+  clearMintedToken: () => void;
+  refreshSlots: () => Promise<void>;
+  assignSlot: (
+    slotId: string,
+    assetIds: string[],
+    options?: { replace?: boolean }
+  ) => Promise<void>;
   /** The key the next generation will bill, or null to let the server decide. */
   billingKeyId: () => string | null;
+}
+
+async function* iterateBody(body: ReadableStream<Uint8Array>): AsyncGenerator<Uint8Array> {
+  const reader = body.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      if (value) yield value;
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 export const useServer = create<ServerState>((set, get) => {
@@ -146,6 +203,13 @@ export const useServer = create<ServerState>((set, get) => {
 
   const fail = (error: unknown): void => {
     useUi.getState().setError(error instanceof Error ? error.message : String(error));
+  };
+
+  const adoptCreated = (created: JobRecord[]): void => {
+    if (created.length === 0) return;
+    const seen = new Set(created.map((job) => job.id));
+    set({ jobs: [...created, ...get().jobs.filter((job) => !seen.has(job.id))] });
+    useUi.getState().selectMany(created.map((job) => job.id));
   };
 
   return {
@@ -162,6 +226,9 @@ export const useServer = create<ServerState>((set, get) => {
     palettes: [],
     paletteColors: {},
     templates: [],
+    apiTokens: [],
+    mintedToken: null,
+    slots: [],
 
     async loadProjects() {
       try {
@@ -187,7 +254,15 @@ export const useServer = create<ServerState>((set, get) => {
       const project = get().projects.find((entry) => entry.id === id);
       if (!project) return;
 
-      set({ ready: false, project, assets: [], jobs: [], palettes: [], templates: [] });
+      set({
+        ready: false,
+        project,
+        assets: [],
+        jobs: [],
+        palettes: [],
+        templates: [],
+        slots: []
+      });
 
       // The document opens alongside the row data rather than after it: a
       // scene with no asset rows yet renders empty, which is correct,
@@ -195,11 +270,14 @@ export const useServer = create<ServerState>((set, get) => {
       useDoc.getState().open(id, project.role !== "viewer");
 
       try {
-        const [assetsRes, jobsRes, palettesRes, templatesRes] = await Promise.all([
+        const [assetsRes, jobsRes, palettesRes, templatesRes, slotsRes] = await Promise.all([
           projectApi<{ assets: AssetRecord[] }>(id, "/assets"),
           projectApi<{ jobs: JobRecord[] }>(id, "/jobs"),
           projectApi<{ palettes: PaletteInfo[] }>(id, "/palettes"),
-          projectApi<{ templates: TemplateInfo[] }>(id, "/templates")
+          projectApi<{ templates: TemplateInfo[] }>(id, "/templates"),
+          api<{ slots: EngineSlotRecord[] }>(`/api/v1/projects/${id}/slots`).catch(() => ({
+            slots: [] as EngineSlotRecord[]
+          }))
         ]);
 
         set({
@@ -207,7 +285,8 @@ export const useServer = create<ServerState>((set, get) => {
           assets: assetsRes.assets,
           jobs: jobsRes.jobs,
           palettes: palettesRes.palettes,
-          templates: templatesRes.templates
+          templates: templatesRes.templates,
+          slots: slotsRes.slots
         });
 
         useDoc.getState().backfill(assetsRes.assets, {
@@ -302,6 +381,10 @@ export const useServer = create<ServerState>((set, get) => {
         });
 
         set({ jobs });
+        const selected = remapSelection(useUi.getState().selectedIds, previous, jobs);
+        if (selected.join("\0") !== useUi.getState().selectedIds.join("\0")) {
+          useUi.getState().selectMany(selected);
+        }
         if (finishedNow) await get().refreshAssets();
       } catch {
         // Polling is best effort; the next tick recovers.
@@ -380,52 +463,80 @@ export const useServer = create<ServerState>((set, get) => {
         : null;
       const loop = ui.loop.enabled;
       const chunk = ui.chunk.enabled;
-      const sheet = loop || chunk ? null : animation ?? itemGrid;
+      const each = ui.each.enabled;
+      const sheet = loop || chunk || each ? null : animation ?? itemGrid;
       const cellSize = animation ? ui.animation.cellSize : ui.itemGrid.cellSize;
+      const layout = normalizeLayoutGuideInputs({ base: ui.bases[0] ?? null, mask: ui.mask });
+      const exampleBases = sheet ? [] : ui.bases;
+      const pixelOn =
+        layout.mask?.source.kind === "template" &&
+        isPixelConstraintTemplate(layout.mask.source.templateId);
+      const framesOn =
+        layout.mask?.source.kind === "template" &&
+        isSheetFramesTemplate(layout.mask.source.templateId);
+      const pixelWindow = pixelOn
+        ? pixelConstraintWindow(layout.mask?.window ?? settings.processing.targetSize)
+        : null;
+      const mask = pixelWindow && layout.mask ? { ...layout.mask, window: pixelWindow } : layout.mask;
+      const sheetPixel = Boolean(sheet && pixelOn);
+      const sheetFrames = Boolean(sheet && framesOn);
       const variables = ui.variables.filter((entry) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(entry.name));
-      const projectSettings = useDoc.getState().project;
-      const prompt = workingPrompt({
-        prefix: projectSettings.promptPrefix,
+      const prompt = {
+        prefix: "",
         body: ui.promptBody,
-        suffix: projectSettings.promptSuffix,
-        model: settings.generation.model,
-        mask: sheet ? null : ui.mask,
-        base: sheet ? null : ui.base,
-        animation: ui.animation,
-        itemGrid: ui.itemGrid,
-        overrides: ui.featurePrompts
-      });
+        suffix: "",
+        guide: "",
+        extra: ""
+      };
       const expansions = expandPrompt(prompt, variables);
+      const animate =
+        ui.animateExpansions &&
+        !loop &&
+        !chunk &&
+        !each &&
+        !sheet &&
+        expansions.length * Math.max(1, exampleBases.length) > 1;
+      const requestSize =
+        sheet && !sheetPixel ? sheet.sheet.size : settings.generation.size;
+      const sequencePlan =
+        sheet && sheetPixel && pixelWindow
+          ? attachSheetPixelPlate(
+              sheet.plan,
+              snapRequestSize(requestSize, settings.generation.model),
+              pixelWindow
+            )
+          : sheet && sheetFrames
+            ? attachSheetFramePlate(
+                sheet.plan,
+                snapRequestSize(requestSize, settings.generation.model)
+              )
+            : (sheet?.plan ?? null);
 
       try {
-        await projectApi(projectId(), "/generate", {
+        const { jobs: created } = await projectApi<{ jobs: JobRecord[] }>(projectId(), "/generate", {
           method: "POST",
           body: JSON.stringify({
             promptBody: ui.promptBody,
-            promptGuide: prompt.guide,
-            promptExtra: prompt.extra,
-            // Prefix and suffix are omitted: they live in the shared document,
-            // and the server reads them from there rather than trusting a
-            // copy that may be a poll behind.
             providerKeyId: get().billingKeyId(),
             generation: sheet
               ? {
                   ...settings.generation,
                   useAutoSize: false,
-                  size: sheet.sheet.size,
+                  size: requestSize,
                   imageCount: 1
                 }
-              : loop || chunk
+              : loop || chunk || each || animate
                 ? { ...settings.generation, imageCount: 1 }
                 : settings.generation,
-            processing: sheet
-              ? {
-                  ...settings.processing,
-                  // Frames force trim off, so the cell rectangle is what sets
-                  // the sprite's size. Height derives from the square cell.
-                  targetSize: { width: cellSize, height: 0 }
-                }
-              : settings.processing,
+            processing:
+              sheet && settings.processing.downsample
+                ? {
+                    ...settings.processing,
+                    targetSize: sheetPixel
+                      ? (pixelWindow ?? settings.processing.targetSize)
+                      : { width: cellSize, height: 0 }
+                  }
+                : settings.processing,
             folder: resolveJobFolder(
               ui.folder,
               suggestedFolder({
@@ -434,46 +545,50 @@ export const useServer = create<ServerState>((set, get) => {
                 many:
                   !loop &&
                   !chunk &&
-                  (ui.batches > 1 || settings.generation.imageCount > 1 || expansions.length > 1)
+                  (ui.batches > 1 ||
+                    settings.generation.imageCount > 1 ||
+                    expansions.length > 1 ||
+                    exampleBases.length > 1)
               })
             ),
-            inputs: sheet
-              ? null
-              : (() => {
-                  const layout = normalizeLayoutGuideInputs({ base: ui.base, mask: ui.mask });
-                  const mask =
-                    layout.mask?.source.kind === "template" &&
-                    isPixelConstraintTemplate(layout.mask.source.templateId)
-                      ? {
-                          ...layout.mask,
-                          window: pixelConstraintWindow(settings.processing.targetSize)
-                        }
-                      : layout.mask;
-                  return {
-                    base: layout.base,
+            inputs:
+              sheet && !sheetPixel && !sheetFrames
+                ? null
+                : {
+                    base: sheet ? null : (exampleBases[0] ?? null),
                     mask,
-                    loop: ui.loop.enabled ? { steps: ui.loop.steps } : null,
+                    loop: ui.loop.enabled
+                      ? {
+                          steps: ui.loop.steps,
+                          ...(ui.loop.sendStart ? { sendStart: true } : {}),
+                          ...(ui.loop.includeStart ? { includeStart: true } : {})
+                        }
+                      : null,
                     chunk: ui.chunk.enabled
                       ? { columns: ui.chunk.columns, rows: ui.chunk.rows }
-                      : null
-                  };
-                })(),
-            sequencePlan: sheet?.plan ?? null,
+                      : null,
+                    each: each || null
+                  },
+            bases: exampleBases.length > 0 ? exampleBases : undefined,
+            sequencePlan,
             batches: ui.batches,
             variables,
-            // Sheets, loops, and chunks pin canvas or imageCount for this job
-            // only. Writing those back is how 1152x576 and a 32px asset size
-            // appeared without anyone setting them.
+            animate,
+            // Sheets, loops, chunks, and fan-out animations pin canvas or
+            // imageCount for this job only. Writing those back is how
+            // 1152x576 and a 32px asset size appeared without anyone setting them.
             remember: shouldRememberGeneration({
               sheet: Boolean(sheet),
               loop,
-              chunk
+              chunk,
+              animate
             })
               ? undefined
               : false
           })
         });
 
+        adoptCreated(created);
         await get().refreshJobs();
       } catch (error) {
         fail(error);
@@ -482,11 +597,39 @@ export const useServer = create<ServerState>((set, get) => {
       }
     },
 
+    resetGenerateDefaults() {
+      const restored = defaultGenerateSetup(get().settings.generation.model);
+      useUi.getState().applyGenerationSetup(restored);
+      useUi.getState().setBatches(1);
+      get().setGeneration(restored.generation);
+      get().setDefaultProcessing(restored.processing);
+    },
+
+    restoreFromAsset(asset) {
+      const restored = restoreGeneration(asset);
+      useUi.getState().applyGenerationSetup(restored);
+      get().setGeneration(restored.generation);
+      get().setDefaultProcessing(restored.processing);
+
+      const model = findModel(restored.generation.model);
+      const key = get().projectKeys.find((entry) => entry.id === get().billingKeyId()) ?? null;
+      if (model && key && model.provider !== key.provider) {
+        useUi
+          .getState()
+          .setNotice(
+            `loaded setup from ${asset.label} — switch to a ${model.provider} key to keep ${model.label}`
+          );
+        return;
+      }
+
+      useUi.getState().setNotice(`loaded setup from ${asset.label}`);
+    },
+
     async rerunSelected() {
       const ui = useUi.getState();
-      const { settings } = get();
+      const assetIds = ui.selectedIds.filter((id) => get().assets.some((asset) => asset.id === id));
 
-      if (ui.selectedIds.length === 0) {
+      if (assetIds.length === 0) {
         ui.setError("select assets in the library to rerun");
         return;
       }
@@ -497,26 +640,23 @@ export const useServer = create<ServerState>((set, get) => {
       try {
         const edits = useDoc.getState().edits;
         const folders = new Set(
-          ui.selectedIds
+          assetIds
             .map((id) => edits[id]?.folder.trim() ?? "")
             .filter((folder) => folder.length > 0)
         );
 
-        await projectApi(projectId(), "/rerun", {
+        const { jobs: created } = await projectApi<{ jobs: JobRecord[] }>(projectId(), "/rerun", {
           method: "POST",
           body: JSON.stringify({
-            assetIds: ui.selectedIds,
+            assetIds,
             providerKeyId: get().billingKeyId(),
             folder: folders.size === 1 ? [...folders][0] : undefined
           })
         });
 
+        adoptCreated(created);
         await get().refreshJobs();
-        useUi
-          .getState()
-          .setNotice(
-            `queued ${ui.selectedIds.length} rerun(s) with the project's current prompt wrapper`
-          );
+        useUi.getState().setNotice(`queued ${assetIds.length} rerun(s)`);
       } catch (error) {
         fail(error);
       } finally {
@@ -531,7 +671,7 @@ export const useServer = create<ServerState>((set, get) => {
       useUi.getState().setBusy("queueing");
 
       try {
-        await projectApi(projectId(), "/generate", {
+        const { jobs: created } = await projectApi<{ jobs: JobRecord[] }>(projectId(), "/generate", {
           method: "POST",
           body: JSON.stringify({
             // Replays the wrapper the original job ran with rather than
@@ -553,6 +693,7 @@ export const useServer = create<ServerState>((set, get) => {
           })
         });
 
+        adoptCreated(created);
         await get().refreshJobs();
         useUi.getState().setNotice(`requeued ${job.label}`);
       } catch (error) {
@@ -571,12 +712,23 @@ export const useServer = create<ServerState>((set, get) => {
       }
     },
 
-    async clearJobs() {
+    async dismissJob(id) {
       try {
+        await projectApi(projectId(), `/jobs/${id}`, { method: "DELETE" });
+        await get().refreshJobs();
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    async clearFailedJobs() {
+      try {
+        const previous = get().jobs;
         const { jobs } = await projectApi<{ jobs: JobRecord[] }>(projectId(), "/jobs", {
           method: "DELETE"
         });
         set({ jobs });
+        useUi.getState().selectMany(remapSelection(useUi.getState().selectedIds, previous, jobs));
       } catch (error) {
         fail(error);
       }
@@ -591,6 +743,7 @@ export const useServer = create<ServerState>((set, get) => {
       }
 
       set({ assets: get().assets.filter((asset) => asset.id !== id) });
+      processor.evictAsset(projectId(), id);
 
       // Clearing it out of the document is a separate, undoable step: the row
       // is soft-deleted server-side, and un-deleting is a support action, but
@@ -703,7 +856,10 @@ export const useServer = create<ServerState>((set, get) => {
       ui.setError(null);
 
       try {
-        const cutBackground = options?.cutBackground ?? get().settings.cutTemplateBackgroundOnPaste;
+        const slot = options?.slot ?? "mask";
+        const cutBackground =
+          options?.cutBackground ??
+          (slot === "base" ? false : get().settings.cutTemplateBackgroundOnPaste);
         const form = new FormData();
         form.append("image", await toPngFile(file));
         form.append("cutBackground", String(cutBackground));
@@ -716,14 +872,15 @@ export const useServer = create<ServerState>((set, get) => {
 
         await get().refreshTemplates();
 
-        const slot = options?.slot ?? "mask";
         const uiState = useUi.getState();
         if (slot === "base") {
-          uiState.setBase({
-            source: { kind: "template", templateId: template.id },
-            fit: uiState.base?.fit ?? "contain",
-            matchAspect: uiState.base?.matchAspect ?? true
-          });
+          uiState.addBases([
+            {
+              source: { kind: "template", templateId: template.id },
+              fit: uiState.bases[0]?.fit ?? "contain",
+              matchAspect: uiState.bases[0]?.matchAspect ?? true
+            }
+          ]);
         } else {
           uiState.setMask({
             source: { kind: "template", templateId: template.id },
@@ -738,6 +895,13 @@ export const useServer = create<ServerState>((set, get) => {
         fail(error);
       } finally {
         useUi.getState().setBusy(null);
+      }
+    },
+
+    async uploadTemplates(files, options) {
+      if (files.length === 0) return;
+      for (const file of files) {
+        await get().uploadTemplate(file, options);
       }
     },
 
@@ -781,9 +945,12 @@ export const useServer = create<ServerState>((set, get) => {
         await get().refreshTemplates();
 
         const ui = useUi.getState();
-        if (ui.base?.source.kind === "template" && ui.base.source.templateId === templateId) {
-          ui.setBase(null);
-        }
+        ui.setBases(
+          ui.bases.filter(
+            (entry) =>
+              !(entry.source.kind === "template" && entry.source.templateId === templateId)
+          )
+        );
         if (ui.mask?.source.kind === "template" && ui.mask.source.templateId === templateId) {
           ui.setMask(null);
         }
@@ -853,6 +1020,98 @@ export const useServer = create<ServerState>((set, get) => {
         set({ projectKeys: keys });
       } catch (error) {
         fail(error);
+      }
+    },
+
+    async loadApiTokens() {
+      try {
+        const { tokens } = await api<{ tokens: ApiTokenStatus[] }>("/api/tokens");
+        set({ apiTokens: tokens });
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    async createApiToken(name) {
+      try {
+        const { token, record } = await api<{ token: string; record: ApiTokenStatus }>(
+          "/api/tokens",
+          { method: "POST", body: JSON.stringify({ name }) }
+        );
+        set({ apiTokens: [record, ...get().apiTokens], mintedToken: token });
+        return token;
+      } catch (error) {
+        fail(error);
+        return null;
+      }
+    },
+
+    async revokeApiToken(id) {
+      try {
+        await api(`/api/tokens/${id}`, { method: "DELETE" });
+        set({ apiTokens: get().apiTokens.filter((token) => token.id !== id) });
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    clearMintedToken() {
+      set({ mintedToken: null });
+    },
+
+    async refreshSlots() {
+      try {
+        const { slots } = await api<{ slots: EngineSlotRecord[] }>(
+          `/api/v1/projects/${projectId()}/slots`
+        );
+        set({ slots });
+      } catch {
+        // Polling is best effort; the next tick recovers.
+      }
+    },
+
+    async assignSlot(slotId, assetIds, options) {
+      const current = get().slots.find((entry) => entry.id === slotId);
+      const replace = options?.replace === true;
+      const planned = current
+        ? replace
+          ? replaceSlotAssignment(current.intent ?? "texture", assetIds)
+          : mergeSlotAssignment(
+              current.intent ?? "texture",
+              current.assignedAssetIds ?? [],
+              assetIds
+            )
+        : assetIds;
+
+      useUi.setState({
+        busy: "uploading",
+        error: null,
+        assigning: emptyAssignProgress(slotId, planned)
+      });
+
+      try {
+        const response = await fetch(`/api/v1/projects/${projectId()}/slots/${slotId}/assign`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ assetIds, ...(replace ? { replace: true } : {}) })
+        });
+        await rejectIfNotOk(response);
+        if (!response.body) throw new Error("assign stream missing body");
+
+        const slot = await consumeAssignEvents(iterateBody(response.body), (event) => {
+          const progress = useUi.getState().assigning;
+          if (!progress) return;
+          useUi.setState({ assigning: applyAssignStreamEvent(progress, event) });
+        });
+
+        set({
+          slots: get().slots.map((entry) => (entry.id === slot.id ? slot : entry))
+        });
+        await get().refreshAssets();
+      } catch (error) {
+        fail(error);
+      } finally {
+        useUi.setState({ busy: null, assigning: null });
       }
     }
   };

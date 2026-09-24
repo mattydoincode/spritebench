@@ -42,6 +42,7 @@ const CASES: Array<{ name: string; settings: Partial<ProcessingSettings>; palett
     settings: {
       cutout: "edgeFloodFill",
       skipCutoutTransparentBorder: 1,
+      downsample: true,
       targetSize: { width: 0, height: 32 },
       pixelate: "dominantColor"
     },
@@ -64,6 +65,7 @@ const CASES: Array<{ name: string; settings: Partial<ProcessingSettings>; palett
   {
     name: "palette quantize, no dither",
     settings: {
+      downsample: true,
       targetSize: { width: 0, height: 48 },
       dither: "none",
       distanceMode: "oklab"
@@ -73,6 +75,7 @@ const CASES: Array<{ name: string; settings: Partial<ProcessingSettings>; palett
   {
     name: "palette quantize, floyd-steinberg",
     settings: {
+      downsample: true,
       targetSize: { width: 0, height: 48 },
       dither: "floydSteinberg",
       ditherStrength: 1,
@@ -83,6 +86,7 @@ const CASES: Array<{ name: string; settings: Partial<ProcessingSettings>; palett
   {
     name: "palette quantize, bayer4x4, weighted rgb",
     settings: {
+      downsample: true,
       targetSize: { width: 0, height: 48 },
       dither: "bayer4x4",
       ditherStrength: 0.5,
@@ -104,6 +108,7 @@ const CASES: Array<{ name: string; settings: Partial<ProcessingSettings>; palett
   {
     name: "nearest neighbour downsample",
     settings: {
+      downsample: true,
       targetSize: { width: 24, height: 24 },
       pixelate: "nearest"
     },
@@ -113,7 +118,7 @@ const CASES: Array<{ name: string; settings: Partial<ProcessingSettings>; palett
     name: "chroma key cutout",
     settings: {
       cutout: "chromaKey",
-      chromaKey: "#ffffff",
+      chromaKeys: ["#ffffff"],
       cutoutTolerance: 0.3,
       targetSize: { width: 0, height: 0 }
     },

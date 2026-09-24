@@ -8,6 +8,9 @@ import {
   PIXEL_CONSTRAINT_TEMPLATE_ID,
   buildPixelConstraintMask,
   buildPixelConstraintTemplate,
+  buildSheetPixelConstraintTemplate,
+  gridOptionsFromSheetPlate,
+  sheetPixelConstraintLayout,
   isPixelConstraintTemplate,
   pixelConstraintLayout,
   pixelConstraintWindow,
@@ -148,6 +151,7 @@ describe("pixel constraint template", () => {
     expect(next.trimToContent).toBe(false);
     expect(next.cutout).toBe("none");
     expect(next.targetSize).toEqual({ width: 32, height: 48 });
+    expect(next.downsample).toBe(true);
     expect(DEFAULT_PROCESSING.trimToContent).toBe(true);
     expect(DEFAULT_PROCESSING.edits).toEqual([]);
   });
@@ -155,6 +159,7 @@ describe("pixel constraint template", () => {
   it("reattaches the stored grid on enqueue after dropping client crops", () => {
     const processing = {
       ...DEFAULT_PROCESSING,
+      downsample: true,
       targetSize: { width: 32, height: 48 },
       edits: [{ kind: "crop" as const, x: 1, y: 2, width: 8, height: 8 }]
     };
@@ -177,10 +182,26 @@ describe("pixel constraint template", () => {
     expect(processingForJob(processing, null).edits).toEqual([]);
   });
 
+  it("leaves the pixel grid off when downsample is unchecked", () => {
+    const mask = {
+      source: { kind: "template" as const, templateId: PIXEL_CONSTRAINT_TEMPLATE_ID },
+      window: { width: 32, height: 32 }
+    };
+    const next = processingForJob(
+      { ...DEFAULT_PROCESSING, downsample: false, targetSize: { width: 32, height: 32 } },
+      { mask },
+      { width: 1024, height: 1024 }
+    );
+
+    expect(next.edits).toEqual([]);
+    expect(next.downsample).toBe(false);
+    expect(next.targetSize).toEqual({ width: 32, height: 32 });
+  });
+
   it("samples a padded plate through the pipeline without trimming", () => {
     const source = buildPixelConstraintTemplate({ width: 64, height: 64 }, { width: 2, height: 4 });
     const settings = processingForJob(
-      DEFAULT_PROCESSING,
+      { ...DEFAULT_PROCESSING, downsample: true },
       {
         mask: {
           source: { kind: "template", templateId: PIXEL_CONSTRAINT_TEMPLATE_ID },
@@ -224,6 +245,104 @@ describe("pixel constraint template", () => {
         cell: 21
       }
     ]);
+  });
+
+  it("lays out a sheet of checkerboards and leaves unused cells empty", () => {
+    const canvas = { width: 64, height: 64 };
+    const sprite = { width: 4, height: 4 };
+    const plan = {
+      columns: 2,
+      rows: 2,
+      actions: [
+        { name: "walk", frames: 2 },
+        { name: "idle", frames: 1 }
+      ]
+    };
+    const layout = sheetPixelConstraintLayout(canvas, sprite, 2, 2);
+    const image = buildSheetPixelConstraintTemplate(canvas, sprite, plan);
+
+    expect(layout).toMatchObject({
+      origin: { x: 0, y: 0 },
+      cell: { width: 28, height: 28 },
+      sprite: { width: 4, height: 4 },
+      gutter: 7
+    });
+    expect(at(image, 0, 0)).toEqual([PIXEL_CONSTRAINT_GREY_A, PIXEL_CONSTRAINT_GREY_A, PIXEL_CONSTRAINT_GREY_A, 255]);
+    expect(at(image, 7, 0)).toEqual([PIXEL_CONSTRAINT_GREY_B, PIXEL_CONSTRAINT_GREY_B, PIXEL_CONSTRAINT_GREY_B, 255]);
+    expect(at(image, 28, 0)).toEqual([255, 255, 255, 255]);
+    expect(at(image, 35, 0)).toEqual([PIXEL_CONSTRAINT_GREY_A, PIXEL_CONSTRAINT_GREY_A, PIXEL_CONSTRAINT_GREY_A, 255]);
+    expect(at(image, 35, 35)).toEqual([255, 255, 255, 255]);
+  });
+
+  it("fits a non-square sheet the same way a still is fitted", () => {
+    expect(pixelConstraintLayout({ width: 64, height: 64 }, { width: 2, height: 4 })).toMatchObject({
+      cell: 16,
+      originX: 16,
+      originY: 0
+    });
+    expect(sheetPixelConstraintLayout({ width: 64, height: 64 }, { width: 2, height: 4 }, 1, 1)).toMatchObject({
+      origin: { x: 16, y: 0 },
+      cell: { width: 32, height: 64 },
+      sprite: { width: 2, height: 4 },
+      gutter: 0
+    });
+  });
+
+  it("samples one animation cell, not the whole sheet", () => {
+    const mask = {
+      source: { kind: "template" as const, templateId: PIXEL_CONSTRAINT_TEMPLATE_ID },
+      window: { width: 4, height: 4 }
+    };
+    const plan = {
+      columns: 2,
+      rows: 2,
+      actions: [{ name: "walk", frames: 2 }],
+      plate: sheetPixelConstraintLayout({ width: 64, height: 64 }, { width: 4, height: 4 }, 2, 2)
+    };
+
+    expect(
+      processingForJob(
+        { ...DEFAULT_PROCESSING, downsample: true },
+        { mask },
+        { width: 64, height: 64 },
+        plan
+      ).edits[0]
+    ).toEqual({
+      kind: "pixelGrid",
+      columns: 4,
+      rows: 4,
+      canvasWidth: 28,
+      canvasHeight: 28,
+      originX: 0,
+      originY: 0,
+      cell: 7
+    });
+  });
+
+  it("seeds slice margins from the stored plate", () => {
+    expect(
+      gridOptionsFromSheetPlate(
+        { width: 128, height: 128 },
+        {
+          columns: 2,
+          rows: 2,
+          plate: {
+            canvas: { width: 64, height: 64 },
+            origin: { x: 8, y: 8 },
+            cell: { width: 24, height: 24 },
+            sprite: { width: 4, height: 4 },
+            gutter: 8
+          }
+        }
+      )
+    ).toEqual({
+      columns: 2,
+      rows: 2,
+      marginX: 16,
+      marginY: 16,
+      spacingX: 16,
+      spacingY: 16
+    });
   });
 
   it("still applies a columns-only edit by recomputing from the result", () => {

@@ -4,8 +4,19 @@ import { isTemplateDrop, readTemplateDrop } from "@/client/dragAssets";
 import { cropImage } from "@/core/edits";
 import { createImage } from "@/core/pixels";
 import type { RgbaImage } from "@/core/types";
+import {
+  SHEET_FRAME_INK,
+  SHEET_FRAMES_TEMPLATE_ID,
+  sheetFrameLayout
+} from "@/core/frameMask";
+import {
+  PIXEL_CONSTRAINT_GREY_A,
+  PIXEL_CONSTRAINT_TEMPLATE_ID,
+  sheetCellRect,
+  sheetPixelConstraintLayout
+} from "@/core/pixelMask";
 import { decodePng } from "@/server/png";
-import { buildEditFromImages, jobUsesEdit } from "@/server/template";
+import { buildEditFromImages, editInputsForJob, jobUsesEdit } from "@/server/template";
 import { DEFAULT_GENERATION, jobUsesMask, type JobInputs } from "@/shared/model";
 
 const ASSET_MIME = "application/x-art-studio-assets";
@@ -130,14 +141,23 @@ describe("template drop", () => {
     });
 
     expect(isTemplateDrop(event)).toBe(true);
-    expect(readTemplateDrop(event)).toEqual({ kind: "asset", assetId: "asset-1" });
+    expect(readTemplateDrop(event)).toEqual({ kind: "assets", assetIds: ["asset-1"] });
   });
 
-  it("accepts an image file when no asset is on the drag", () => {
+  it("accepts image files when no asset is on the drag", () => {
     const file = new File(["x"], "sketch.png", { type: "image/png" });
     const event = dragEvent({ types: ["Files"], files: [file] });
 
-    expect(readTemplateDrop(event)).toEqual({ kind: "file", file });
+    expect(readTemplateDrop(event)).toEqual({ kind: "files", files: [file] });
+  });
+
+  it("keeps every dragged asset", () => {
+    const event = dragEvent({
+      types: [ASSET_MIME],
+      payload: JSON.stringify(["asset-1", "asset-2"])
+    });
+
+    expect(readTemplateDrop(event)).toEqual({ kind: "assets", assetIds: ["asset-1", "asset-2"] });
   });
 
   it("ignores non-image files", () => {
@@ -147,5 +167,91 @@ describe("template drop", () => {
     });
 
     expect(readTemplateDrop(event)).toBeNull();
+  });
+});
+
+describe("editInputsForJob sheet + pixel constraint", () => {
+  it("sends the checkerboard plate and does not flatten used cells", async () => {
+    const result = await editInputsForJob("project", {
+      inputs: {
+        mask: {
+          source: { kind: "template", templateId: PIXEL_CONSTRAINT_TEMPLATE_ID },
+          maskSource: "transparentWhereLight",
+          dilatePixels: 0,
+          fit: "stretch",
+          window: { width: 4, height: 4 }
+        }
+      },
+      sequencePlan: {
+        columns: 2,
+        rows: 2,
+        fps: 6,
+        actions: [
+          { name: "walk", frames: 2 },
+          { name: "idle", frames: 1 }
+        ]
+      },
+      generation: { ...DEFAULT_GENERATION, size: { width: 1024, height: 1024 } }
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.plate).toBeTruthy();
+    expect(result?.mask).toBeTruthy();
+    const image = decodePng(Buffer.from(result!.base));
+    const layout = sheetPixelConstraintLayout(result!.size, { width: 4, height: 4 }, 2, 2);
+    const i = (x: number, y: number) => (y * image.width + x) * 4;
+    expect([
+      image.data[i(layout.origin.x, layout.origin.y)],
+      image.data[i(layout.origin.x, layout.origin.y) + 1],
+      image.data[i(layout.origin.x, layout.origin.y) + 2]
+    ]).toEqual([PIXEL_CONSTRAINT_GREY_A, PIXEL_CONSTRAINT_GREY_A, PIXEL_CONSTRAINT_GREY_A]);
+    const unused = sheetCellRect(layout, 1, 1);
+    const unusedX = unused.x;
+    const unusedY = unused.y;
+    expect([image.data[i(unusedX, unusedY)], image.data[i(unusedX, unusedY) + 1], image.data[i(unusedX, unusedY) + 2]]).toEqual([
+      255, 255, 255
+    ]);
+  });
+});
+
+describe("editInputsForJob sheet + frames plate", () => {
+  it("sends empty white cells and does not paint a pixel grid", async () => {
+    const result = await editInputsForJob("project", {
+      inputs: {
+        mask: {
+          source: { kind: "template", templateId: SHEET_FRAMES_TEMPLATE_ID },
+          maskSource: "transparentWhereLight",
+          dilatePixels: 0,
+          fit: "stretch"
+        }
+      },
+      sequencePlan: {
+        columns: 2,
+        rows: 2,
+        fps: 6,
+        actions: [
+          { name: "walk", frames: 2 },
+          { name: "idle", frames: 1 }
+        ]
+      },
+      generation: { ...DEFAULT_GENERATION, size: { width: 64, height: 64 } }
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.plate).toBeTruthy();
+    expect(result?.mask).toBeTruthy();
+    const image = decodePng(Buffer.from(result!.base));
+    const layout = sheetFrameLayout(result!.size, 2, 2);
+    const i = (x: number, y: number) => (y * image.width + x) * 4;
+    const used = sheetCellRect(layout, 0, 0);
+    const unused = sheetCellRect(layout, 1, 1);
+    expect([image.data[i(used.x, used.y)], image.data[i(used.x, used.y) + 1], image.data[i(used.x, used.y) + 2]]).toEqual([
+      255, 255, 255
+    ]);
+    expect([
+      image.data[i(unused.x, unused.y)],
+      image.data[i(unused.x, unused.y) + 1],
+      image.data[i(unused.x, unused.y) + 2]
+    ]).toEqual([SHEET_FRAME_INK, SHEET_FRAME_INK, SHEET_FRAME_INK]);
   });
 });

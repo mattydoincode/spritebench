@@ -4,6 +4,7 @@ import { snapRequestSize } from "@/providers/models";
 import {
   isChunkSpec,
   isLoopSpec,
+  type BaseSpec,
   type GenerationParams,
   type JobInputs,
   type JobStatus,
@@ -59,9 +60,20 @@ export function startingAssetId(inputs: JobInputs | null | undefined): string | 
   return source?.kind === "asset" ? source.assetId : null;
 }
 
+/** Bases that will fan out, or the single `inputs.base` when the list is empty. */
+export function resolveBases(input: {
+  inputs?: JobInputs | null;
+  bases?: BaseSpec[] | null;
+}): BaseSpec[] {
+  if (input.bases && input.bases.length > 0) return input.bases;
+  const base = input.inputs?.base;
+  return base ? [base] : [];
+}
+
 export function validateGenerateInputs(input: {
   inputs?: JobInputs | null;
   sequencePlan?: SequencePlan | null;
+  bases?: BaseSpec[] | null;
 }): void {
   const inputs = input.inputs ?? null;
   const expandingLoop = isExpandingLoop(inputs);
@@ -71,24 +83,41 @@ export function validateGenerateInputs(input: {
     throw new InvalidInputsError("loop and chunk cannot run in the same request");
   }
 
+  if (inputs?.each && (expandingLoop || expandingChunk)) {
+    throw new InvalidInputsError("each cannot run with loop or chunk");
+  }
+
   if ((expandingLoop || expandingChunk) && input.sequencePlan?.actions?.length) {
     throw new InvalidInputsError("loop and chunk cannot run with a sheet");
   }
 
-  if ((expandingLoop || expandingChunk) && !startingAssetId(inputs)) {
-    throw new InvalidInputsError("pick a starting image first");
+  if (inputs?.each && input.sequencePlan?.actions?.length) {
+    throw new InvalidInputsError("each cannot run with a sheet");
+  }
+
+  if (expandingLoop || expandingChunk) {
+    const starts = resolveBases(input);
+    if (starts.length === 0 || starts.some((entry) => entry.source.kind !== "asset")) {
+      throw new InvalidInputsError("pick a starting image first");
+    }
+  }
+
+  if (inputs?.each) {
+    const starts = resolveBases(input);
+    if (starts.length === 0) throw new InvalidInputsError("add images to edit first");
   }
 }
 
-/** Sheets, loops, and chunks pin size or imageCount for one request only. */
+/** Sheets, loops, chunks, and fan-out animations pin size or imageCount for one request only. */
 export function shouldRememberGeneration(input: {
   remember?: boolean;
   sheet?: boolean;
   loop?: boolean;
   chunk?: boolean;
+  animate?: boolean;
 }): boolean {
   if (input.remember === false) return false;
-  return !input.sheet && !input.loop && !input.chunk;
+  return !input.sheet && !input.loop && !input.chunk && !input.animate;
 }
 
 function requireStartingAsset(inputs: JobInputs | null): void {
@@ -99,7 +128,7 @@ function requireStartingAsset(inputs: JobInputs | null): void {
  * Expands one prompt variant into the jobs it should insert.
  *
  * Stills stay one group of `batches` copies. Loop and chunk each get one
- * group per batch copy, so the jobs bar shows a chain or a grid, not a mix.
+ * group per batch copy, so a chain or a grid stays one batch, not a mix.
  *
  * A row that already has a loop index or chunk rect is a replay: one job,
  * no further fan-out.
@@ -142,8 +171,14 @@ export function planFanout(input: {
         return {
           inputs: {
             base: inputs?.base ?? null,
+            start: inputs?.start ?? inputs?.base ?? null,
             mask: inputs?.mask ?? null,
-            loop: { steps, index }
+            loop: {
+              steps,
+              index,
+              ...(loop.sendStart ? { sendStart: true as const } : {}),
+              ...(loop.includeStart ? { includeStart: true as const } : {})
+            }
           },
           generation,
           status: index === 1 ? ("queued" as const) : ("blocked" as const),
@@ -187,7 +222,14 @@ export function planFanout(input: {
     }));
   }
 
-  const still = inputs?.base || inputs?.mask ? { base: inputs?.base ?? null, mask: inputs?.mask ?? null } : null;
+  const still =
+    inputs?.base || inputs?.mask || inputs?.each
+      ? {
+          base: inputs?.base ?? null,
+          mask: inputs?.mask ?? null,
+          ...(inputs?.each ? { each: true as const } : {})
+        }
+      : null;
 
   return [
     {
@@ -201,6 +243,45 @@ export function planFanout(input: {
       }))
     }
   ];
+}
+
+/**
+ * Tags each prompt/template variant as a frame of one animation.
+ *
+ * One set per batch copy, so two batches of four colours are two 4-frame
+ * loops, not one 8-frame interleave. Loop and chunk rows are left alone.
+ */
+export function attachFanoutAnimation(
+  groupsByExpansion: PlannedGroup[][],
+  enabled: boolean
+): PlannedGroup[][] {
+  const count = groupsByExpansion.length;
+  if (!enabled || count <= 1) return groupsByExpansion;
+
+  const ids = new Map<number, string>();
+  return groupsByExpansion.map((groups, expansionIndex) =>
+    groups.map((group) => ({
+      rows: group.rows.map((row) => {
+        if (row.inputs?.loop || row.inputs?.chunk) return row;
+
+        const key = row.batchIndex;
+        let id = ids.get(key);
+        if (!id) {
+          id = crypto.randomUUID();
+          ids.set(key, id);
+        }
+
+        return {
+          ...row,
+          generation: { ...row.generation, imageCount: 1 },
+          inputs: {
+            ...(row.inputs ?? {}),
+            animate: { id, index: expansionIndex, count }
+          }
+        };
+      })
+    }))
+  );
 }
 
 export function nextLoopIndex(inputs: JobInputs | null): number | null {

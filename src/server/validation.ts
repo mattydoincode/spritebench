@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { MAX_CHROMA_KEYS } from "@/core/settings";
 import {
   CUTOUT_MODES,
   DISTANCE_MODES,
@@ -49,7 +50,7 @@ export const processingSchema = z
     flipHorizontal: z.boolean(),
     flipVertical: z.boolean(),
     cutout: z.enum(CUTOUT_MODES),
-    chromaKey: z.string().regex(/^#?[0-9a-fA-F]{3,8}$/),
+    chromaKeys: z.array(z.string().regex(/^#?[0-9a-fA-F]{3,8}$/)).max(MAX_CHROMA_KEYS),
     cutoutTolerance: z.number().min(0).max(1),
     cutoutLocalTolerance: z.number().min(0).max(1),
     cutoutLuminanceThreshold: z.number().min(0).max(1),
@@ -58,8 +59,10 @@ export const processingSchema = z
     despeckleMinimumNeighbors: z.number().int().min(0).max(8),
     fillHoles: z.boolean(),
     erodePixels: z.number().int().min(0).max(64),
+    clipToIso: z.boolean(),
     trimToContent: z.boolean(),
     trimPadding: z.number().int().min(0).max(512),
+    downsample: z.boolean(),
     targetSize: size,
     pixelate: z.enum(PIXELATE_MODES),
     snapAlpha: z.boolean(),
@@ -123,7 +126,19 @@ export const sequencePlanSchema = z.object({
       })
     )
     .min(1)
-    .max(32)
+    .max(32),
+  plate: z
+    .object({
+      canvas: size,
+      origin: z.object({
+        x: z.number().int().min(0).max(8192),
+        y: z.number().int().min(0).max(8192)
+      }),
+      cell: size,
+      sprite: size,
+      gutter: z.number().int().min(0).max(8192).optional()
+    })
+    .optional()
 });
 
 const imageSourceSchema = z.discriminatedUnion("kind", [
@@ -157,13 +172,20 @@ const rectSchema = z.object({
   height: z.number().finite()
 });
 
+const loopFlagsSchema = {
+  sendStart: z.boolean().optional(),
+  includeStart: z.boolean().optional()
+};
+
 const loopRequestSchema = z.object({
-  steps: z.number().int().min(2).max(20)
+  steps: z.number().int().min(2).max(20),
+  ...loopFlagsSchema
 });
 
 const loopJobSchema = z.object({
   steps: z.number().int().min(1).max(20),
-  index: z.number().int().min(1).max(20)
+  index: z.number().int().min(1).max(20),
+  ...loopFlagsSchema
 });
 
 const chunkRequestSchema = z.object({
@@ -178,9 +200,18 @@ const chunkJobSchema = chunkRequestSchema.extend({
 
 export const jobInputsSchema = z.object({
   base: baseSpecSchema.nullish(),
+  start: baseSpecSchema.nullish(),
   mask: maskSpecSchema.nullish(),
   loop: z.union([loopJobSchema, loopRequestSchema]).nullish(),
-  chunk: z.union([chunkJobSchema, chunkRequestSchema]).nullish()
+  chunk: z.union([chunkJobSchema, chunkRequestSchema]).nullish(),
+  animate: z
+    .object({
+      id: z.string().uuid(),
+      index: z.number().int().min(0).max(256),
+      count: z.number().int().min(2).max(256)
+    })
+    .nullish(),
+  each: z.boolean().nullish()
 });
 
 export const generateBodySchema = z.object({
@@ -195,6 +226,8 @@ export const generateBodySchema = z.object({
   processing: processingSchema.optional(),
   folder: z.string().max(255).optional(),
   inputs: jobInputsSchema.nullish(),
+  /** Example / starting images. Each one fans out like a variable value. */
+  bases: z.array(baseSpecSchema).max(20).optional(),
   sequencePlan: sequencePlanSchema.nullish(),
   label: z.string().max(255).optional(),
   batches: z.number().int().min(1).max(20).optional(),
@@ -210,6 +243,8 @@ export const generateBodySchema = z.object({
     )
     .max(20)
     .optional(),
+  /** Collect variable / template expansions into one library animation. */
+  animate: z.boolean().optional(),
   remember: z.boolean().optional()
 });
 
@@ -229,6 +264,38 @@ export const approveBodySchema = z.object({
   name: z.string().max(255).optional(),
   subfolder: z.string().max(255).optional()
 });
+
+export const apiTokenBodySchema = z.object({
+  name: z.string().trim().min(1).max(80)
+});
+
+export const catalogBodySchema = z.object({
+  slots: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        kind: z.enum(["node", "set_item", "set_bag"]),
+        intent: z.enum(["texture", "sprite_frames", "textures"]).optional(),
+        label: z.string().trim().min(1).max(255),
+        path: z.string().max(1024).default(""),
+        localHash: z
+          .string()
+          .regex(/^[0-9a-f]{64}$/)
+          .nullable()
+          .optional()
+      })
+    )
+    .max(2000)
+});
+
+export const assignSlotBodySchema = z
+  .object({
+    assetIds: z.array(z.string().uuid()).max(100).default([]),
+    replace: z.boolean().optional()
+  })
+  .refine((body) => body.replace === true || body.assetIds.length > 0, {
+    message: "assetIds required"
+  });
 
 /**
  * Editable asset fields now live in the project's Yjs document, so the only

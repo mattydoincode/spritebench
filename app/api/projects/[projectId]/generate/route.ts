@@ -3,22 +3,20 @@ import {
   isPixelConstraintTemplate,
   pixelConstraintWindow
 } from "@/core/pixelMask";
-import { withDefaults } from "@/core/settings";
-import { readDoc } from "@/db/repo/projectDoc";
 import { KeyNotUsableError, resolveKeySelection } from "@/db/repo/providerKeys";
 import { readSettings, writeSettings } from "@/db/repo/users";
 import { providerForModel } from "@/providers";
 import { clampGeneration, findModel } from "@/providers/models";
 import { projectContext } from "@/server/access";
+import { loadProjectSettings } from "@/server/projectSettings";
+import { processingForNewAsset } from "@/shared/projectSettings";
 import {
   EmptyExpansionError,
   FanOutExceededError,
   InvalidInputsError,
-  QuotaExceededError,
   enqueueGeneration
 } from "@/server/generation";
 import { generateBodySchema, parseBody, withValidation } from "@/server/validation";
-import { docFromState, readProjectSettings } from "@/shared/doc";
 import { normalizeLayoutGuideInputs } from "@/shared/featurePrompt";
 import { composePrompt, type GenerationParams } from "@/shared/model";
 import { isExpandingMultistep, shouldRememberGeneration } from "@/shared/multistep";
@@ -34,29 +32,28 @@ export async function POST(request: Request, { params }: Params) {
     const { projectId, userId } = await projectContext(params, "generate");
 
     const body = await parseBody(request, generateBodySchema);
-    const [settings, snapshot] = await Promise.all([
+    const [settings, projectSettings] = await Promise.all([
       readSettings(userId),
-      readDoc(projectId)
+      loadProjectSettings(projectId)
     ]);
-
-    // The wrapper is the project's, read from the document rather than taken
-    // on trust from the body -- a client that has not synced yet would
-    // otherwise quietly generate without the house style.
-    const project = readProjectSettings(docFromState(snapshot.state));
 
     const prompt = {
       guide: body.promptGuide ?? "",
-      prefix: body.promptPrefix ?? project.promptPrefix,
+      prefix: body.promptPrefix ?? "",
       body: body.promptBody,
       extra: body.promptExtra ?? "",
-      suffix: body.promptSuffix ?? project.promptSuffix
+      suffix: body.promptSuffix ?? ""
     };
 
     const generation: GenerationParams = clampGeneration({
       ...settings.generation,
       ...(body.generation ?? {})
     });
-    const processing = withDefaults({ ...settings.processing, ...(body.processing ?? {}) });
+    const processing = processingForNewAsset(
+      settings.processing,
+      projectSettings,
+      body.processing
+    );
     const layout = normalizeLayoutGuideInputs({
       base: body.inputs?.base ?? null,
       mask: body.inputs?.mask ?? null
@@ -75,9 +72,9 @@ export async function POST(request: Request, { params }: Params) {
       : null;
 
     // Generation and processing choices are the caller's own working
-    // preferences, so they are remembered against them. The prompt wrapper is
-    // the project's and lives in the document. The pixel-grid downsample is
-    // attached at enqueue from the mask, not written into these defaults.
+    // preferences, so they are remembered against them. The pixel-grid
+    // downsample is attached at enqueue from the mask, not written into these
+    // defaults.
     const expanding = isExpandingMultistep(body.inputs);
     if (
       shouldRememberGeneration({
@@ -90,7 +87,10 @@ export async function POST(request: Request, { params }: Params) {
       await writeSettings(userId, { generation, processing });
     }
 
-    if (expanding && findModel(generation.model)?.supportsEdit === false) {
+    if (
+      (expanding || Boolean(inputs?.each)) &&
+      findModel(generation.model)?.supportsEdit === false
+    ) {
       return NextResponse.json({ error: "this model cannot edit an existing image" }, { status: 400 });
     }
 
@@ -113,16 +113,15 @@ export async function POST(request: Request, { params }: Params) {
         sequencePlan: body.sequencePlan ?? null,
         label: body.label,
         batches: body.batches ?? 1,
-        variables: body.variables
+        variables: body.variables,
+        bases: body.bases,
+        animate: body.animate
       });
 
       return NextResponse.json({ jobs, composedPrompt: composePrompt(prompt) });
     } catch (error) {
       if (error instanceof KeyNotUsableError) {
         return NextResponse.json({ error: error.message }, { status: 400 });
-      }
-      if (error instanceof QuotaExceededError) {
-        return NextResponse.json({ error: error.message }, { status: 402 });
       }
       if (
         error instanceof EmptyExpansionError ||

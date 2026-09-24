@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { withDefaults } from "@/core/settings";
 import { DEFAULT_GENERATION, type JobRecord, type JobStatus } from "@/shared/model";
 import { db, type Transaction } from "../index";
@@ -49,6 +49,12 @@ export async function listJobs(projectId: string): Promise<JobRecord[]> {
 export async function getJobRow(id: string): Promise<JobRow | null> {
   const [row] = await db().select().from(jobs).where(eq(jobs.id, id)).limit(1);
   return row ?? null;
+}
+
+export async function getJob(projectId: string, id: string): Promise<JobRecord | null> {
+  const row = await getJobRow(id);
+  if (!row || row.projectId !== projectId) return null;
+  return toJobRecord(row);
 }
 
 export interface NewJob {
@@ -245,17 +251,25 @@ export async function unblockJob(
   return row ?? null;
 }
 
-export async function clearFinishedJobs(projectId: string): Promise<void> {
-  await db()
+export async function deleteFailedJob(projectId: string, id: string): Promise<boolean> {
+  const [row] = await db()
     .delete(jobs)
     .where(
       and(
+        eq(jobs.id, id),
         eq(jobs.projectId, projectId),
-        ne(jobs.status, "queued"),
-        ne(jobs.status, "blocked"),
-        ne(jobs.status, "running")
+        inArray(jobs.status, ["error", "cancelled"])
       )
-    );
+    )
+    .returning({ id: jobs.id });
+
+  return row !== undefined;
+}
+
+export async function clearFailedJobs(projectId: string): Promise<void> {
+  await db()
+    .delete(jobs)
+    .where(and(eq(jobs.projectId, projectId), inArray(jobs.status, ["error", "cancelled"])));
 }
 
 /**

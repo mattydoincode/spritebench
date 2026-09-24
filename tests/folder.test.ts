@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  FOLDER_SWATCHES,
+  folderSwatch,
   foldersByJobId,
   groupByFolder,
   resolveJobFolder,
@@ -55,5 +57,21 @@ describe("groupByFolder", () => {
     expect(groupByFolder([{ folder: "loop" }, { folder: "loop" }])).toEqual([
       { folder: "loop", items: [{ folder: "loop" }, { folder: "loop" }] }
     ]);
+  });
+});
+
+describe("folderSwatch", () => {
+  it("picks a stable color from the name", () => {
+    expect(folderSwatch("anim")).toEqual(folderSwatch("anim"));
+    expect(FOLDER_SWATCHES).toContainEqual(folderSwatch("anim"));
+  });
+
+  it("spreads different names across the palette", () => {
+    const picked = new Set(
+      ["anim", "batch", "grid", "props", "tiles", "ui", "fx", "portraits"].map(
+        (name) => FOLDER_SWATCHES.indexOf(folderSwatch(name))
+      )
+    );
+    expect(picked.size).toBeGreaterThan(1);
   });
 });

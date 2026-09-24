@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { isAssetDrag, readAssetDrag } from "@/client/dragAssets";
-import { processor } from "@/client/processor";
+import { PROCESS_PRIORITY, processor } from "@/client/processor";
 import { resolveAssetsNow } from "@/client/stores/assets";
 import { useDoc } from "@/client/stores/doc";
 import { EMPTY_PALETTE, useServer } from "@/client/stores/server";
@@ -204,7 +204,9 @@ export function TerrainView({
             asset.processing,
             EMPTY_PALETTE,
             false,
-            asset.hasSource === false ? "thumb" : "source"
+            asset.hasSource === false ? "thumb" : "source",
+            { width: asset.sourceWidth, height: asset.sourceHeight },
+            PROCESS_PRIORITY.visible
           );
           if (cancelled) return;
           next[id] = rgbaFromBitmap(preview.processed);

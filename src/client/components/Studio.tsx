@@ -4,10 +4,13 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { GeneratePanel } from "@/client/components/GeneratePanel";
 import { ImageEditModal } from "@/client/components/ImageEditModal";
+import { ProjectSettingsModal } from "@/client/components/ProjectSettingsModal";
 import { SliceModal } from "@/client/components/SliceModal";
+import { TemplateBuilderModal } from "@/client/components/TemplateBuilderModal";
 import { InspectorPanel } from "@/client/components/InspectorPanel";
-import { JobsBar } from "@/client/components/JobsBar";
+import { EnginePanel } from "@/client/components/EnginePanel";
 import { LibraryPanel } from "@/client/components/LibraryPanel";
+import { ProcessDock } from "@/client/components/ProcessDock";
 import { Scene } from "@/client/components/Scene";
 import { ProjectBar } from "@/client/components/ProjectBar";
 import { ResizeHandle } from "@/client/components/ResizeHandle";
@@ -70,8 +73,11 @@ export function Studio({ projectId }: { projectId: string }) {
   const scenes = useDoc((state) => state.scenes);
   const editingAssetId = useUi((state) => state.editingAssetId);
   const slicingAssetId = useUi((state) => state.slicingAssetId);
+  const projectSettingsOpen = useUi((state) => state.projectSettingsOpen);
+  const templateBuilderOpen = useUi((state) => state.templateBuilderOpen);
 
   const layout = useUi((state) => state.layout);
+  const rightTab = useUi((state) => state.rightTab);
   const [missing, setMissing] = useState(false);
 
   useEffect(() => {
@@ -98,7 +104,11 @@ export function Studio({ projectId }: { projectId: string }) {
       await useServer.getState().openProject(projectId);
     })();
 
-    return () => useDoc.getState().close();
+    return () => {
+      useUi.getState().closeProjectSettings();
+      useUi.getState().closeTemplateBuilder();
+      useDoc.getState().close();
+    };
   }, [projectId]);
 
   // A project with no scene has nowhere to drop anything. Waits for the
@@ -110,15 +120,17 @@ export function Studio({ projectId }: { projectId: string }) {
     if (id) useUi.getState().setActiveScene(project.id, id);
   }, [project, docReady, scenes.length]);
 
-  const hasActiveJobs = jobs.some((job) => job.status === "queued" || job.status === "running");
+  const hasActiveJobs = jobs.some(
+    (job) => job.status === "queued" || job.status === "blocked" || job.status === "running"
+  );
 
   useEffect(() => {
     if (!project) return;
 
-    const interval = setInterval(
-      () => void useServer.getState().refreshJobs(),
-      hasActiveJobs ? 750 : 5000
-    );
+    const interval = setInterval(() => {
+      void useServer.getState().refreshJobs();
+      void useServer.getState().refreshSlots();
+    }, hasActiveJobs ? 750 : 5000);
 
     return () => clearInterval(interval);
   }, [project, hasActiveJobs]);
@@ -166,7 +178,7 @@ export function Studio({ projectId }: { projectId: string }) {
   }
 
   return (
-    <main className="studio-root flex h-screen flex-col">
+    <main className="studio-root relative flex h-screen flex-col">
       <ProjectBar />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -210,7 +222,11 @@ export function Studio({ projectId }: { projectId: string }) {
         </div>
 
         {layout.collapsed.right ? (
-          <PaneRail label="Inspector" side="right" onExpand={() => collapse("right")} />
+          <PaneRail
+            label={rightTab === "godot" ? "Godot" : "Inspector"}
+            side="right"
+            onExpand={() => collapse("right")}
+          />
         ) : (
           <>
             <ResizeHandle
@@ -220,16 +236,18 @@ export function Studio({ projectId }: { projectId: string }) {
             />
 
             <div className="flex min-h-0 shrink-0 flex-col overflow-hidden" style={{ width: layout.right }}>
-              <InspectorPanel />
+              {rightTab === "godot" ? <EnginePanel /> : <InspectorPanel />}
             </div>
           </>
         )}
       </div>
 
-      <JobsBar />
+      <ProcessDock />
 
       {editingAssetId ? <ImageEditModal /> : null}
       {slicingAssetId ? <SliceModal /> : null}
+      {projectSettingsOpen ? <ProjectSettingsModal /> : null}
+      {templateBuilderOpen ? <TemplateBuilderModal /> : null}
     </main>
   );
 }

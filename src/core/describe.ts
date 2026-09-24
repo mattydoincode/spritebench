@@ -1,7 +1,7 @@
 import { describeEdits } from "./edits";
 import { describeOrientation, hasOrientationWork } from "./orientation";
 import { resolveTargetSize } from "./resample";
-import type { ProcessingSettings } from "./settings";
+import { effectiveTargetSize, trimsToContent, type ProcessingSettings } from "./settings";
 import type { Rgb, Size } from "./types";
 
 /**
@@ -39,12 +39,13 @@ export function describeSettings(
   }
 
   if (settings.erodePixels > 0) steps.push(`erode ${settings.erodePixels}px`);
-  if (settings.trimToContent) steps.push("trim to content");
+  if (settings.clipToIso) steps.push("clip iso");
+  if (trimsToContent(settings)) steps.push("trim to content");
 
   // Compared against the post-rotation size, not the original: a quarter turn
   // swaps the edges without the pipeline resizing anything.
   const turned = afterOrientation(settings, source);
-  const target = resolveTargetSize(turned, settings.targetSize);
+  const target = resolveTargetSize(turned, effectiveTargetSize(settings));
 
   if (
     target.width > 0 &&
@@ -76,7 +77,7 @@ function afterOrientation(settings: ProcessingSettings, source: Size): Size {
  */
 export function expectedSize(settings: ProcessingSettings, source: Size): Size {
   const turned = afterOrientation(settings, source);
-  const target = resolveTargetSize(turned, settings.targetSize);
+  const target = resolveTargetSize(turned, effectiveTargetSize(settings));
 
   return target.width > 0 && target.height > 0 ? target : turned;
 }

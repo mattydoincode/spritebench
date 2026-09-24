@@ -278,10 +278,11 @@ export const geminiProvider: ImageProvider = {
     };
   },
 
-  async edit({ apiKey, prompt, generation, base, mask, plate, size }: EditRequest): Promise<ProviderResult> {
+  async edit({ apiKey, prompt, generation, base, mask, plate, start, size }: EditRequest): Promise<ProviderResult> {
     const images = plate
       ? [
           { mimeType: "image/png", data: Buffer.from(base).toString("base64") },
+          ...(start ? [{ mimeType: "image/png", data: Buffer.from(start).toString("base64") }] : []),
           { mimeType: "image/png", data: Buffer.from(plate).toString("base64") }
         ]
       : [
@@ -291,7 +292,8 @@ export const geminiProvider: ImageProvider = {
               ? encodePng(flattenEditGuide(decodePng(Buffer.from(base)), decodePng(Buffer.from(mask))))
               : Buffer.from(base)
             ).toString("base64")
-          }
+          },
+          ...(start ? [{ mimeType: "image/png", data: Buffer.from(start).toString("base64") }] : [])
         ];
     const { payload, elapsedSeconds } = await send(
       generation.model,

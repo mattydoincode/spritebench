@@ -1,18 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { ISO_DIAMOND_TEMPLATE_ID } from "@/core/isoMask";
+import { ISO_21_TEMPLATE_ID, ISO_DIAMOND_TEMPLATE_ID } from "@/core/isoMask";
+import { SHEET_FRAMES_TEMPLATE_ID } from "@/core/frameMask";
 import { PIXEL_CONSTRAINT_TEMPLATE_ID } from "@/core/pixelMask";
 import {
   GEMINI_GUIDE_INSTRUCTIONS,
   GEMINI_REFERENCE_INSTRUCTIONS,
+  GEMINI_REVISE_INSTRUCTIONS,
+  ISO_21_INSTRUCTIONS,
   ISO_DIAMOND_INSTRUCTIONS,
   PIXEL_CONSTRAINT_INSTRUCTIONS,
+  PIXEL_CONSTRAINT_SHEET_NOTE,
+  SHEET_FRAMES_INSTRUCTIONS,
   activeFeaturePrompts,
-  composeFeatureSlots,
+  appendSuggestedPrompt,
   normalizeLayoutGuideInputs,
-  resolveFeatureText,
-  workingPrompt
+  promptWithEachGuide
 } from "@/shared/featurePrompt";
-import { composePrompt } from "@/shared/model";
 
 const isoMask = {
   source: { kind: "template" as const, templateId: ISO_DIAMOND_TEMPLATE_ID },
@@ -51,6 +54,19 @@ describe("feature prompts", () => {
 
     expect(extras.map((entry) => entry.id)).toEqual(["iso-diamond"]);
     expect(extras[0]?.defaultText).toBe(ISO_DIAMOND_INSTRUCTIONS);
+  });
+
+  it("uses the 2:1 plate text for the dimetric template", () => {
+    const extras = activeFeaturePrompts({
+      model: "gemini-3.1-flash-image",
+      mask: {
+        ...isoMask,
+        source: { kind: "template", templateId: ISO_21_TEMPLATE_ID }
+      }
+    });
+
+    expect(extras.map((entry) => entry.id)).toEqual(["iso-diamond"]);
+    expect(extras[0]?.defaultText).toBe(ISO_21_INSTRUCTIONS);
   });
 
   it("uses only the pixel-constraint text, not the generic mask guide", () => {
@@ -97,6 +113,28 @@ describe("feature prompts", () => {
     expect(extras.map((entry) => entry.id)).toEqual(["reference", "pixel-constraint"]);
   });
 
+  it("surfaces the Gemini revise guide when each is on", () => {
+    const extras = activeFeaturePrompts({
+      model: "gemini-3.1-flash-image",
+      base: reference,
+      each: true
+    });
+
+    expect(extras.map((entry) => entry.id)).toEqual(["revise"]);
+    expect(extras[0]?.defaultText).toBe(GEMINI_REVISE_INSTRUCTIONS);
+  });
+
+  it("attaches the revise guide on Gemini each jobs", () => {
+    const prompt = { prefix: "", body: "clean the edges", suffix: "" };
+    expect(promptWithEachGuide(prompt, true, "gemini-3.1-flash-image").guide).toBe(
+      GEMINI_REVISE_INSTRUCTIONS
+    );
+    expect(promptWithEachGuide(prompt, true, "gpt-image-2").guide).toBeUndefined();
+    expect(promptWithEachGuide({ ...prompt, guide: "keep this" }, true, "gemini-3.1-flash-image").guide).toBe(
+      "keep this"
+    );
+  });
+
   it("surfaces the Gemini reference guide for an unmasked base", () => {
     const extras = activeFeaturePrompts({
       model: "gemini-3.1-flash-image",
@@ -107,44 +145,14 @@ describe("feature prompts", () => {
     expect(extras[0]?.defaultText).toBe(GEMINI_REFERENCE_INSTRUCTIONS);
   });
 
-  it("uses an override until it is cleared", () => {
-    const extra = activeFeaturePrompts({
-      model: "gpt-image-2",
-      mask: pixelMask
-    })[0];
-    if (!extra) throw new Error("expected pixel-constraint extra");
-
-    expect(resolveFeatureText(extra, { "pixel-constraint": "fill the white" })).toBe(
-      "fill the white"
+  it("appends suggested text once", () => {
+    expect(appendSuggestedPrompt("", "fill the diamond")).toBe("fill the diamond");
+    expect(appendSuggestedPrompt("a crate", "fill the diamond")).toBe(
+      "a crate\n\nfill the diamond"
     );
-    expect(resolveFeatureText(extra, {})).toBe(PIXEL_CONSTRAINT_INSTRUCTIONS);
-  });
-
-  it("puts plate instructions after the subject when there is no generic guide", () => {
-    const extras = activeFeaturePrompts({
-      model: "gemini-3.1-flash-image",
-      mask: pixelMask
-    });
-    const slots = composeFeatureSlots(extras, {
-      "pixel-constraint": "fill in the white"
-    });
-    const sent = composePrompt(
-      workingPrompt({
-        prefix: "house style",
-        body: "a crate",
-        suffix: "transparent",
-        model: "gemini-3.1-flash-image",
-        mask: pixelMask,
-        overrides: { "pixel-constraint": "fill in the white" }
-      })
+    expect(appendSuggestedPrompt("a crate\n\nfill the diamond", "fill the diamond")).toBe(
+      "a crate\n\nfill the diamond"
     );
-
-    expect(slots.guide).toBe("");
-    expect(slots.extra).toBe("fill in the white");
-    expect(sent.startsWith("house style")).toBe(true);
-    expect(sent).toContain("a crate");
-    expect(sent).toContain("fill in the white");
-    expect(sent.endsWith("transparent")).toBe(true);
   });
 
   it("moves a layout plate from reference onto the mask", () => {
@@ -178,7 +186,7 @@ describe("feature prompts", () => {
     expect(extras[0]?.defaultText).toMatch(/sprite sheet/);
   });
 
-  it("keeps the generic mask guide on a Gemini sheet", () => {
+  it("sends only the sheet extra on a Gemini sheet", () => {
     const extras = activeFeaturePrompts({
       model: "gemini-3.1-flash-image",
       animation: {
@@ -188,6 +196,46 @@ describe("feature prompts", () => {
       }
     });
 
-    expect(extras.map((entry) => entry.id)).toEqual(["guide", "animation"]);
+    expect(extras.map((entry) => entry.id)).toEqual(["animation"]);
+  });
+
+  it("pairs pixel constraint with the sheet extra, not a generic mask guide", () => {
+    const extras = activeFeaturePrompts({
+      model: "gemini-3.1-flash-image",
+      mask: pixelMask,
+      animation: {
+        enabled: true,
+        actions: [{ name: "walk", frames: 4 }],
+        cellSize: 64
+      }
+    });
+
+    expect(extras.map((entry) => entry.id)).toEqual(["pixel-constraint", "animation"]);
+    expect(extras[0]?.defaultText).toContain(PIXEL_CONSTRAINT_SHEET_NOTE);
+    expect(extras[1]?.defaultText).toMatch(/own pixel grid/);
+    expect(extras[1]?.defaultText).not.toMatch(/Covered cells are masked/);
+  });
+
+  it("pairs the frames plate with the sheet extra, not a pixel grid", () => {
+    const extras = activeFeaturePrompts({
+      model: "gemini-3.1-flash-image",
+      mask: {
+        source: { kind: "template", templateId: SHEET_FRAMES_TEMPLATE_ID },
+        maskSource: "transparentWhereLight",
+        dilatePixels: 0,
+        fit: "stretch"
+      },
+      animation: {
+        enabled: true,
+        actions: [{ name: "walk", frames: 4 }],
+        cellSize: 64
+      }
+    });
+
+    expect(extras.map((entry) => entry.id)).toEqual(["frames", "animation"]);
+    expect(extras[0]?.defaultText).toBe(SHEET_FRAMES_INSTRUCTIONS);
+    expect(extras[1]?.defaultText).toMatch(/white rectangle/);
+    expect(extras[1]?.defaultText).not.toMatch(/pixel grid/);
+    expect(extras[1]?.defaultText).not.toMatch(/Covered cells are masked/);
   });
 });

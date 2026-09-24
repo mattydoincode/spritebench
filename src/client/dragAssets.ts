@@ -24,7 +24,9 @@ export function readAssetDrag(event: React.DragEvent): string[] {
   }
 }
 
-export type TemplateDrop = { kind: "file"; file: File } | { kind: "asset"; assetId: string };
+export type TemplateDrop =
+  | { kind: "files"; files: File[] }
+  | { kind: "assets"; assetIds: string[] };
 
 export function isTemplateDrop(event: React.DragEvent): boolean {
   return isAssetDrag(event) || event.dataTransfer.types.includes("Files");
@@ -43,9 +45,9 @@ export function canAcceptTemplateDrop(types: readonly string[], assetsOnly = fal
 }
 
 export function readTemplateDrop(event: React.DragEvent): TemplateDrop | null {
-  const [assetId] = readAssetDrag(event);
-  if (assetId) return { kind: "asset", assetId };
+  const assetIds = readAssetDrag(event);
+  if (assetIds.length > 0) return { kind: "assets", assetIds };
 
-  const file = [...event.dataTransfer.files].find((entry) => entry.type.startsWith("image/"));
-  return file ? { kind: "file", file } : null;
+  const files = [...event.dataTransfer.files].filter((entry) => entry.type.startsWith("image/"));
+  return files.length > 0 ? { kind: "files", files } : null;
 }

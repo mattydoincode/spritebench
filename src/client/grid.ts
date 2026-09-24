@@ -1,6 +1,13 @@
 import { isoLattice, isoStampBox } from "@/core/repeater";
 import { terrainExtent } from "@/core/terrain";
-import type { RepeatGroup, StagedItem, TerrainGroup } from "@/shared/model";
+import type { Size } from "@/core/types";
+import {
+  isIsoPlacement,
+  isoPitchForRepeater,
+  type RepeatGroup,
+  type StagedItem,
+  type TerrainGroup
+} from "@/shared/model";
 
 export interface Point {
   x: number;
@@ -138,6 +145,164 @@ export function resizeFromCorner(
   };
 }
 
+export interface Box {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export type RepeaterScalePatch = {
+  x: number;
+  y: number;
+  cell: Size;
+  marginX: number;
+  marginY: number;
+  areaWidth: number;
+  areaHeight: number;
+};
+
+type RepeaterLayout = Pick<
+  RepeatGroup,
+  | "x"
+  | "y"
+  | "placement"
+  | "marginX"
+  | "marginY"
+  | "countX"
+  | "countY"
+  | "fillX"
+  | "fillY"
+  | "areaWidth"
+  | "areaHeight"
+> & { isoPitch?: number };
+
+function isoMapBox(
+  origin: Point,
+  cell: Size,
+  marginX: number,
+  marginY: number,
+  cols: number,
+  rows: number,
+  pitch: number
+): Box {
+  const lattice = isoLattice(cell, marginX, marginY, pitch);
+  const corners = [
+    [0, 0],
+    [Math.max(0, cols - 1), 0],
+    [0, Math.max(0, rows - 1)],
+    [Math.max(0, cols - 1), Math.max(0, rows - 1)]
+  ] as const;
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+
+  for (const [col, row] of corners) {
+    const box = isoStampBox(col, row, origin, lattice, cell);
+    minX = Math.min(minX, box.x);
+    maxX = Math.max(maxX, box.x + box.width);
+    minY = Math.min(minY, box.y);
+    maxY = Math.max(maxY, box.y + box.height);
+  }
+
+  return {
+    x: minX,
+    y: minY,
+    width: Math.max(1, maxX - minX),
+    height: Math.max(1, maxY - minY)
+  };
+}
+
+/**
+ * The rectangle the corner handles sit on. Finite maps use the whole
+ * footprint; a fill axis collapses to one cell so you are not dragging
+ * infinity. Scatter is the scatter area.
+ */
+export function repeaterScaleBox(group: RepeaterLayout, cell: Size): Box {
+  if (group.placement === "scatter") {
+    return {
+      x: group.x,
+      y: group.y,
+      width: Math.max(1, group.areaWidth),
+      height: Math.max(1, group.areaHeight)
+    };
+  }
+
+  const cols = group.fillX ? 1 : Math.max(1, Math.floor(group.countX));
+  const rows = group.fillY ? 1 : Math.max(1, Math.floor(group.countY));
+  const width = Math.max(1, cell.width);
+  const height = Math.max(1, cell.height);
+
+  if (isIsoPlacement(group.placement)) {
+    return isoMapBox(
+      { x: group.x, y: group.y },
+      { width, height },
+      group.marginX,
+      group.marginY,
+      cols,
+      rows,
+      isoPitchForRepeater(group)
+    );
+  }
+
+  return {
+    x: group.x,
+    y: group.y,
+    width: Math.max(1, (width + group.marginX) * cols - group.marginX),
+    height: Math.max(1, (height + group.marginY) * rows - group.marginY)
+  };
+}
+
+/**
+ * Map a dragged scale box back onto cell, margins, and origin. Opposite
+ * corner of the box stays planted; stamps scale with the box.
+ */
+export function applyRepeaterScale(
+  group: RepeaterLayout,
+  cell: Size,
+  start: Box,
+  next: Box
+): RepeaterScalePatch {
+  const startW = Math.max(1, start.width);
+  const startH = Math.max(1, start.height);
+  const scaleX = Math.max(1 / startW, next.width / startW);
+  const scaleY = Math.max(1 / startH, next.height / startH);
+
+  const nextCell = {
+    width: cell.width > 0 ? Math.max(1, Math.round(cell.width * scaleX)) : 0,
+    height: cell.height > 0 ? Math.max(1, Math.round(cell.height * scaleY)) : 0
+  };
+
+  const scaled: RepeaterScalePatch = {
+    x: group.x,
+    y: group.y,
+    cell: nextCell,
+    marginX: Math.round(group.marginX * scaleX),
+    marginY: Math.round(group.marginY * scaleY),
+    areaWidth:
+      group.placement === "scatter"
+        ? Math.max(1, next.width)
+        : Math.max(1, Math.round(group.areaWidth * scaleX)),
+    areaHeight:
+      group.placement === "scatter"
+        ? Math.max(1, next.height)
+        : Math.max(1, Math.round(group.areaHeight * scaleY))
+  };
+
+  const tentative = repeaterScaleBox({ ...group, ...scaled }, {
+    width: nextCell.width > 0 ? nextCell.width : Math.max(1, Math.round(startW * scaleX)),
+    height: nextCell.height > 0 ? nextCell.height : Math.max(1, Math.round(startH * scaleY))
+  });
+
+  return {
+    ...scaled,
+    x: group.x + (next.x - tentative.x),
+    y: group.y + (next.y - tentative.y)
+  };
+}
+
 export function centerOf(entry: StagedItem | RepeatGroup | TerrainGroup): Point {
   if ("footprint" in entry) {
     return {
@@ -168,34 +333,20 @@ export function centerOf(entry: StagedItem | RepeatGroup | TerrainGroup): Point 
     return { x: entry.x, y: entry.y };
   }
 
-  if (entry.placement === "iso") {
+  if (isIsoPlacement(entry.placement)) {
     if (entry.cell.width <= 0) return { x: entry.x, y: entry.y };
 
-    const lattice = isoLattice(entry.cell, entry.marginX, entry.marginY);
-    const cols = Math.max(1, Math.floor(entry.countX));
-    const rows = Math.max(1, Math.floor(entry.countY));
-    const origin = { x: entry.x, y: entry.y };
-    const corners = [
-      [0, 0],
-      [cols - 1, 0],
-      [0, rows - 1],
-      [cols - 1, rows - 1]
-    ] as const;
+    const box = isoMapBox(
+      { x: entry.x, y: entry.y },
+      entry.cell,
+      entry.marginX,
+      entry.marginY,
+      Math.max(1, Math.floor(entry.countX)),
+      Math.max(1, Math.floor(entry.countY)),
+      isoPitchForRepeater(entry)
+    );
 
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let maxY = -Infinity;
-
-    for (const [col, row] of corners) {
-      const box = isoStampBox(col, row, origin, lattice, entry.cell);
-      minX = Math.min(minX, box.x);
-      maxX = Math.max(maxX, box.x + box.width);
-      minY = Math.min(minY, box.y);
-      maxY = Math.max(maxY, box.y + box.height);
-    }
-
-    return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
   }
 
   return {

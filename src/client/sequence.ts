@@ -1,11 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { processor, type ProcessedPreview, type SourceVariant } from "@/client/processor";
+import {
+  framesAfterSignatureChange,
+  keysToCancel,
+  PROCESS_DEBOUNCE_MS,
+  shouldDebounceProcess
+} from "@/client/processPreview";
+import {
+  isProcessCancelled,
+  PROCESS_PRIORITY,
+  processor,
+  type ProcessedPreview,
+  type SourceVariant
+} from "@/client/processor";
 import { useServer } from "@/client/stores/server";
-import { hashSettings, type ProcessingSettings } from "@/core/settings";
-import { thumbnailSize } from "@/core/size";
-import { scaleRect } from "@/core/slice";
+import { hashPalette, hashSettings, type ProcessingSettings } from "@/core/settings";
 import type { Rgb } from "@/core/types";
 import type { ResolvedAsset } from "@/shared/model";
 import {
@@ -14,7 +24,6 @@ import {
   frameIndexAtTick,
   frameSettings,
   frameSourceAssetId,
-  insetRect,
   totalTicks,
   type Sequence
 } from "@/shared/sequence";
@@ -25,31 +34,17 @@ import {
  * A 4x4 sheet drawn into a 96-pixel library square is sixteen unreadable
  * specks, so anywhere that shows one image per asset shows frame 0 instead.
  *
- * The `variant` matters. Frame rectangles are in raw source coordinates, and
- * the library renders from a 256-pixel stored thumbnail, so the rectangle has
- * to be mapped into that space or it lands off the edge of the image.
+ * Rectangles stay in raw source pixels. The processor maps them onto a
+ * thumbnail when that is the image being decoded.
  *
  * Returns undefined for an asset with no animation, which is the signal to
  * render it the ordinary way.
  */
-export function previewFrameSettings(
-  asset: ResolvedAsset | null,
-  variant: SourceVariant
-): ProcessingSettings | undefined {
+export function previewFrameSettings(asset: ResolvedAsset | null): ProcessingSettings | undefined {
   const sequence = asset?.sequences.find((entry) => entry.frames.length > 0);
   if (!asset || !sequence) return undefined;
 
-  const settings = frameSettings(asset.processing, sequence, sequence.frames[0]);
-  if (variant !== "thumb") return settings;
-
-  const source = { width: asset.sourceWidth, height: asset.sourceHeight };
-  const rect = insetRect(sequence.frames[0].rect, sequence.inset);
-  const scaled = scaleRect(rect, source, thumbnailSize(source));
-
-  // Per-frame edits are dropped rather than rescaled: they are in the frame's
-  // own space, and at thumbnail scale a few pixels of crop is invisible
-  // anyway. Getting the frame right is the whole job here.
-  return { ...settings, edits: [{ kind: "crop", ...scaled }] };
+  return frameSettings(asset.processing, sequence, sequence.frames[0]);
 }
 
 export interface SequenceFramesState {
@@ -101,14 +96,20 @@ export function useSequenceFrames(
       asset.id,
       effective,
       hashSettings(asset.processing),
-      palette.length,
+      hashPalette(palette),
       `${top},${right},${bottom},${left}`,
       frames
     ].join("/");
-  }, [asset, sequence, palette.length, effective]);
+  }, [asset, sequence, palette, effective]);
+
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const keysRef = useRef<string[]>([]);
 
   useEffect(() => {
     if (!asset || !sequence || !projectId || sequence.frames.length === 0) {
+      for (const key of keysToCancel(keysRef.current, [])) processor.cancel(key);
+      keysRef.current = [];
       setState(EMPTY);
       return;
     }
@@ -116,67 +117,77 @@ export function useSequenceFrames(
     const settings = sequence.frames.map((frame) =>
       frameSettings(asset.processing, sequence, frame)
     );
-
-    // Anything already rendered shows immediately; only the rest flickers.
-    const seeded = settings.map(
-      (entry, index) =>
-        processor.peek(
-          processor.cacheKeyFor(
-            frameSourceAssetId(asset.id, sequence.frames[index]),
-            entry,
-            palette.length,
-            effective
-          )
-        ) ?? null
+    const keys = settings.map((entry, index) =>
+      processor.cacheKeyFor(
+        frameSourceAssetId(asset.id, sequence.frames[index]),
+        entry,
+        palette,
+        effective
+      )
     );
 
+    for (const key of keysToCancel(keysRef.current, keys)) processor.cancel(key);
+    keysRef.current = keys;
+
+    const peeked = keys.map((key) => processor.peek(key) ?? null);
+    const frames = framesAfterSignatureChange(stateRef.current.frames, peeked);
+    const missing = peeked.flatMap((frame, index) => (frame ? [] : [index]));
+
     setState({
-      frames: seeded,
-      loading: seeded.some((frame) => frame === null),
+      frames,
+      loading: missing.length > 0,
       error: null
     });
 
+    if (missing.length === 0) return;
+
     let cancelled = false;
-    let outstanding = 0;
+    let timer = 0;
 
-    for (const [index, entry] of settings.entries()) {
-      if (seeded[index]) continue;
+    const start = () => {
+      let outstanding = missing.length;
 
-      outstanding++;
+      for (const index of missing) {
+        processor
+          .process(
+            projectId,
+            frameSourceAssetId(asset.id, sequence.frames[index]),
+            settings[index],
+            palette,
+            false,
+            effective,
+            { width: asset.sourceWidth, height: asset.sourceHeight },
+            PROCESS_PRIORITY.visible
+          )
+          .then((preview) => {
+            if (cancelled) return;
 
-      processor
-        .process(
-          projectId,
-          frameSourceAssetId(asset.id, sequence.frames[index]),
-          entry,
-          palette,
-          false,
-          effective
-        )
-        .then((preview) => {
-          if (cancelled) return;
-
-          setState((previous) => {
-            const frames = [...previous.frames];
-            frames[index] = preview;
-            return { ...previous, frames };
+            setState((previous) => {
+              const next = [...previous.frames];
+              next[index] = preview;
+              return { ...previous, frames: next };
+            });
+          })
+          .catch((error: Error) => {
+            if (!cancelled && !isProcessCancelled(error)) {
+              setState((previous) => ({ ...previous, error: error.message }));
+            }
+          })
+          .finally(() => {
+            outstanding--;
+            if (!cancelled && outstanding === 0) {
+              setState((previous) => ({ ...previous, loading: false }));
+            }
           });
-        })
-        .catch((error: Error) => {
-          if (!cancelled) setState((previous) => ({ ...previous, error: error.message }));
-        })
-        .finally(() => {
-          outstanding--;
-          if (!cancelled && outstanding === 0) {
-            setState((previous) => ({ ...previous, loading: false }));
-          }
-        });
-    }
+      }
+    };
 
-    if (outstanding === 0) setState((previous) => ({ ...previous, loading: false }));
+    const delay = shouldDebounceProcess(frames.some(Boolean)) ? PROCESS_DEBOUNCE_MS : 0;
+    timer = window.setTimeout(start, delay);
 
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
     // `signature` stands in for asset, sequence and palette: it is built from
     // exactly the fields of each that change a rendered pixel.

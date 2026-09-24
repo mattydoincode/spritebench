@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { PromptSpec } from "@/shared/model";
+import { appendBases, type PromptSpec } from "@/shared/model";
 import {
   bindPrompt,
   collectSlots,
+  expandCreate,
   expandPrompt,
   insertSlot,
+  joinValues,
   LOOP_SLOT_NAMES,
   loopBindings,
   loopReservedSlots,
@@ -12,7 +14,9 @@ import {
   offeredVariables,
   parseValues,
   planCreate,
-  promptForJob
+  promptForJob,
+  removeSlot,
+  renameSlot
 } from "@/shared/promptVars";
 
 function prompt(body: string, prefix = "", suffix = ""): PromptSpec {
@@ -24,6 +28,27 @@ describe("parseValues", () => {
     expect(parseValues("green, red, blue")).toEqual(["green", "red", "blue"]);
     expect(parseValues(" green, , red,")).toEqual(["green", "red"]);
     expect(parseValues("")).toEqual([]);
+  });
+
+  it("round-trips through joinValues", () => {
+    expect(joinValues(["green", " red", ""])).toBe("green, red");
+    expect(parseValues(joinValues(["green", "red", "blue"]))).toEqual(["green", "red", "blue"]);
+  });
+});
+
+describe("removeSlot", () => {
+  it("strips the token and leftover spaces", () => {
+    expect(removeSlot("a crate {color}", "color")).toBe("a crate");
+    expect(removeSlot("a {color} crate", "color")).toBe("a crate");
+    expect(removeSlot("{color}", "color")).toBe("");
+    expect(removeSlot("a {color} {size}", "color")).toBe("a {size}");
+    expect(removeSlot("{var} {var2}", "var")).toBe("{var2}");
+  });
+
+  it("renames a token in place", () => {
+    expect(renameSlot("a {color} bin", "color", "tint")).toBe("a {tint} bin");
+    expect(renameSlot("a {color} bin", "color", "")).toBe("a bin");
+    expect(renameSlot("a {color} bin", "color", "color")).toBe("a {color} bin");
   });
 });
 
@@ -205,6 +230,79 @@ describe("planCreate", () => {
     expect(plan.breakdown).toBe("2 batches × 4 chunks");
   });
 
+  it("multiplies reference templates like a variable", () => {
+    const plan = planCreate({
+      prompt: prompt("a {color} crate"),
+      variables: [{ name: "color", values: "green, red" }],
+      batches: 1,
+      imageCount: 1,
+      sheet: false,
+      bases: 3
+    });
+
+    expect(plan.expansions).toBe(6);
+    expect(plan.jobs).toBe(6);
+    expect(plan.breakdown).toBe("3 templates × 2 colors");
+    expect(plan.blocked).toBeNull();
+  });
+
+  it("multiplies each-mode images and requires at least one", () => {
+    const missing = planCreate({
+      prompt: prompt("clean this up"),
+      variables: [],
+      batches: 1,
+      imageCount: 2,
+      sheet: false,
+      bases: 0,
+      startNoun: "image",
+      requiresStart: true,
+      hasStart: false,
+      missingStart: "add images to edit first",
+      each: true
+    });
+
+    expect(missing.jobs).toBe(1);
+    expect(missing.blocked).toMatch(/add images/);
+
+    const ready = planCreate({
+      prompt: prompt("clean this up"),
+      variables: [],
+      batches: 1,
+      imageCount: 2,
+      sheet: false,
+      bases: 5,
+      startNoun: "image",
+      requiresStart: true,
+      hasStart: true,
+      each: true
+    });
+
+    expect(ready.expansions).toBe(5);
+    expect(ready.jobs).toBe(5);
+    expect(ready.images).toBe(5);
+    expect(ready.breakdown).toBe("5 images");
+    expect(ready.blocked).toBeNull();
+  });
+
+  it("multiplies loop starts", () => {
+    const plan = planCreate({
+      prompt: prompt("refine this"),
+      variables: [],
+      batches: 1,
+      imageCount: 1,
+      sheet: false,
+      loopSteps: 4,
+      bases: 3,
+      startNoun: "start",
+      requiresStart: true,
+      hasStart: true
+    });
+
+    expect(plan.jobs).toBe(12);
+    expect(plan.breakdown).toBe("3 starts × 4 steps");
+    expect(plan.blocked).toBeNull();
+  });
+
   it("blocks a fan-out past the limit", () => {
     const plan = planCreate({
       prompt: prompt("a {n} bin"),
@@ -217,6 +315,80 @@ describe("planCreate", () => {
 
     expect(plan.images).toBe(50);
     expect(plan.blocked).toMatch(/50 images/);
+  });
+
+  it("pins each expansion to one image when collecting an animation", () => {
+    const plan = planCreate({
+      prompt: prompt("a {color} bin"),
+      variables: [{ name: "color", values: "green, red, blue" }],
+      batches: 2,
+      imageCount: 4,
+      sheet: false,
+      animate: true
+    });
+
+    expect(plan.jobs).toBe(6);
+    expect(plan.images).toBe(6);
+    expect(plan.breakdown).toBe("3 colors × 2 batches as animations");
+  });
+
+  it("does not pin a single job when animate is on", () => {
+    const plan = planCreate({
+      prompt: prompt("a bin"),
+      variables: [],
+      batches: 1,
+      imageCount: 3,
+      sheet: false,
+      animate: true
+    });
+
+    expect(plan.images).toBe(3);
+    expect(plan.breakdown).toBe("3 images");
+  });
+});
+
+describe("appendBases", () => {
+  const template = (id: string) => ({
+    source: { kind: "template" as const, templateId: id },
+    fit: "contain" as const,
+    matchAspect: true
+  });
+
+  it("skips a source that is already listed", () => {
+    expect(appendBases([template("a")], [template("a"), template("b")])).toEqual([
+      template("a"),
+      template("b")
+    ]);
+  });
+});
+
+describe("expandCreate", () => {
+  const template = (id: string) => ({
+    source: { kind: "template" as const, templateId: id },
+    fit: "contain" as const,
+    matchAspect: true
+  });
+
+  it("is one expansion with no base when none are attached", () => {
+    const expansions = expandCreate(prompt("a crate"), [], []);
+    expect(expansions).toHaveLength(1);
+    expect(expansions[0].base).toBeNull();
+    expect(expansions[0].prompt.body).toBe("a crate");
+  });
+
+  it("fans out one job per template, cartesian with slots", () => {
+    const expansions = expandCreate(
+      prompt("a {color} crate"),
+      [{ name: "color", values: "green, red" }],
+      [template("a"), template("b")]
+    );
+
+    expect(expansions.map((entry) => [entry.base?.source.kind === "template" ? entry.base.source.templateId : "", entry.prompt.body])).toEqual([
+      ["a", "a green crate"],
+      ["b", "a green crate"],
+      ["a", "a red crate"],
+      ["b", "a red crate"]
+    ]);
   });
 });
 

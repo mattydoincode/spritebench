@@ -11,6 +11,17 @@ const nextConfig = {
   distDir: process.env.NEXT_DIST_DIR || ".next",
 
   /**
+   * Webpack only — Turbopack ignores this. Stops Next from evicting a page
+   * after 60s idle so navigating back does not recompile. Buffer covers the
+   * whole page graph (`/`, `/sign-in`, `/projects`, `/projects/[id]`,
+   * `/settings`, plus legal pages).
+   */
+  onDemandEntries: {
+    maxInactiveAge: 15 * 60 * 1000,
+    pagesBufferLength: 8
+  },
+
+  /**
    * Sends www to the apex, so there is one canonical origin.
    *
    * This lives here because neither layer above it can do the job. App

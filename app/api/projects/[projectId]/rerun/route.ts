@@ -1,20 +1,19 @@
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { getAsset } from "@/db/repo/assets";
-import { readDoc } from "@/db/repo/projectDoc";
 import { KeyNotUsableError, resolveKeySelection } from "@/db/repo/providerKeys";
 import { readSettings } from "@/db/repo/users";
 import { providerForModel } from "@/providers";
 import { clampGeneration } from "@/providers/models";
 import { projectContext } from "@/server/access";
+import { loadProjectSettings } from "@/server/projectSettings";
+import { processingForNewAsset } from "@/shared/projectSettings";
 import {
   FanOutExceededError,
-  QuotaExceededError,
   assertCapacity,
   enqueueGeneration
 } from "@/server/generation";
 import { parseBody, rerunBodySchema, withValidation } from "@/server/validation";
-import { docFromState, readProjectSettings } from "@/shared/doc";
 import { formatSeq } from "@/shared/naming";
 import type { JobRecord } from "@/shared/model";
 
@@ -27,12 +26,10 @@ export async function POST(request: Request, { params }: Params) {
     const { projectId, userId } = await projectContext(params, "generate");
 
     const body = await parseBody(request, rerunBodySchema);
-    const [settings, snapshot] = await Promise.all([
+    const [settings, projectSettings] = await Promise.all([
       readSettings(userId),
-      readDoc(projectId)
+      loadProjectSettings(projectId)
     ]);
-
-    const project = readProjectSettings(docFromState(snapshot.state));
 
     const targets = (
       await Promise.all(body.assetIds.map((id) => getAsset(projectId, id)))
@@ -42,8 +39,8 @@ export async function POST(request: Request, { params }: Params) {
       return NextResponse.json({ error: "none of those assets exist" }, { status: 404 });
     }
 
-    // Each rerun is its own single-image job, but they share a batch id so the
-    // jobs bar groups them the way a multi-batch generate does.
+    // Each rerun is its own single-image job, but they share a batch id so a
+    // multi-asset rerun stays one batch the way a multi-batch generate does.
     const batchId = targets.length > 1 ? crypto.randomUUID() : null;
     const jobs: JobRecord[] = [];
 
@@ -74,14 +71,16 @@ export async function POST(request: Request, { params }: Params) {
           providerKeyId,
           prompt: {
             guide: asset.prompt.guide ?? "",
-            prefix: body.promptPrefix ?? project.promptPrefix,
+            prefix: asset.prompt.prefix,
             body: asset.prompt.body,
             extra: asset.prompt.extra ?? "",
-            suffix: body.promptSuffix ?? project.promptSuffix
+            suffix: asset.prompt.suffix
           },
           generation,
           processing:
-            body.useStoredProcessing === false ? settings.processing : asset.generatedWith,
+            body.useStoredProcessing === false
+              ? processingForNewAsset(settings.processing, projectSettings)
+              : asset.generatedWith,
           // Folder and pretty name live in the Yjs document, so the label uses
           // the number, which is the one name the server can see.
           folder: body.folder ?? "",
@@ -98,9 +97,6 @@ export async function POST(request: Request, { params }: Params) {
     } catch (error) {
       if (error instanceof KeyNotUsableError) {
         return NextResponse.json({ error: error.message, jobs }, { status: 400 });
-      }
-      if (error instanceof QuotaExceededError) {
-        return NextResponse.json({ error: error.message, jobs }, { status: 402 });
       }
       if (error instanceof FanOutExceededError) {
         return NextResponse.json({ error: error.message, jobs }, { status: 400 });

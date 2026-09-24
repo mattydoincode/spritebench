@@ -1,7 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { processor, type ProcessedPreview, type SourceVariant } from "@/client/processor";
+import {
+  PROCESS_DEBOUNCE_MS,
+  previewAfterKeyChange,
+  shouldDebounceProcess
+} from "@/client/processPreview";
+import {
+  bitmapLive,
+  isProcessCancelled,
+  previewUsable,
+  processor,
+  PROCESS_PRIORITY,
+  type ProcessedPreview,
+  type SourceVariant
+} from "@/client/processor";
 import { previewFrameSettings } from "@/client/sequence";
 import { EMPTY_PALETTE, useServer } from "@/client/stores/server";
 import type { ProcessingSettings } from "@/core/settings";
@@ -39,7 +52,9 @@ export function useProcessed(
   wantSource = false,
   variant: SourceVariant = "source",
   override?: ProcessingSettings,
-  sourceAssetId?: string
+  sourceAssetId?: string,
+  priority: number = PROCESS_PRIORITY.background,
+  enabled = true
 ): PreviewState {
   const projectId = useServer((state) => state.project?.id ?? null);
 
@@ -58,45 +73,97 @@ export function useProcessed(
   const cacheKey = useMemo(
     () =>
       asset && settings && processId
-        ? processor.cacheKeyFor(processId, settings, palette.length, effective)
+        ? processor.cacheKeyFor(processId, settings, palette, effective)
         : "",
-    [asset, settings, palette.length, effective, processId]
+    [asset, settings, palette, effective, processId]
   );
+
+  const detached = Boolean(state.preview && !previewUsable(state.preview, wantSource));
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const keyRef = useRef("");
+  const assetRef = useRef("");
 
   useEffect(() => {
     if (!asset || !projectId || !settings || !processId) {
+      keyRef.current = "";
+      assetRef.current = "";
       setState({ preview: null, error: null, loading: false });
       return;
     }
 
-    const cached = processor.peek(cacheKey);
-    if (cached && (!wantSource || cached.sourceBitmap)) {
-      setState({ preview: cached, error: null, loading: false });
-      return;
-    }
+    if (!enabled) return;
+
+    const previousKey = keyRef.current;
+    if (previousKey && previousKey !== cacheKey) processor.cancel(previousKey);
+    keyRef.current = cacheKey;
+
+    const assetChanged = assetRef.current !== processId;
+    assetRef.current = processId;
 
     let cancelled = false;
-    setState((previous) => ({ ...previous, loading: true }));
+    let timer = 0;
 
-    processor
-      .process(projectId, processId, settings, palette, wantSource, effective)
-      .then((preview) => {
-        if (!cancelled) setState({ preview, error: null, loading: false });
-      })
-      .catch((error: Error) => {
-        if (!cancelled) setState({ preview: null, error: error.message, loading: false });
-      });
+    const apply = (preview: ProcessedPreview) => {
+      if (cancelled || !previewUsable(preview, wantSource)) return;
+      setState({ preview, error: null, loading: false });
+    };
+
+    const cached = processor.peek(cacheKey);
+    const peeked = cached && previewUsable(cached, wantSource) ? cached : null;
+    const lastGood = previewUsable(stateRef.current.preview, wantSource)
+      ? stateRef.current.preview
+      : null;
+    const next = previewAfterKeyChange({
+      previous: lastGood,
+      nextPeek: peeked,
+      assetChanged
+    });
+
+    setState({ preview: next.preview, error: null, loading: next.loading });
+
+    if (!peeked) {
+      const start = () => {
+        processor
+          .process(
+            projectId,
+            processId,
+            settings,
+            palette,
+            wantSource,
+            effective,
+            { width: asset.sourceWidth, height: asset.sourceHeight },
+            priority
+          )
+          .then(apply)
+          .catch((error: Error) => {
+            if (cancelled || isProcessCancelled(error)) return;
+            setState((previous) => ({
+              preview: previous.preview,
+              error: error.message,
+              loading: false
+            }));
+          });
+      };
+
+      const delay = shouldDebounceProcess(Boolean(next.preview)) ? PROCESS_DEBOUNCE_MS : 0;
+      timer = window.setTimeout(start, delay);
+    }
+
+    const unsubscribe = processor.subscribe(cacheKey, apply);
 
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
+      unsubscribe();
     };
     // `settings` is covered by `cacheKey`, which is a hash of it. Depending on
     // the object as well would refetch on every render for a caller that
     // builds its override inline.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [asset, projectId, cacheKey, palette, wantSource, effective]);
+  }, [asset, projectId, cacheKey, palette, wantSource, effective, detached, processId, priority, enabled]);
 
-  return state;
+  return detached ? { preview: null, error: state.error, loading: true } : state;
 }
 
 export function BitmapCanvas({
@@ -124,7 +191,12 @@ export function BitmapCanvas({
 
   useEffect(() => {
     const canvas = ref.current;
-    if (!canvas || !bitmap || width <= 0 || height <= 0) return;
+    if (!canvas) return;
+    if (!bitmap || !bitmapLive(bitmap) || width <= 0 || height <= 0) {
+      canvas.width = 0;
+      canvas.height = 0;
+      return;
+    }
 
     canvas.width = width;
     canvas.height = height;
@@ -147,7 +219,7 @@ export function BitmapCanvas({
       context.putImageData(frame, 0, 0);
     }
 
-    if (overlay) {
+    if (overlay && bitmapLive(overlay)) {
       context.save();
       context.globalAlpha = overlayOpacity;
       context.drawImage(overlay, 0, 0, width, height);
@@ -164,68 +236,95 @@ export function BitmapCanvas({
   );
 }
 
-export function AssetThumb({ asset, size = 96 }: { asset: ResolvedAsset; size?: number }) {
+function useIntersecting(ref: { current: Element | null }): boolean {
+  const [visible, setVisible] = useState(() => typeof IntersectionObserver === "undefined");
+
+  useEffect(() => {
+    if (visible) return;
+    const element = ref.current;
+    if (!element) return;
+
+    if (typeof IntersectionObserver === "undefined") {
+      setVisible(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) setVisible(true);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref, visible]);
+
+  return visible;
+}
+
+export function AssetThumb({
+  asset,
+  size = 96,
+  variant = "thumb"
+}: {
+  asset: ResolvedAsset;
+  size?: number;
+  variant?: SourceVariant;
+}) {
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const visible = useIntersecting(boxRef);
   const palette = useAssetPalette(asset);
-  // Runs the pipeline over the small stored preview rather than the source.
-  // The result is indistinguishable at this size and costs a few KB.
+  // Thumb variant runs the same pipeline over the stored preview. Source-space
+  // crops and erode are mapped in the worker from the recorded source size.
   const { preview, error, loading } = useProcessed(
     asset,
     palette,
     false,
-    "thumb",
-    asset.set ? undefined : previewFrameSettings(asset, "thumb")
+    variant,
+    asset.set ? undefined : previewFrameSettings(asset),
+    undefined,
+    PROCESS_PRIORITY.background,
+    visible
   );
 
   const frameCount = asset.sequences.find((entry) => entry.frames.length > 0)?.frames.length ?? 0;
-
-  if (error) {
-    return (
-      <div
-        className="flex items-center justify-center rounded bg-[#3a1e26] p-1 text-center text-[9px] leading-tight text-rose-300"
-        style={{ width: size, height: size }}
-      >
-        {error}
-      </div>
-    );
-  }
-
-  if (!preview) {
-    return (
-      <div
-        className="checkerboard flex items-center justify-center rounded text-[10px] text-slate-500"
-        style={{ width: size, height: size }}
-      >
-        {loading ? "..." : ""}
-      </div>
-    );
-  }
-
-  const scale = Math.min(size / preview.width, size / preview.height);
+  const scale =
+    preview && preview.width > 0 && preview.height > 0
+      ? Math.min(size / preview.width, size / preview.height)
+      : 1;
 
   return (
     <div
-      className="checkerboard relative flex items-center justify-center overflow-hidden rounded"
+      ref={boxRef}
+      className={`relative flex items-center justify-center overflow-hidden ${
+        error ? "rounded bg-[#3a1e26] p-1" : "checkerboard"
+      }`}
       style={{ width: size, height: size }}
     >
-      <BitmapCanvas
-        bitmap={preview.processed}
-        width={preview.width}
-        height={preview.height}
-        pixelated={scale >= 1}
-        style={{
-          width: Math.max(1, Math.round(preview.width * scale)),
-          height: Math.max(1, Math.round(preview.height * scale))
-        }}
-      />
-
-      {frameCount > 0 ? (
-        <span
-          className="pointer-events-none absolute bottom-0.5 right-0.5 rounded bg-black/70 px-1 text-[9px] leading-tight text-amber-300"
-          title={`${frameCount} frame animation, showing frame 1`}
-        >
-          {frameCount}f
-        </span>
-      ) : null}
+      {error ? (
+        <span className="text-center text-[9px] leading-tight text-rose-300">{error}</span>
+      ) : preview ? (
+        <>
+          <BitmapCanvas
+            bitmap={preview.processed}
+            width={preview.width}
+            height={preview.height}
+            pixelated
+            className="block"
+            style={{
+              width: Math.max(1, Math.round(preview.width * scale)),
+              height: Math.max(1, Math.round(preview.height * scale))
+            }}
+          />
+          {frameCount > 0 ? (
+            <span
+              className="pointer-events-none absolute bottom-0.5 right-0.5 rounded bg-black/70 px-1 text-[9px] leading-tight text-amber-300"
+              title={`${frameCount} frame animation, showing frame 1`}
+            >
+              {frameCount}f
+            </span>
+          ) : null}
+        </>
+      ) : (
+        <span className="text-[10px] text-slate-500">{loading ? "..." : ""}</span>
+      )}
     </div>
   );
 }

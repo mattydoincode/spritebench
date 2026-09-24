@@ -88,6 +88,65 @@ describe("frameSettings", () => {
     expect(settings.edits[1]).toEqual({ kind: "crop", x: 1, y: 1, width: 5, height: 5 });
   });
 
+  it("keeps a per-frame pixel grid after the crop", () => {
+    const base = {
+      ...DEFAULT_PROCESSING,
+      downsample: true,
+      targetSize: { width: 4, height: 4 },
+      edits: [
+        {
+          kind: "pixelGrid" as const,
+          columns: 4,
+          rows: 4,
+          canvasWidth: 32,
+          canvasHeight: 32,
+          originX: 0,
+          originY: 0,
+          cell: 8
+        }
+      ]
+    };
+    const settings = frameSettings(base, sequence(), frame("a", 0));
+
+    expect(settings.edits).toEqual([
+      { kind: "crop", x: 0, y: 0, width: 20, height: 20 },
+      {
+        kind: "pixelGrid",
+        columns: 4,
+        rows: 4,
+        canvasWidth: 32,
+        canvasHeight: 32,
+        originX: 0,
+        originY: 0,
+        cell: 8
+      }
+    ]);
+  });
+
+  it("skips the pixel grid when downsample is off", () => {
+    const base = {
+      ...DEFAULT_PROCESSING,
+      downsample: false,
+      targetSize: { width: 4, height: 4 },
+      edits: [
+        {
+          kind: "pixelGrid" as const,
+          columns: 4,
+          rows: 4,
+          canvasWidth: 32,
+          canvasHeight: 32,
+          originX: 0,
+          originY: 0,
+          cell: 8
+        }
+      ]
+    };
+
+    expect(frameSettings(base, sequence(), frame("a", 0)).edits).toEqual([
+      { kind: "crop", x: 0, y: 0, width: 20, height: 20 }
+    ]);
+  });
+
   it("drops sheet-level edits so a sheet crop cannot shift every frame", () => {
     const base = {
       ...DEFAULT_PROCESSING,

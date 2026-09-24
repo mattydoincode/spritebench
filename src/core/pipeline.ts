@@ -7,11 +7,12 @@ import {
   trimToContent
 } from "./cutout";
 import { applyEdits, describeEdits } from "./edits";
+import { clipToIsoDiamond } from "./isoMask";
 import { applyOrientation, describeOrientation, hasOrientationWork } from "./orientation";
 import { quantize } from "./palette";
 import { hexToRgb } from "./pixels";
 import { resize, resolveTargetSize } from "./resample";
-import type { ProcessingSettings } from "./settings";
+import { effectiveTargetSize, trimsToContent, type ProcessingSettings } from "./settings";
 import type { Rgb, RgbaImage } from "./types";
 
 export interface PipelineResult {
@@ -62,7 +63,7 @@ export function applyPipeline(
       working = cut(
         working,
         settings.cutout,
-        hexToRgb(settings.chromaKey),
+        settings.chromaKeys.map(hexToRgb),
         settings.cutoutTolerance,
         settings.cutoutLocalTolerance,
         settings.cutoutLuminanceThreshold,
@@ -87,7 +88,12 @@ export function applyPipeline(
     steps.push(`erode ${settings.erodePixels}px`);
   }
 
-  if (settings.trimToContent) {
+  if (settings.clipToIso) {
+    working = clipToIsoDiamond(working);
+    steps.push("clip iso");
+  }
+
+  if (trimsToContent(settings)) {
     const before = `${working.width}x${working.height}`;
     working = trimToContent(working, settings.alphaThreshold, settings.trimPadding);
     steps.push(`trim ${before} to ${working.width}x${working.height}`);
@@ -95,7 +101,7 @@ export function applyPipeline(
 
   const target = resolveTargetSize(
     { width: working.width, height: working.height },
-    settings.targetSize
+    effectiveTargetSize(settings)
   );
 
   if (target.width > 0 && target.height > 0) {

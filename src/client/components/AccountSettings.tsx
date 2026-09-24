@@ -1,10 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  DEFAULT_PROCESS_WORKERS,
+  MAX_PROCESS_WORKERS,
+  MIN_PROCESS_WORKERS
+} from "@/client/processQueue";
 import { useServer } from "@/client/stores/server";
 import { useUi } from "@/client/stores/ui";
 import { providerIds, providerLabel } from "@/providers/models";
-import { Modal } from "./ui";
+import { Modal, NumberInput } from "./ui";
 
 /**
  * Account-level settings: things that belong to you rather than to a project.
@@ -223,6 +228,152 @@ function KeyRow({ id, provider, label, keySuffix, valid }: {
   );
 }
 
+function MintedTokenModal({ token, onClose }: { token: string; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(token);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <Modal title="Personal access token" variant="plain" width={520} onClose={onClose}>
+      <p className="text-sm text-amber-200">Copy this now. It is not shown again.</p>
+      <p className="mt-3 break-all rounded-md border border-[var(--color-edge)] bg-[var(--color-ink-800)] px-3 py-2 font-mono text-sm text-white">
+        {token}
+      </p>
+      <div className="mt-6 flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-md border border-[var(--color-edge)] px-4 py-2 text-sm text-slate-300 hover:bg-[var(--color-ink-700)]"
+        >
+          Done
+        </button>
+        <button
+          type="button"
+          onClick={() => void copy()}
+          className="rounded-md bg-[var(--color-accent-dim)] px-4 py-2 text-sm font-medium text-white hover:brightness-110"
+        >
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function TokenSection() {
+  const tokens = useServer((state) => state.apiTokens);
+  const minted = useServer((state) => state.mintedToken);
+  const [name, setName] = useState("Godot");
+  const [creating, setCreating] = useState(false);
+
+  const create = async () => {
+    if (!name.trim()) return;
+    setCreating(true);
+    await useServer.getState().createApiToken(name.trim());
+    setCreating(false);
+  };
+
+  return (
+    <section className="mt-12">
+      <h2 className="text-lg font-medium text-white">Personal access tokens</h2>
+      <p className="mt-2 text-sm leading-relaxed text-slate-400">
+        For the Godot plugin. Paste the token into the editor, not into the
+        project. Every token can do the same things you can: list projects,
+        sync slots, and pull assigned art. They cannot generate or mint more
+        tokens.
+      </p>
+
+      <div className="mt-4 flex gap-2">
+        <input
+          type="text"
+          value={name}
+          placeholder="Godot"
+          onChange={(event) => setName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") void create();
+          }}
+        />
+        <button
+          type="button"
+          disabled={creating || !name.trim()}
+          onClick={() => void create()}
+          className="shrink-0 rounded-md bg-[var(--color-accent-dim)] px-4 py-2 text-sm font-medium text-white hover:brightness-110 disabled:opacity-40"
+        >
+          {creating ? "Creating..." : "Create"}
+        </button>
+      </div>
+
+      {minted ? (
+        <MintedTokenModal
+          token={minted}
+          onClose={() => useServer.getState().clearMintedToken()}
+        />
+      ) : null}
+
+      {tokens.length > 0 ? (
+        <ul className="mt-4 flex flex-col gap-2">
+          {tokens.map((token) => (
+            <li
+              key={token.id}
+              className="flex items-center gap-4 rounded-lg border border-[var(--color-edge)] bg-[var(--color-ink-800)] px-4 py-3"
+            >
+              <span className="min-w-0 flex-1 truncate text-slate-300">{token.name}</span>
+              <span className="font-mono text-sm text-slate-500">{token.prefix}…</span>
+              <button
+                type="button"
+                onClick={() => void useServer.getState().revokeApiToken(token.id)}
+                className="rounded-md border border-[var(--color-edge)] px-3 py-1.5 text-sm text-slate-400 hover:border-rose-800 hover:text-rose-300"
+              >
+                Revoke
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
+
+function reportedCores(): number | null {
+  if (typeof navigator === "undefined") return null;
+  const count = navigator.hardwareConcurrency;
+  return Number.isFinite(count) && count > 0 ? count : null;
+}
+
+function MachineSection() {
+  const processWorkers = useUi((state) => state.processWorkers);
+  const cores = reportedCores();
+
+  return (
+    <section className="mt-8">
+      <h2 className="mb-2 text-lg font-medium text-white">This machine</h2>
+      <p className="mb-4 max-w-xl text-sm leading-relaxed text-slate-400">
+        Local image processing runs in your browser. Each worker is one thread.
+        {cores ? ` This browser reports ${cores} cores.` : ""} Default is {DEFAULT_PROCESS_WORKERS};
+        raise it if you have the cores and a large library.
+      </p>
+      <label className="flex items-center gap-3 text-sm text-slate-300">
+        <span className="w-32 shrink-0">Process workers</span>
+        <NumberInput
+          integer
+          min={MIN_PROCESS_WORKERS}
+          max={MAX_PROCESS_WORKERS}
+          value={processWorkers}
+          width={56}
+          title={`${MIN_PROCESS_WORKERS}–${MAX_PROCESS_WORKERS} workers on this computer`}
+          onChange={(value) => useUi.getState().setProcessWorkers(value)}
+        />
+      </label>
+    </section>
+  );
+}
+
 export function AccountSettings() {
   const keys = useServer((state) => state.providerKeys);
   const error = useUi((state) => state.error);
@@ -231,10 +382,14 @@ export function AccountSettings() {
   const [adding, setAdding] = useState(false);
 
   useEffect(() => {
+    useUi.getState().hydrate();
     useUi.getState().clearMessages();
 
     void (async () => {
-      await useServer.getState().loadProjects();
+      await Promise.all([
+        useServer.getState().loadProjects(),
+        useServer.getState().loadApiTokens()
+      ]);
       setLoading(false);
     })();
   }, []);
@@ -278,6 +433,9 @@ export function AccountSettings() {
       </section>
 
       {adding ? <AddKeyModal onClose={() => setAdding(false)} /> : null}
+
+      <MachineSection />
+      <TokenSection />
     </div>
   );
 }

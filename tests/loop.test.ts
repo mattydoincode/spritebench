@@ -71,5 +71,16 @@ describe("successorInputs", () => {
       kind: "asset",
       assetId: "cccccccc-cccc-cccc-cccc-cccccccccccc"
     });
+    expect(next.start?.source).toEqual(inputs.base?.source);
+  });
+
+  it("does not overwrite an existing start", () => {
+    const origin = {
+      source: { kind: "asset" as const, assetId: "dddddddd-dddd-dddd-dddd-dddddddddddd" },
+      fit: "contain" as const,
+      matchAspect: true
+    };
+    const next = successorInputs({ ...inputs, start: origin }, "cccccccc-cccc-cccc-cccc-cccccccccccc");
+    expect(next.start).toEqual(origin);
   });
 });

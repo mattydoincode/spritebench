@@ -1,4 +1,4 @@
-import { composePrompt, isLoopSpec, type JobInputs, type PromptSpec } from "./model";
+import { composePrompt, isLoopSpec, type BaseSpec, type JobInputs, type PromptSpec } from "./model";
 
 /**
  * Prompt slots like `{color}` and the cartesian fan-out they produce.
@@ -42,6 +42,11 @@ export interface PromptExpansion {
   label: string;
 }
 
+export interface CreateExpansion extends PromptExpansion {
+  /** Reference or starting image for this variant. Null when none was attached. */
+  base: BaseSpec | null;
+}
+
 /** Matches the default `MAX_IMAGES_PER_REQUEST`. The server still reads env. */
 export const DEFAULT_CREATE_IMAGE_LIMIT = 40;
 
@@ -50,6 +55,37 @@ export function parseValues(raw: string): string[] {
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
+}
+
+export function joinValues(values: string[]): string {
+  return values
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+    .join(", ");
+}
+
+function isSlotName(name: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
+}
+
+/** Drop `{name}` tokens and the leftover spaces they leave behind. */
+export function removeSlot(text: string, name: string): string {
+  if (!isSlotName(name)) return text;
+  return text
+    .split(`{${name}}`)
+    .join("")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/^[ \t]+/, "")
+    .trimEnd();
+}
+
+export function renameSlot(text: string, from: string, to: string): string {
+  if (from === to || !isSlotName(from)) return text;
+  if (!to) return removeSlot(text, from);
+  if (!isSlotName(to)) return text;
+  return text.split(`{${from}}`).join(`{${to}}`);
 }
 
 export function collectSlots(...parts: string[]): string[] {
@@ -150,6 +186,26 @@ export function expandPrompt(
   });
 }
 
+/**
+ * Prompt variants × reference/starting images.
+ *
+ * Empty `bases` is one job with no image attached, same as before. One or
+ * more is a job per image, cartesian with `{slots}`.
+ */
+export function expandCreate(
+  prompt: PromptSpec,
+  variables: PromptVariable[],
+  bases: BaseSpec[] = [],
+  reserved: readonly string[] = []
+): CreateExpansion[] {
+  const prompts = expandPrompt(prompt, variables, reserved);
+  if (prompts.length === 0) return [];
+
+  const refs: Array<BaseSpec | null> = bases.length > 0 ? bases : [null];
+
+  return prompts.flatMap((entry) => refs.map((base) => ({ ...entry, base })));
+}
+
 export interface CreatePlan {
   expansions: number;
   jobs: number;
@@ -174,24 +230,39 @@ export function planCreate(input: {
   sheet: boolean;
   loopSteps?: number;
   chunkCells?: number;
+  /** Example / starting images. 0 means no attached image, not zero jobs. */
+  bases?: number;
+  startNoun?: string;
   requiresStart?: boolean;
   hasStart?: boolean;
   limit?: number;
   reserved?: readonly string[];
+  /** Pin each expansion to one image and collect them as a library animation. */
+  animate?: boolean;
+  /** One edit per attached image. */
+  each?: boolean;
+  missingStart?: string;
 }): CreatePlan {
   const batches = Math.max(1, Math.floor(input.batches));
   const loopSteps = Math.max(0, Math.floor(input.loopSteps ?? 0));
   const chunkCells = Math.max(0, Math.floor(input.chunkCells ?? 0));
   const fan = loopSteps > 0 ? loopSteps : chunkCells > 0 ? chunkCells : 1;
-  const perJob = input.sheet || fan > 1 ? 1 : Math.max(1, Math.floor(input.imageCount));
   const reserved = input.reserved ?? [];
   const expansions = expandPrompt(input.prompt, input.variables, reserved);
-  const count = expansions.length;
+  const refs = Math.max(1, Math.floor(input.bases ?? 0));
+  const count = expansions.length * refs;
+  const perJob =
+    input.sheet || input.each || fan > 1 || (input.animate && count > 1)
+      ? 1
+      : Math.max(1, Math.floor(input.imageCount));
   const jobs = count * batches * fan;
   const images = jobs * perJob;
   const limit = input.limit ?? DEFAULT_CREATE_IMAGE_LIMIT;
 
   const parts: string[] = [];
+  if ((input.bases ?? 0) > 1) {
+    parts.push(plural(input.bases ?? 0, input.startNoun ?? "template"));
+  }
   for (const entry of activeVariables(input.prompt, input.variables, reserved)) {
     const n = parseValues(entry.values).length;
     if (n > 0) parts.push(plural(n, entry.name));
@@ -200,10 +271,16 @@ export function planCreate(input: {
   if (loopSteps > 1) parts.push(plural(loopSteps, "step"));
   if (chunkCells > 1) parts.push(plural(chunkCells, "chunk"));
   if (perJob > 1) parts.push(plural(perJob, "image"));
+  const animated =
+    input.animate && count > 1 && fan <= 1 && !input.sheet
+      ? batches > 1
+        ? "as animations"
+        : "as an animation"
+      : "";
 
   let blocked: string | null = null;
   if (input.requiresStart && !input.hasStart) {
-    blocked = "pick a starting image first";
+    blocked = input.missingStart ?? "pick a starting image first";
   } else if (count === 0) {
     blocked = "give every {slot} in the prompt at least one value";
   } else if (images > limit) {
@@ -216,7 +293,7 @@ export function planCreate(input: {
     expansions: count,
     jobs,
     images,
-    breakdown: parts.join(" × "),
+    breakdown: [parts.join(" × "), animated].filter(Boolean).join(" "),
     blocked
   };
 }

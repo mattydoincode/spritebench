@@ -8,7 +8,7 @@ import {
   type ReactNode
 } from "react";
 import { createPortal } from "react-dom";
-import { type Pane, useUi } from "@/client/stores/ui";
+import { sectionCollapsed, type Pane, useUi } from "@/client/stores/ui";
 
 let openModals = 0;
 
@@ -301,6 +301,44 @@ function CollapseChevron({ pane }: { pane: Pane }) {
       className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-[var(--color-edge)] bg-[var(--color-ink-700)] text-[13px] leading-none text-slate-400 transition hover:border-slate-500 hover:bg-[var(--color-ink-500)] hover:text-white"
     >
       {COLLAPSE_ARROW[pane]}
+    </button>
+  );
+}
+
+export function Tabs({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div
+      role="tablist"
+      aria-label={label}
+      className="flex rounded border border-[var(--color-edge)] bg-[var(--color-ink-900)] p-0.5"
+    >
+      {children}
+    </div>
+  );
+}
+
+export function Tab({
+  selected,
+  onClick,
+  children
+}: {
+  selected: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={selected}
+      onClick={onClick}
+      className={`rounded px-2 py-0.5 text-[11px] font-semibold tracking-wider uppercase ${
+        selected
+          ? "bg-[var(--color-ink-600)] text-slate-200"
+          : "text-slate-500 hover:bg-[var(--color-ink-800)] hover:text-slate-300"
+      }`}
+    >
+      {children}
     </button>
   );
 }
@@ -649,13 +687,15 @@ export function Slider({
   onChange,
   min,
   max,
-  step = 0.01
+  step = 0.01,
+  showValue = true
 }: {
   value: number;
   onChange: (value: number) => void;
   min: number;
   max: number;
   step?: number;
+  showValue?: boolean;
 }) {
   return (
     <Row>
@@ -667,9 +707,11 @@ export function Slider({
         value={value}
         onChange={(event) => onChange(Number.parseFloat(event.target.value))}
       />
-      <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-slate-400">
-        {value.toFixed(2)}
-      </span>
+      {showValue ? (
+        <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-slate-400">
+          {value.toFixed(2)}
+        </span>
+      ) : null}
     </Row>
   );
 }
@@ -682,6 +724,42 @@ export function Divider({ label }: { label?: string }) {
         <span className="text-[10px] uppercase tracking-widest text-slate-500">{label}</span>
       ) : null}
       <span className="h-px flex-1 bg-[var(--color-edge)]" />
+    </div>
+  );
+}
+
+/**
+ * A labeled divider that hides its body. State lives in the ui store so a
+ * closed section stays closed across reloads and is easy to move later.
+ */
+export function Section({
+  id,
+  label,
+  children
+}: {
+  id: string;
+  label: string;
+  children: ReactNode;
+}) {
+  const collapsed = useUi((state) => sectionCollapsed(id, state.collapsedSections));
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => useUi.getState().toggleSection(id)}
+        aria-expanded={!collapsed}
+        title={collapsed ? `Show ${label}` : `Hide ${label}`}
+        className="my-3 flex w-full items-center gap-2"
+      >
+        <span className="h-px flex-1 bg-[var(--color-edge)]" />
+        <span className="flex items-center gap-1 text-[10px] uppercase tracking-widest text-slate-500">
+          <span aria-hidden>{collapsed ? "\u25b8" : "\u25be"}</span>
+          {label}
+        </span>
+        <span className="h-px flex-1 bg-[var(--color-edge)]" />
+      </button>
+      {collapsed ? null : children}
     </div>
   );
 }

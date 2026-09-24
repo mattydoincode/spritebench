@@ -32,10 +32,12 @@ export async function providerAttachmentBytes(
       );
     }
     if (part === "reference" && !inputs.mask) return inputs.base;
+    if (part === "start") return inputs.start ?? null;
     return null;
   }
 
   if (part === "base") return inputs.base;
+  if (part === "start") return inputs.start ?? null;
   if (part === "mask") return inputs.mask;
   if (part === "guide") return inputs.plate ?? null;
   return null;

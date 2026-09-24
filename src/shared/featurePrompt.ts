@@ -1,20 +1,22 @@
-import { isIsoDiamondTemplate } from "@/core/isoMask";
+import { isIsoDiamondTemplate, isoProjectionForTemplate } from "@/core/isoMask";
+import { isSheetFramesTemplate } from "@/core/frameMask";
 import { isLayoutGuideTemplate, isPixelConstraintTemplate } from "@/core/pixelMask";
 import { findModel } from "@/providers/models";
 import { gridInstructions, itemGridInstructions, planAnimation, planItemGrid } from "./animationPrompt";
 import type { BaseSpec, MaskSpec, PromptSpec } from "./model";
 
 /**
- * Extra text a feature prepends or appends. Not the house style — that is
- * prefix/suffix — and not the subject. These are the instructions that used
- * to be hardcoded next to a mask or a sheet and were invisible until send.
+ * Suggested instructions for a mask, plate, or sheet. Not sent unless the
+ * user copies them into the prompt box.
  */
 
 export type FeaturePromptId =
   | "guide"
   | "reference"
+  | "revise"
   | "iso-diamond"
   | "pixel-constraint"
+  | "frames"
   | "animation"
   | "item-grid";
 
@@ -31,6 +33,7 @@ export interface FeaturePromptContext {
   model: string;
   mask?: MaskSpec | null;
   base?: BaseSpec | null;
+  each?: boolean;
   animation?: { enabled: boolean; actions: { name: string; frames: number }[]; cellSize: number } | null;
   itemGrid?: { enabled: boolean; columns: number; rows: number; cellSize: number } | null;
 }
@@ -50,9 +53,18 @@ export const GEMINI_GUIDE_INSTRUCTIONS = [
 export const GEMINI_REFERENCE_INSTRUCTIONS =
   "The attached image is a composition reference. Keep its pose, proportions, and layout. Draw a new finished illustration of the subject; do not trace the reference as line art unless the prompt asks for that.";
 
+export const GEMINI_REVISE_INSTRUCTIONS =
+  "The attached image is the artwork to revise. Return an updated version of this same image. Keep its subject, composition, and identity unless the prompt asks otherwise. Apply only the requested changes — do not start a new illustration from scratch.";
+
 export const ISO_DIAMOND_INSTRUCTIONS = [
   "The attached image is a layout plate, not the finished artwork.",
-  "White pixels mark the isometric diamond — fill them with the subject.",
+  "White pixels mark a true isometric diamond — 120° between the three axes, about √3 wide for every 1 tall. Fill them with the subject.",
+  "Leave the black pixels unchanged. Do not draw the guide itself."
+].join(" ");
+
+export const ISO_21_INSTRUCTIONS = [
+  "The attached image is a layout plate, not the finished artwork.",
+  "White pixels mark the 2:1 dimetric diamond — twice as wide as it is tall. Fill them with the subject.",
   "Leave the black pixels unchanged. Do not draw the guide itself."
 ].join(" ");
 
@@ -61,6 +73,15 @@ export const PIXEL_CONSTRAINT_INSTRUCTIONS = [
   "The grey checkerboard is a pixel grid: each square is exactly one sprite pixel.",
   "Fill every square with a single flat colour. Do not blend across squares or leave the guide grey.",
   "Paint the outside white. Do not draw the checkerboard itself in the result."
+].join(" ");
+
+export const PIXEL_CONSTRAINT_SHEET_NOTE =
+  "Each animation cell is its own pixel grid, separated by empty gutters. Unused cells stay empty.";
+
+export const SHEET_FRAMES_INSTRUCTIONS = [
+  "The attached image is a layout plate, not the finished artwork.",
+  "White rectangles are the frames — fill each used cell with the subject.",
+  "Leave the black gutters and unused cells unchanged. Do not draw the guide itself."
 ].join(" ");
 
 function isGemini(model: string): boolean {
@@ -99,19 +120,20 @@ export function normalizeLayoutGuideInputs(inputs: {
 
   return {
     base: null,
-    mask: isPixelConstraintTemplate(id)
-      ? {
-          source: { kind: "template", templateId: id },
-          maskSource: "transparentWhereLight",
-          dilatePixels: 0,
-          fit: "stretch"
-        }
-      : {
-          source: { kind: "template", templateId: id },
-          maskSource: "keepInsideShape",
-          dilatePixels: 0,
-          fit: "contain"
-        }
+    mask:
+      isPixelConstraintTemplate(id) || isSheetFramesTemplate(id)
+        ? {
+            source: { kind: "template", templateId: id },
+            maskSource: "transparentWhereLight",
+            dilatePixels: 0,
+            fit: "stretch"
+          }
+        : {
+            source: { kind: "template", templateId: id },
+            maskSource: "keepInsideShape",
+            dilatePixels: 0,
+            fit: "contain"
+          }
   };
 }
 
@@ -128,7 +150,14 @@ export function activeFeaturePrompts(ctx: FeaturePromptContext): FeaturePrompt[]
     Boolean(ctx.base) && !layoutGuideId(null, ctx.base);
   const id = guideId ?? templateId(ctx.mask?.source);
 
-  if (gemini && realReference) {
+  if (gemini && realReference && ctx.each) {
+    extras.push({
+      id: "revise",
+      slot: "guide",
+      label: "Revise",
+      defaultText: GEMINI_REVISE_INSTRUCTIONS
+    });
+  } else if (gemini && realReference) {
     extras.push({
       id: "reference",
       slot: "guide",
@@ -138,8 +167,8 @@ export function activeFeaturePrompts(ctx: FeaturePromptContext): FeaturePrompt[]
   }
 
   // Layout plates carry their own read-the-plate text. The generic Gemini
-  // mask preamble only applies to a custom stencil or a sheet.
-  if (gemini && (customMask || (sheetActive(ctx) && !guideId))) {
+  // mask preamble only applies to a custom stencil — never a sheet.
+  if (gemini && customMask) {
     extras.push({
       id: "guide",
       slot: "guide",
@@ -149,11 +178,12 @@ export function activeFeaturePrompts(ctx: FeaturePromptContext): FeaturePrompt[]
   }
 
   if (id && isIsoDiamondTemplate(id)) {
+    const dimetric = isoProjectionForTemplate(id) === "dimetric";
     extras.push({
       id: "iso-diamond",
       slot: "extra",
-      label: "Iso diamond",
-      defaultText: ISO_DIAMOND_INSTRUCTIONS
+      label: dimetric ? "2:1 diamond" : "Iso diamond",
+      defaultText: dimetric ? ISO_21_INSTRUCTIONS : ISO_DIAMOND_INSTRUCTIONS
     });
   }
 
@@ -162,9 +192,23 @@ export function activeFeaturePrompts(ctx: FeaturePromptContext): FeaturePrompt[]
       id: "pixel-constraint",
       slot: "extra",
       label: "Pixel constraint",
-      defaultText: PIXEL_CONSTRAINT_INSTRUCTIONS
+      defaultText: sheetActive(ctx)
+        ? `${PIXEL_CONSTRAINT_INSTRUCTIONS} ${PIXEL_CONSTRAINT_SHEET_NOTE}`
+        : PIXEL_CONSTRAINT_INSTRUCTIONS
     });
   }
+
+  if (id && isSheetFramesTemplate(id)) {
+    extras.push({
+      id: "frames",
+      slot: "extra",
+      label: "Frames",
+      defaultText: SHEET_FRAMES_INSTRUCTIONS
+    });
+  }
+
+  const pixel = Boolean(id && isPixelConstraintTemplate(id));
+  const frames = Boolean(id && isSheetFramesTemplate(id));
 
   if (ctx.animation?.enabled) {
     const planned = planAnimation({
@@ -176,11 +220,10 @@ export function activeFeaturePrompts(ctx: FeaturePromptContext): FeaturePrompt[]
       id: "animation",
       slot: "extra",
       label: "Sheet",
-      defaultText: gridInstructions(
-        ctx.animation.actions,
-        planned.sheet.columns,
-        planned.sheet.rows
-      )
+      defaultText: gridInstructions(ctx.animation.actions, planned.sheet.columns, planned.sheet.rows, {
+        pixelConstraint: pixel,
+        frames
+      })
     });
   } else if (ctx.itemGrid?.enabled) {
     const planned = planItemGrid({
@@ -197,7 +240,8 @@ export function activeFeaturePrompts(ctx: FeaturePromptContext): FeaturePrompt[]
         ctx.itemGrid.columns,
         ctx.itemGrid.rows,
         planned.sheet.columns,
-        planned.sheet.rows
+        planned.sheet.rows,
+        { pixelConstraint: pixel, frames }
       )
     });
   }
@@ -205,45 +249,16 @@ export function activeFeaturePrompts(ctx: FeaturePromptContext): FeaturePrompt[]
   return extras;
 }
 
-export function resolveFeatureText(
-  extra: FeaturePrompt,
-  overrides: Record<string, string>
-): string {
-  const override = overrides[extra.id];
-  return typeof override === "string" ? override : extra.defaultText;
+/** Gemini each-mode jobs get the revise guide unless one is already stored. */
+export function promptWithEachGuide(prompt: PromptSpec, each: boolean, model: string): PromptSpec {
+  if (!each || prompt.guide?.trim() || findModel(model)?.provider !== "gemini") return prompt;
+  return { ...prompt, guide: GEMINI_REVISE_INSTRUCTIONS };
 }
 
-export function composeFeatureSlots(
-  extras: FeaturePrompt[],
-  overrides: Record<string, string>
-): { guide: string; extra: string } {
-  const guide: string[] = [];
-  const extra: string[] = [];
-
-  for (const entry of extras) {
-    const text = resolveFeatureText(entry, overrides).trim();
-    if (!text) continue;
-    if (entry.slot === "guide") guide.push(text);
-    else extra.push(text);
-  }
-
-  return { guide: guide.join("\n\n"), extra: extra.join("\n\n") };
-}
-
-export function workingPrompt(
-  ctx: FeaturePromptContext & {
-    prefix: string;
-    body: string;
-    suffix: string;
-    overrides: Record<string, string>;
-  }
-): PromptSpec {
-  const slots = composeFeatureSlots(activeFeaturePrompts(ctx), ctx.overrides);
-  return {
-    guide: slots.guide,
-    prefix: ctx.prefix,
-    body: ctx.body,
-    extra: slots.extra,
-    suffix: ctx.suffix
-  };
+/** Append suggested text to the prompt box, skipping a copy that is already there. */
+export function appendSuggestedPrompt(current: string, suggested: string): string {
+  const add = suggested.trim();
+  if (!add) return current;
+  if (current.includes(add)) return current;
+  return current.trim() ? `${current.trim()}\n\n${add}` : add;
 }

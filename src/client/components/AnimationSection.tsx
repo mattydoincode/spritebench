@@ -16,7 +16,7 @@ import {
   type Sequence
 } from "@/shared/sequence";
 import { BitmapCanvas } from "./AssetBitmap";
-import { Button, Divider, Field, NumberInput, Row, Select } from "./ui";
+import { Button, Field, NumberInput, Row, Section, Select } from "./ui";
 
 const STRIP_SIZE = 44;
 
@@ -107,11 +107,11 @@ export function AnimationSection({
 
   const openSlicer = () => ui().openSlicer(asset.id);
 
+  const sequenceLabel = sequence && sequenceKind(sequence) === "set" ? "items" : "animation";
+
   if (asset.sequences.length === 0) {
     return (
-      <>
-        <Divider label={sequence && sequenceKind(sequence) === "set" ? "items" : "animation"} />
-
+      <Section id="inspector.sequence" label={sequenceLabel}>
         <p className="mb-2 text-[10px] leading-snug text-slate-500">
           Slice this image into frames to play it as an animation. Works on any sheet laid out on
           a grid.
@@ -120,7 +120,7 @@ export function AnimationSection({
         <Button className="w-full" onClick={openSlicer}>
           slice into frames
         </Button>
-      </>
+      </Section>
     );
   }
 
@@ -129,9 +129,10 @@ export function AnimationSection({
   const current = active?.frames[playback.index] ?? null;
 
   return (
-    <>
-      <Divider label={active && sequenceKind(active) === "set" ? "items" : "animation"} />
-
+    <Section
+      id="inspector.sequence"
+      label={active && sequenceKind(active) === "set" ? "items" : "animation"}
+    >
       <Row className="mb-2">
         <div className="min-w-0 flex-1">
           <Select
@@ -266,6 +267,6 @@ export function AnimationSection({
           ) : null}
         </>
       ) : null}
-    </>
+    </Section>
   );
 }

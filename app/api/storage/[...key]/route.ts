@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireMember } from "@/server/access";
-import { requireUser } from "@/server/session";
+import { requireV1User } from "@/server/v1";
 import { withValidation } from "@/server/validation";
 import { ObjectNotFoundError, storage, storageDriver } from "@/storage";
 
@@ -39,7 +39,7 @@ function projectIdOf(key: string): string | null {
  * hand out signed URLs for. The R2 driver never routes through here.
  */
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ key: string[] }> }
 ) {
   return withValidation(async () => {
@@ -60,7 +60,7 @@ export async function GET(
     const projectId = projectIdOf(key);
     if (!projectId) return NextResponse.json({ error: "not found" }, { status: 404 });
 
-    await requireMember(await requireUser(), projectId, "view");
+    await requireMember(await requireV1User(request), projectId, "view");
 
     try {
       const bytes = await storage().get(key);

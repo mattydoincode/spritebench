@@ -1,3 +1,4 @@
+import { loopIncludesStart } from "./loop";
 import { isChunkSpec, isLoopSpec, type JobInputs, type ResolvedAsset } from "./model";
 import { DEFAULT_FPS, NO_INSET, SET_FPS, type Sequence } from "./sequence";
 
@@ -83,11 +84,19 @@ export interface SetSpec {
   row: number;
 }
 
-/** Concrete loop/chunk job inputs become a set slot. Expanding requests do not. */
+/** Concrete loop/chunk/fan-out job inputs become a set slot. Expanding requests do not. */
 export function setSpecFromInputs(inputs: JobInputs | null | undefined): SetSpec | null {
+  if (inputs?.animate && Number.isFinite(inputs.animate.index) && inputs.animate.count > 1) {
+    const columns = Math.max(1, Math.floor(inputs.animate.count));
+    const index = Math.max(0, Math.floor(inputs.animate.index));
+    const slot = slotFromIndex(index, columns);
+    return { kind: "animation", columns, rows: 1, index, ...slot };
+  }
+
   if (isLoopSpec(inputs?.loop)) {
-    const columns = Math.max(1, Math.floor(inputs.loop.steps));
-    const index = Math.max(0, Math.floor(inputs.loop.index) - 1);
+    const includeStart = loopIncludesStart(inputs.loop);
+    const columns = Math.max(1, Math.floor(inputs.loop.steps) + (includeStart ? 1 : 0));
+    const index = Math.max(0, Math.floor(inputs.loop.index) - (includeStart ? 0 : 1));
     const slot = slotFromIndex(index, columns);
     return { kind: "animation", columns, rows: 1, index, ...slot };
   }
@@ -103,8 +112,20 @@ export function setSpecFromInputs(inputs: JobInputs | null | undefined): SetSpec
   return null;
 }
 
-export function setIdForJob(job: { id: string; batchId: string | null }): string {
-  return job.batchId ?? job.id;
+export function setIdForJob(job: {
+  id: string;
+  batchId: string | null;
+  inputs?: JobInputs | null;
+}): string {
+  return job.inputs?.animate?.id ?? job.batchId ?? job.id;
+}
+
+/** Frame 0 when the loop asked to keep the original start in the animation. */
+export function loopOriginMember(inputs: JobInputs | null | undefined): AssetSetMember | null {
+  if (!inputs || !isLoopSpec(inputs.loop) || !loopIncludesStart(inputs.loop)) return null;
+  const source = inputs.start?.source ?? inputs.base?.source;
+  if (source?.kind !== "asset") return null;
+  return { assetId: source.assetId, index: 0, col: 0, row: 0 };
 }
 
 export function sequenceFromSet(

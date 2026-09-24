@@ -121,9 +121,8 @@ function toCrop(rect: Rect): CropEdit {
  *
  * `trimToContent` is forced off: the frame rectangle is the registration, and
  * trimming would give each frame a different bounding box and a different
- * scale. Asset-level `edits` are dropped for the same reason the rectangle is
- * stored raw -- a sheet-wide crop would shift every frame out from under its
- * rectangle.
+ * scale. Sheet-wide crops are dropped so they cannot shift every frame. A
+ * `pixelGrid` on the asset runs after the crop only when downsample is on.
  */
 export function frameSourceAssetId(assetId: string, frame: SequenceFrame): string {
   return frame.sourceAssetId || assetId;
@@ -134,10 +133,13 @@ export function frameSettings(
   sequence: Sequence,
   frame: SequenceFrame
 ): ProcessingSettings {
+  const sample = base.downsample
+    ? base.edits.filter((edit) => edit.kind === "pixelGrid")
+    : [];
   return {
     ...base,
     trimToContent: false,
-    edits: [toCrop(insetRect(frame.rect, sequence.inset)), ...frame.edits]
+    edits: [toCrop(insetRect(frame.rect, sequence.inset)), ...sample, ...frame.edits]
   };
 }
 

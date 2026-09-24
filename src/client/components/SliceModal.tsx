@@ -6,6 +6,7 @@ import { useAsset } from "@/client/stores/assets";
 import { useDoc } from "@/client/stores/doc";
 import { useServer } from "@/client/stores/server";
 import { useUi } from "@/client/stores/ui";
+import { gridOptionsFromSheetPlate } from "@/core/pixelMask";
 import {
   DEFAULT_GRID,
   cellFrameSize,
@@ -153,13 +154,29 @@ export function SliceModal() {
     const columns = Math.max(1, ...next.map((entry) => entry.frames));
     const rows = Math.max(next.length, 1);
     const seed = seedFromAsset(asset.sequences, columns);
+    const plan = asset.sequencePlan;
+    const sourceSize = { width: asset.sourceWidth, height: asset.sourceHeight };
+    const plateGrid = plan ? gridOptionsFromSheetPlate(sourceSize, plan) : null;
+    const plateSize =
+      plan?.plate && plan.plate.canvas.width > 0 && plan.plate.canvas.height > 0
+        ? {
+            width: Math.max(
+              1,
+              Math.round(plan.plate.cell.width * (sourceSize.width / plan.plate.canvas.width))
+            ),
+            height: Math.max(
+              1,
+              Math.round(plan.plate.cell.height * (sourceSize.height / plan.plate.canvas.height))
+            )
+          }
+        : null;
 
     setSelected(null);
     booted.current = false;
     seededFromAsset.current = Boolean(seed);
     history.reset({
-      grid: { ...DEFAULT_GRID, columns, rows },
-      frameSize: seed?.size ?? { width: 1, height: 1 },
+      grid: plateGrid ?? { ...DEFAULT_GRID, columns, rows },
+      frameSize: seed?.size ?? plateSize ?? { width: 1, height: 1 },
       origins: seed?.origins ?? {},
       actions: next
     });

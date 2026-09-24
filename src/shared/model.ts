@@ -1,3 +1,10 @@
+import {
+  clampIsoPitch,
+  DEFAULT_ISO_PROJECTION,
+  DIMETRIC_PITCH,
+  isoPitchFromProjection,
+  type IsoProjection
+} from "@/core/iso";
 import type { ProcessingSettings } from "@/core/settings";
 import {
   DEFAULT_TERRAIN,
@@ -64,6 +71,25 @@ export interface BaseSpec {
   matchAspect: boolean;
 }
 
+export function imageSourceKey(source: ImageSource): string {
+  return source.kind === "template" ? `template:${source.templateId}` : `asset:${source.assetId}`;
+}
+
+/** Append examples/starts, skipping a source that is already in the list. */
+export function appendBases(current: BaseSpec[], added: BaseSpec[]): BaseSpec[] {
+  const seen = new Set(current.map((entry) => imageSourceKey(entry.source)));
+  const next = [...current];
+
+  for (const entry of added) {
+    const key = imageSourceKey(entry.source);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    next.push(entry);
+  }
+
+  return next;
+}
+
 export interface MaskSpec {
   source: ImageSource;
   maskSource: MaskSource;
@@ -76,7 +102,17 @@ export interface MaskSpec {
 export interface LoopSpec {
   steps: number;
   index: number;
+  /** Re-attach the original start on every step, not just the first. */
+  sendStart?: boolean;
+  /** Put the original start at frame 0 of the finished animation. */
+  includeStart?: boolean;
 }
+
+export type LoopRequest = {
+  steps: number;
+  sendStart?: boolean;
+  includeStart?: boolean;
+};
 
 export interface ChunkSpec {
   columns: number;
@@ -91,11 +127,26 @@ export interface ChunkSpec {
  * `loop` / `chunk` without `index` / `rect` is a generate request still waiting
  * to be expanded. After enqueue every row has the concrete per-job fields.
  */
+/** Variable / template fan-out collected into one library animation. */
+export interface FanoutAnimation {
+  id: string;
+  index: number;
+  count: number;
+}
+
 export interface JobInputs {
   base?: BaseSpec | null;
+  /**
+   * Original loop start. `base` advances to the previous output; this stays
+   * put so later steps can still send or include the origin.
+   */
+  start?: BaseSpec | null;
   mask?: MaskSpec | null;
-  loop?: LoopSpec | { steps: number } | null;
+  loop?: LoopSpec | LoopRequest | null;
   chunk?: ChunkSpec | { columns: number; rows: number } | null;
+  animate?: FanoutAnimation | null;
+  /** Same prompt applied to each attached image. */
+  each?: boolean | null;
 }
 
 export function isLoopSpec(loop: JobInputs["loop"]): loop is LoopSpec {
@@ -164,6 +215,22 @@ export interface SequencePlan {
   kind?: SequenceKind;
   /** Top to bottom, one cycle per row. Trailing cells on a short row are masked. */
   actions: SequencePlanAction[];
+  /**
+   * Pixel-constraint plate: each animation cell is a sprite-pixel grid.
+   * Slice and per-frame sampling read this instead of even-dividing the PNG.
+   */
+  plate?: SequencePlanPlate;
+}
+
+export interface SequencePlanPlate {
+  canvas: Size;
+  origin: { x: number; y: number };
+  /** Request pixels of one animation cell. */
+  cell: Size;
+  /** Sprite pixels inside one cell. */
+  sprite: Size;
+  /** Request pixels of empty space between animation cells. Missing means packed. */
+  gutter?: number;
 }
 
 export interface TokenUsage {
@@ -247,10 +314,14 @@ export interface StagedItem {
   flipHorizontal: boolean;
   flipVertical: boolean;
   /**
-   * Quarter-turns in the 2:1 iso plane (world yaw). 0 is as-drawn, usually
+   * Quarter-turns in the iso plane (world yaw). 0 is as-drawn, usually
    * SE. 1 turns that to NE. Missing reads as 0.
    */
   isoTurn: number;
+  /**
+   * Which diamond the yaw unsquashes through. Missing reads as true iso.
+   */
+  isoProjection: IsoProjection;
   showSource: boolean;
   opacity: number;
   /**
@@ -271,14 +342,32 @@ export interface StagedItem {
   rotation: number;
 }
 
-export const REPEATER_PLACEMENTS = ["grid", "iso", "scatter"] as const;
+export const REPEATER_PLACEMENTS = ["grid", "iso", "iso21", "scatter"] as const;
 export type RepeaterPlacement = (typeof REPEATER_PLACEMENTS)[number];
 
 export const REPEATER_PLACEMENT_LABELS: Record<RepeaterPlacement, string> = {
   grid: "grid",
   iso: "iso",
+  iso21: "2:1",
   scatter: "scatter"
 };
+
+export function isIsoPlacement(placement: RepeaterPlacement): boolean {
+  return placement === "iso" || placement === "iso21";
+}
+
+export function isoProjectionForPlacement(placement: RepeaterPlacement): IsoProjection {
+  return placement === "iso21" ? "dimetric" : DEFAULT_ISO_PROJECTION;
+}
+
+export function isoPitchForRepeater(
+  group: Pick<RepeatGroup, "placement"> & { isoPitch?: number }
+): number {
+  if (typeof group.isoPitch === "number" && Number.isFinite(group.isoPitch)) {
+    return clampIsoPitch(group.isoPitch);
+  }
+  return isoPitchFromProjection(isoProjectionForPlacement(group.placement));
+}
 
 export const REPEATER_ROTATES = ["none", "quarter", "flip", "free"] as const;
 export type RepeaterRotate = (typeof REPEATER_ROTATES)[number];
@@ -298,7 +387,8 @@ export const DEFAULT_REPEATER = {
   areaHeight: 192,
   scaleJitter: 0,
   minGap: 0,
-  edgeBias: 0
+  edgeBias: 0,
+  isoPitch: DIMETRIC_PITCH
 };
 
 const DEFAULT_REPEATER_COUNTS = { countX: 3, countY: 3 } as const;
@@ -408,6 +498,8 @@ export interface RepeatGroup {
   minGap: number;
   /** 0 is uniform. 1 piles stamps on the rectangle's edges. */
   edgeBias: number;
+  /** Camera elevation used by iso / 2:1 lattices. */
+  isoPitch: number;
   background: string;
   zIndex: number;
   opacity: number;
@@ -504,10 +596,8 @@ export interface ResolvedAsset extends AssetRecord {
  * why none of it is shared: two collaborators can hold different generation
  * defaults in the same project.
  *
- * Prompt prefix and suffix used to live here and are now `ProjectSettings` in
- * the shared document -- a project's house style belongs to the project, not
- * to whoever happens to be typing. Job concurrency is server configuration
- * (`WORKER_CONCURRENCY`), and the asset naming slug was replaced by numbers.
+ * Job concurrency is server configuration (`WORKER_CONCURRENCY`), and the
+ * asset naming slug was replaced by numbers.
  */
 export interface StudioSettings {
   generation: GenerationParams;
@@ -516,41 +606,18 @@ export interface StudioSettings {
   templateCutTolerance: number;
 }
 
-/** Project-wide settings from the Yjs document. Shared, and undoable. */
-export interface ProjectSettings {
-  promptPrefix: string;
-  promptSuffix: string;
-}
-
 /**
- * A named version of a prompt part, saved on the project.
+ * A named prompt saved on the project.
  *
- * Shared rather than personal: a house style someone likes enough to name is
- * useful to the next person who opens the same project. The working prefix,
- * suffix and scratch stay where they are -- this is just the library you
- * load from and save into.
+ * Shared rather than personal: a prompt someone likes enough to name is
+ * useful to the next person who opens the same project. The working box
+ * stays where it is -- this is the library you load from and save into.
  */
-export type PromptSnippetKind = "prefix" | "suffix" | "scratch";
-
 export interface PromptSnippet {
   id: string;
   name: string;
-  kind: PromptSnippetKind;
   text: string;
 }
-
-/**
- * What a project generates under until someone changes it.
- *
- * Applied when the field is absent from the document rather than written in at
- * creation, so a new project needs no seeding step. Clearing the prefix stores
- * an empty string, which is a different thing from absent and stays cleared.
- */
-export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
-  promptPrefix:
-    "You are generating game art from a 100% top-down perspective. This means we'll only see the tops of objects, never the sides. Schematic like, no perspective, perfectly top down.",
-  promptSuffix: "Transparent Background"
-};
 
 export interface ProjectSummary {
   id: string;

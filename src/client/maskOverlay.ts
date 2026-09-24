@@ -54,11 +54,14 @@ export function useMaskOverlay(
       mask: asset.inputs?.mask ?? null,
       edits: asset.processing.edits,
       sourceSize: { width: asset.sourceWidth, height: asset.sourceHeight },
-      targetSize: asset.processing.targetSize
+      targetSize: asset.processing.targetSize,
+      sequencePlan: asset.sequencePlan
     });
 
     const next = plate
-      ? bitmapFromRgba(overlayPlateForView(plate, asset.processing.edits, view))
+      ? bitmapFromRgba(
+          overlayPlateForView(plate, asset.processing.edits, view, asset.sequencePlan)
+        )
       : loadCustomPlate(projectId, asset);
 
     next

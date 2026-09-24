@@ -1,15 +1,23 @@
 import crypto from "node:crypto";
-import { processingForJob } from "@/core/pixelMask";
+import { attachSheetFramePlate, isSheetFramesTemplate } from "@/core/frameMask";
+import {
+  attachSheetPixelPlate,
+  isPixelConstraintTemplate,
+  pixelConstraintWindow,
+  processingForJob
+} from "@/core/pixelMask";
 import { withDefaults, type ProcessingSettings } from "@/core/settings";
 import { snapRequestSize } from "@/providers/models";
 import type { Size } from "@/core/types";
 import { db, type Transaction } from "@/db";
-import { countAssets, getAssetRow } from "@/db/repo/assets";
-import { insertJob, pendingImages, setQueueJobId, toJobRecord } from "@/db/repo/jobs";
+import { getAssetRow } from "@/db/repo/assets";
+import { insertJob, setQueueJobId, toJobRecord } from "@/db/repo/jobs";
 import { lockProject } from "@/db/repo/projects";
+import { getTemplate } from "@/db/repo/templates";
 import { dispatchJob } from "@/queue/dispatch";
 import {
   composePrompt,
+  type BaseSpec,
   type GenerationParams,
   type JobInputs,
   type JobRecord,
@@ -18,13 +26,23 @@ import {
 } from "@/shared/model";
 import {
   InvalidInputsError,
+  attachFanoutAnimation,
   isExpandingChunk,
+  isExpandingMultistep,
   planFanout,
+  resolveBases,
   startingAssetId,
-  validateGenerateInputs
+  validateGenerateInputs,
+  type PlannedGroup
 } from "@/shared/multistep";
-import { expandPrompt, loopReservedSlots, promptForJob, type PromptVariable } from "@/shared/promptVars";
-import { freeAssetLimit, maxImagesPerRequest } from "./config";
+import { promptWithEachGuide } from "@/shared/featurePrompt";
+import {
+  expandCreate,
+  loopReservedSlots,
+  promptForJob,
+  type PromptVariable
+} from "@/shared/promptVars";
+import { maxImagesPerRequest } from "./config";
 
 export { InvalidInputsError };
 
@@ -48,24 +66,15 @@ export interface EnqueueRequest {
   batches: number;
   /** `{color}` rows. Empty or omitted means one prompt, as before. */
   variables?: PromptVariable[];
+  /**
+   * Example / starting images. Each one is its own job (cartesian with
+   * variables). Empty falls back to `inputs.base`.
+   */
+  bases?: BaseSpec[];
+  /** Collect variable / template expansions into one library animation. */
+  animate?: boolean;
   /** Set when this job belongs to a batch created by the caller, as reruns do. */
   batch?: { id: string; index: number; size: number } | null;
-}
-
-export class QuotaExceededError extends Error {
-  constructor(
-    readonly limit: number,
-    readonly stored: number,
-    readonly pending: number
-  ) {
-    const held =
-      pending > 0
-        ? `${stored} of ${limit} images, with ${pending} more already generating`
-        : `${stored} of ${limit} images`;
-
-    super(`this project is storing ${held}. Delete some before generating more.`);
-    this.name = "QuotaExceededError";
-  }
 }
 
 export class EmptyExpansionError extends Error {
@@ -86,75 +95,114 @@ export class FanOutExceededError extends Error {
 }
 
 /**
- * Rejects a request that would take the project past its storage quota or fan
- * out further than one request is allowed to.
- *
- * Counted per project rather than per user because the project owner's key
- * pays: a shared project with three collaborators is one bill, not three
- * allowances.
+ * Rejects a request that fans out further than one generate is allowed to.
  *
  * Checked before anything is dispatched, since refusing after the provider
- * call would spend real money on an image we then throw away.
- *
- * Pass the enqueue transaction to make the check binding. Called without one
- * it is only an early, friendlier rejection -- see `enqueueGeneration`.
+ * call would spend real money on images we then throw away.
  */
 export async function assertCapacity(
-  projectId: string,
+  _projectId: string,
   images: number,
-  connection?: Transaction
+  _connection?: Transaction
 ): Promise<void> {
   if (images > maxImagesPerRequest()) {
     throw new FanOutExceededError(images, maxImagesPerRequest());
   }
-
-  const limit = freeAssetLimit();
-  const [stored, pending] = await Promise.all([
-    countAssets(projectId, connection),
-    pendingImages(projectId, connection)
-  ]);
-
-  if (stored + pending + images > limit) {
-    throw new QuotaExceededError(limit, stored, pending);
-  }
 }
 
-async function originSizeFor(request: EnqueueRequest): Promise<Size | null> {
-  const assetId = startingAssetId(request.inputs);
+async function originSizeFor(
+  projectId: string,
+  inputs: JobInputs | null | undefined
+): Promise<Size | null> {
+  const assetId = startingAssetId(inputs);
   if (!assetId) return null;
 
-  const row = await getAssetRow(request.projectId, assetId);
+  const row = await getAssetRow(projectId, assetId);
   if (!row) throw new InvalidInputsError("starting image not found");
   if (!row.sourceKey) throw new InvalidInputsError("starting image source has been rolled off");
 
-  if (!isExpandingChunk(request.inputs)) return null;
+  if (!isExpandingChunk(inputs)) return null;
   return { width: row.sourceWidth, height: row.sourceHeight };
+}
+
+async function describeBase(projectId: string, base: BaseSpec | null): Promise<string> {
+  if (!base) return "";
+  if (base.source.kind === "template") {
+    const row = await getTemplate(projectId, base.source.templateId);
+    return row?.filename ?? base.source.templateId.slice(0, 8);
+  }
+
+  const row = await getAssetRow(projectId, base.source.assetId);
+  return row ? String(row.seq).padStart(3, "0") : base.source.assetId.slice(0, 8);
+}
+
+function sheetPixelPlan(request: EnqueueRequest): SequencePlan | null {
+  const plan = request.sequencePlan ?? null;
+  if (!plan?.actions?.length) return plan;
+  const mask = request.inputs?.mask;
+  if (mask?.source.kind !== "template") return plan;
+  const canvas = snapRequestSize(request.generation.size, request.generation.model);
+
+  if (isPixelConstraintTemplate(mask.source.templateId)) {
+    return attachSheetPixelPlate(
+      plan,
+      canvas,
+      pixelConstraintWindow(mask.window ?? request.processing.targetSize)
+    );
+  }
+
+  if (isSheetFramesTemplate(mask.source.templateId)) {
+    return attachSheetFramePlate(plan, canvas);
+  }
+
+  return plan;
 }
 
 /**
  * Creates job rows and hands them to the queue.
  *
- * The whole fan-out is one transaction: the quota check, every row insert, and
- * every queue send. That makes the check binding rather than advisory -- two
- * concurrent requests serialize on the project's row lock, so the second one
- * sees what the first committed to -- and it makes the request all-or-nothing
- * instead of leaving half a batch behind when the limit is hit midway.
+ * The whole fan-out is one transaction: the request cap, every row insert, and
+ * every queue send. Concurrent requests serialize on the project's row lock,
+ * and the request is all-or-nothing instead of leaving half a batch behind
+ * when a later insert fails.
  */
 export async function enqueueGeneration(request: EnqueueRequest): Promise<JobRecord[]> {
   validateGenerateInputs(request);
 
+  const prompt = promptWithEachGuide(
+    request.prompt,
+    Boolean(request.inputs?.each),
+    request.generation.model
+  );
   const reserved = loopReservedSlots(Boolean(request.inputs?.loop));
-  const expansions = expandPrompt(request.prompt, request.variables ?? [], reserved);
+  const bases = resolveBases(request);
+  const expansions = expandCreate(prompt, request.variables ?? [], bases, reserved);
   if (expansions.length === 0) throw new EmptyExpansionError();
 
-  const originSize = await originSizeFor(request);
-  const groupsByExpansion = expansions.map(() =>
-    planFanout({
-      generation: request.generation,
-      inputs: request.inputs ?? null,
-      batches: request.batches,
-      originSize
-    })
+  const sequencePlan = sheetPixelPlan(request);
+  const planned: PlannedGroup[][] = [];
+
+  for (const expansion of expansions) {
+    const inputs = {
+      ...(request.inputs ?? {}),
+      base: expansion.base
+    };
+    const originSize = await originSizeFor(request.projectId, inputs);
+    planned.push(
+      planFanout({
+        generation: request.generation,
+        inputs,
+        batches: request.batches,
+        originSize
+      })
+    );
+  }
+
+  const groupsByExpansion = attachFanoutAnimation(
+    planned,
+    Boolean(request.animate) &&
+      !sequencePlan?.actions?.length &&
+      !isExpandingMultistep(request.inputs)
   );
 
   const images = groupsByExpansion.reduce(
@@ -168,6 +216,13 @@ export async function enqueueGeneration(request: EnqueueRequest): Promise<JobRec
     0
   );
 
+  const labels = new Map<string, string>();
+  if (bases.length > 1) {
+    for (const base of bases) {
+      labels.set(JSON.stringify(base.source), await describeBase(request.projectId, base));
+    }
+  }
+
   const rows = await db().transaction(async (transaction) => {
     await lockProject(request.projectId, transaction);
     await assertCapacity(request.projectId, images, transaction);
@@ -176,8 +231,12 @@ export async function enqueueGeneration(request: EnqueueRequest): Promise<JobRec
 
     for (const [expansionIndex, expansion] of expansions.entries()) {
       const groups = groupsByExpansion[expansionIndex];
+      const baseTag = expansion.base ? labels.get(JSON.stringify(expansion.base.source)) : "";
       const label =
-        request.label?.trim() || expansion.label || expansion.prompt.body.trim().slice(0, 60) || "untitled";
+        request.label?.trim() ||
+        [baseTag, expansion.label].filter((part) => part && part.length > 0).join(" · ") ||
+        expansion.prompt.body.trim().slice(0, 60) ||
+        "untitled";
 
       for (const group of groups) {
         const batchId =
@@ -204,11 +263,12 @@ export async function enqueueGeneration(request: EnqueueRequest): Promise<JobRec
               processing: processingForJob(
                 withDefaults(request.processing),
                 planned.inputs,
-                snapRequestSize(planned.generation.size, planned.generation.model)
+                snapRequestSize(planned.generation.size, planned.generation.model),
+                sequencePlan
               ),
               folder: request.folder,
               inputs: planned.inputs,
-              sequencePlan: request.sequencePlan ?? null,
+              sequencePlan,
               rerunOf: request.rerunOf ?? null
             },
             transaction

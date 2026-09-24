@@ -1,7 +1,15 @@
 import * as Y from "yjs";
 import { normalizeEdits } from "@/core/edits";
+import { clampIsoPitch, DEFAULT_ISO_PROJECTION, ISO_PROJECTIONS } from "@/core/iso";
+import { clampIsoLight } from "@/core/isoTemplate";
 import { clampIsoTurn } from "@/core/isoTurn";
 import { DEFAULT_PROCESSING, withDefaults, type ProcessingSettings } from "@/core/settings";
+import {
+  withProjectSettings,
+  type ProjectCutoutPatch,
+  type ProjectSettings,
+  type ProjectSettingsPatch
+} from "./projectSettings";
 import {
   DEFAULT_TERRAIN,
   TERRAIN_GRADIENTS,
@@ -21,15 +29,14 @@ import {
 } from "./assetSet";
 import { displayName } from "./naming";
 import {
-  DEFAULT_PROJECT_SETTINGS,
   DEFAULT_REPEATER,
   REPEATER_PLACEMENTS,
   REPEATER_ROTATES,
+  isoPitchForRepeater,
   repeaterFromItem,
   type AssetEdits,
   type AssetRecord,
   type Scene,
-  type ProjectSettings,
   type PromptSnippet,
   type RepeatGroup,
   type ResolvedAsset,
@@ -62,8 +69,12 @@ import {
 const SCENES = "scenes";
 const ASSET_EDITS = "assetEdits";
 const ASSET_SETS = "assetSets";
-const PROJECT = "project";
 const PROMPT_SNIPPETS = "promptSnippets";
+const SETTINGS_CUTOUT = "settings.cutout";
+const SETTINGS_CUTOUT_FLOOD = "settings.cutout.edgeFloodFill";
+const SETTINGS_CUTOUT_CHROMA = "settings.cutout.chromaKey";
+const SETTINGS_CUTOUT_LUMINANCE = "settings.cutout.luminance";
+const SETTINGS_ISO = "settings.iso";
 
 /**
  * Transaction origins. `Y.UndoManager` is configured to track only
@@ -111,16 +122,32 @@ export function assetEditsMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
   return doc.getMap<Y.Map<unknown>>(ASSET_EDITS);
 }
 
-export function projectMap(doc: Y.Doc): Y.Map<unknown> {
-  return doc.getMap<unknown>(PROJECT);
-}
-
 export function promptSnippetsMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
   return doc.getMap<Y.Map<unknown>>(PROMPT_SNIPPETS);
 }
 
 export function assetSetsMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
   return doc.getMap<Y.Map<unknown>>(ASSET_SETS);
+}
+
+function cutoutSettingsMap(doc: Y.Doc): Y.Map<unknown> {
+  return doc.getMap<unknown>(SETTINGS_CUTOUT);
+}
+
+function floodCutoutMap(doc: Y.Doc): Y.Map<unknown> {
+  return doc.getMap<unknown>(SETTINGS_CUTOUT_FLOOD);
+}
+
+function chromaCutoutMap(doc: Y.Doc): Y.Map<unknown> {
+  return doc.getMap<unknown>(SETTINGS_CUTOUT_CHROMA);
+}
+
+function luminanceCutoutMap(doc: Y.Doc): Y.Map<unknown> {
+  return doc.getMap<unknown>(SETTINGS_CUTOUT_LUMINANCE);
+}
+
+function isoSettingsMap(doc: Y.Doc): Y.Map<unknown> {
+  return doc.getMap<unknown>(SETTINGS_ISO);
 }
 
 // --- readers ---------------------------------------------------------------
@@ -184,6 +211,7 @@ function readItem(id: string, map: Y.Map<unknown>): StagedItem {
     flipHorizontal: flag(map, "flipHorizontal"),
     flipVertical: flag(map, "flipVertical"),
     isoTurn: clampIsoTurn(num(map, "isoTurn", 0)),
+    isoProjection: oneOf(str(map, "isoProjection"), ISO_PROJECTIONS, DEFAULT_ISO_PROJECTION),
     showSource: flag(map, "showSource"),
     opacity: num(map, "opacity", 1),
     paused: flag(map, "paused"),
@@ -286,6 +314,8 @@ function terrainsMap(scene: Y.Map<unknown>): Y.Map<Y.Map<unknown>> | undefined {
 
 function readGroup(id: string, map: Y.Map<unknown>): RepeatGroup {
   const position = point(map, "position");
+  const placement = oneOf(str(map, "placement"), REPEATER_PLACEMENTS, DEFAULT_REPEATER.placement);
+  const storedPitch = map.get("isoPitch");
 
   return {
     id,
@@ -300,7 +330,11 @@ function readGroup(id: string, map: Y.Map<unknown>): RepeatGroup {
     countY: num(map, "countY", 8),
     fillX: flag(map, "fillX"),
     fillY: flag(map, "fillY"),
-    placement: oneOf(str(map, "placement"), REPEATER_PLACEMENTS, DEFAULT_REPEATER.placement),
+    placement,
+    isoPitch: isoPitchForRepeater({
+      placement,
+      isoPitch: typeof storedPitch === "number" ? storedPitch : undefined
+    }),
     rotate: oneOf(str(map, "rotate"), REPEATER_ROTATES, DEFAULT_REPEATER.rotate),
     scatterCount: num(map, "scatterCount", DEFAULT_REPEATER.scatterCount),
     areaWidth: num(map, "areaWidth", DEFAULT_REPEATER.areaWidth),
@@ -417,37 +451,15 @@ export function compareStacking(
   return a.zIndex - b.zIndex || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
-/**
- * The prompt wrapper the whole project generates under.
- *
- * In the document rather than on the user, because a project's house style is
- * a property of the project: a collaborator should inherit "16-bit sprite,
- * transparent background" rather than have to be told it. Being here also
- * makes editing it undoable and visible to everyone, which is what you want
- * from something that silently changes what every generation produces.
- */
-export function readProjectSettings(doc: Y.Doc): ProjectSettings {
-  const map = projectMap(doc);
-
-  return {
-    promptPrefix: str(map, "promptPrefix", DEFAULT_PROJECT_SETTINGS.promptPrefix),
-    promptSuffix: str(map, "promptSuffix", DEFAULT_PROJECT_SETTINGS.promptSuffix)
-  };
-}
-
-export function patchProjectSettings(doc: Y.Doc, patch: Partial<ProjectSettings>): void {
-  transactLocal(doc, () => setFields(projectMap(doc), patch));
-}
-
 function readSnippet(id: string, map: Y.Map<unknown>): PromptSnippet | null {
-  const kind = str(map, "kind");
-  if (kind !== "prefix" && kind !== "suffix" && kind !== "scratch") return null;
+  const name = str(map, "name");
+  const text = str(map, "text");
+  if (!name && !text) return null;
 
   return {
     id,
-    name: str(map, "name"),
-    kind,
-    text: str(map, "text")
+    name,
+    text
   };
 }
 
@@ -466,7 +478,6 @@ export function putPromptSnippet(doc: Y.Doc, snippet: PromptSnippet): void {
     promptSnippetsMap(doc).set(snippet.id, map);
     setFields(map, {
       name: snippet.name,
-      kind: snippet.kind,
       text: snippet.text
     });
   });
@@ -557,6 +568,48 @@ export function setAssetHidden(doc: Y.Doc, assetId: string, hidden: boolean): vo
 
 export function deletePromptSnippet(doc: Y.Doc, id: string): void {
   transactLocal(doc, () => promptSnippetsMap(doc).delete(id));
+}
+
+function plainRecord(map: Y.Map<unknown>): Record<string, unknown> {
+  const partial: Record<string, unknown> = {};
+  for (const [key, value] of map.entries()) {
+    if (value instanceof Y.Array) partial[key] = value.toArray();
+    else if (!(value instanceof Y.Map)) partial[key] = value;
+  }
+  return partial;
+}
+
+export function readProjectSettings(doc: Y.Doc): ProjectSettings {
+  return withProjectSettings({
+    cutout: {
+      ...plainRecord(cutoutSettingsMap(doc)),
+      edgeFloodFill: plainRecord(floodCutoutMap(doc)),
+      chromaKey: plainRecord(chromaCutoutMap(doc)),
+      luminance: plainRecord(luminanceCutoutMap(doc))
+    } as ProjectCutoutPatch,
+    isoPitch: isoSettingsMap(doc).get("pitch") as number | undefined,
+    isoLight: isoSettingsMap(doc).get("light")
+  });
+}
+
+export function patchProjectSettings(doc: Y.Doc, patch: ProjectSettingsPatch): void {
+  transactLocal(doc, () => {
+    if (patch.isoPitch !== undefined) {
+      isoSettingsMap(doc).set("pitch", clampIsoPitch(patch.isoPitch));
+    }
+    if (patch.isoLight !== undefined) {
+      isoSettingsMap(doc).set("light", clampIsoLight(patch.isoLight));
+    }
+
+    const next = patch.cutout;
+    if (!next) return;
+
+    const { edgeFloodFill, chromaKey, luminance, ...shared } = next;
+    setFields(cutoutSettingsMap(doc), shared);
+    if (edgeFloodFill) setFields(floodCutoutMap(doc), edgeFloodFill);
+    if (chromaKey) setFields(chromaCutoutMap(doc), chromaKey);
+    if (luminance) setFields(luminanceCutoutMap(doc), luminance);
+  });
 }
 
 export function readScene(doc: Y.Doc, id: string): Scene | null {
@@ -726,6 +779,7 @@ export function addItem(doc: Y.Doc, sceneId: string, item: StagedItem): void {
       flipHorizontal: item.flipHorizontal,
       flipVertical: item.flipVertical,
       isoTurn: clampIsoTurn(item.isoTurn),
+      isoProjection: item.isoProjection,
       showSource: item.showSource,
       opacity: item.opacity,
       paused: item.paused,
@@ -789,6 +843,7 @@ export function addGroup(doc: Y.Doc, sceneId: string, group: RepeatGroup): void 
       scaleJitter: group.scaleJitter,
       minGap: group.minGap,
       edgeBias: group.edgeBias,
+      isoPitch: group.isoPitch,
       background: group.background,
       zIndex: group.zIndex,
       opacity: group.opacity,

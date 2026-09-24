@@ -10,7 +10,7 @@
     "dev:attach": "scripts/dev.sh attach",
     "dev:psql": "scripts/dev.sh psql",
     "dev:reset": "scripts/dev.sh reset",
-    "dev": "next dev -p 4300",
+    "dev": "tsx scripts/dev.ts",
     "worker": "tsx watch --env-file-if-exists=.env.local src/worker/main.ts",
     "build": "next build",
     "build:check": "NEXT_DIST_DIR=.next-build next build",

@@ -205,13 +205,14 @@ export const openAIProvider: ImageProvider = {
     };
   },
 
-  async edit({ apiKey, prompt, generation, base, mask, plate, size }: EditRequest): Promise<ProviderResult> {
+  async edit({ apiKey, prompt, generation, base, mask, plate, start, size }: EditRequest): Promise<ProviderResult> {
     const parameters = buildParameters(prompt, generation, size);
 
     const form = new FormData();
     for (const [key, value] of Object.entries(parameters)) form.append(key, String(value));
 
     form.append("image[]", new File([base], "base.png", { type: "image/png" }));
+    if (start) form.append("image[]", new File([start], "start.png", { type: "image/png" }));
     if (plate) form.append("image[]", new File([plate], "plate.png", { type: "image/png" }));
     if (mask) form.append("mask", new File([mask], "mask.png", { type: "image/png" }));
 

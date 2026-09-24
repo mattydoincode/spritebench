@@ -2,7 +2,27 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isAssetDrag, readAssetDrag } from "@/client/dragAssets";
-import { centerOf, resizeFromCorner, snapPointToGrid, type ResizeCorner } from "@/client/grid";
+import {
+  applyRepeaterScale,
+  centerOf,
+  repeaterScaleBox,
+  resizeFromCorner,
+  snapPointToGrid,
+  type ResizeCorner
+} from "@/client/grid";
+import {
+  hitsInMarquee,
+  pastDragThreshold,
+  pointInRect,
+  rectFromPoints,
+  selectionBounds,
+  selectionOnMarquee,
+  selectionOnTargetClick,
+  selectionOnTargetDown,
+  selectionsEqual,
+  shouldPan,
+  type SceneSelection
+} from "@/client/sceneSelect";
 import {
   MAX_TERRAIN_DETAIL,
   MAX_TERRAIN_TILES,
@@ -13,14 +33,24 @@ import {
   terrainExtent,
   type TerrainGradientId
 } from "@/core/terrain";
+import {
+  DIMETRIC_PITCH,
+  isoDiamondHeightForPitch,
+  isoDiamondRatioForPitch,
+  isoPitchesEqual
+} from "@/core/iso";
 import { clampIsoTurn, spriteFacingCss } from "@/core/isoTurn";
+import { isoProjectionFromSource } from "@/core/isoMask";
 import {
   isoDiamondOrigin,
   isoLattice,
   listIsoCells,
   planRepeater,
   rotateFromCenter,
-  type PlannedStamp
+  stampDrawRect,
+  type PlannedStamp,
+  type StampAlign,
+  type StampFit
 } from "@/core/repeater";
 import {
   activeSceneId,
@@ -41,6 +71,8 @@ import {
   REPEATER_ROTATE_LABELS,
   REPEATER_ROTATES,
   defaultTerrain,
+  isIsoPlacement,
+  isoPitchForRepeater,
   type RepeatGroup,
   type RepeaterRotate,
   type ResolvedAsset,
@@ -49,10 +81,12 @@ import {
   type TerrainGroup
 } from "@/shared/model";
 import { nextSceneName } from "@/shared/naming";
+import { PROCESS_PRIORITY } from "@/client/processor";
 import { previewFrameSettings, useSequencePlayback } from "@/client/sequence";
 import { expandRepeaterMix, isSetAsset } from "@/shared/repeaterMix";
 import { frameSettings, frameSourceAssetId, type Sequence, type SequenceFrame } from "@/shared/sequence";
 import { AssetThumb, BitmapCanvas, useAssetPalette, useProcessed } from "./AssetBitmap";
+import { IsoPitchField } from "./IsoPitchField";
 import { TerrainView } from "./TerrainView";
 import {
   anyModalOpen,
@@ -69,7 +103,7 @@ import {
   Toggle
 } from "./ui";
 
-const MIN_ZOOM = 0.05;
+const MIN_ZOOM = 0.01;
 const MAX_ZOOM = 64;
 const HANDLE = 8;
 const CORNERS: Array<{ corner: ResizeCorner; cursor: string; left: boolean; top: boolean }> = [
@@ -120,6 +154,21 @@ function patchTerrain(terrainId: string, patch: Partial<TerrainGroup>): void {
   if (sceneId) useDoc.getState().patchTerrain(sceneId, terrainId, patch);
 }
 
+function removeSelectedScene(): void {
+  const sceneId = activeSceneId();
+  if (!sceneId) return;
+
+  const { selectedItemIds, selectedGroupIds } = useUi.getState();
+  if (selectedItemIds.length === 0 && selectedGroupIds.length === 0) return;
+
+  useDoc.getState().batch(() => {
+    const doc = useDoc.getState();
+    for (const id of selectedItemIds) doc.removeItem(sceneId, id);
+    for (const id of selectedGroupIds) doc.removeGroup(sceneId, id);
+  });
+  useUi.getState().selectScene([], []);
+}
+
 function setTerrainTile(
   terrainId: string,
   index: number,
@@ -159,6 +208,7 @@ function stageAssets(
         flipHorizontal: false,
         flipVertical: false,
         isoTurn: 0,
+        isoProjection: isoProjectionFromSource(useUi.getState().mask?.source),
         showSource: false,
         opacity: 1,
         paused: false,
@@ -195,6 +245,93 @@ function tileIndices(
 }
 
 const IGNORE_SIZE = () => undefined;
+
+function scaleCellForGroup(group: RepeatGroup, natural: Size): Size {
+  const resolved = resolveCell(group.cell, natural);
+  if (resolved.width > 0 && resolved.height > 0) return resolved;
+  if (group.placement === "scatter") return { width: 0, height: 0 };
+  if (isIsoPlacement(group.placement)) {
+    return {
+      width: 64,
+      height: isoDiamondHeightForPitch(64, isoPitchForRepeater(group))
+    };
+  }
+  return { width: 48, height: 48 };
+}
+
+function CornerHandles({
+  onPointerDown
+}: {
+  onPointerDown: (event: React.PointerEvent, corner: ResizeCorner) => void;
+}) {
+  return (
+    <>
+      {CORNERS.map(({ corner, cursor, left: atLeft, top: atTop }) => (
+        <div
+          key={corner}
+          role="button"
+          title="Drag to resize"
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            onPointerDown(event, corner);
+          }}
+          style={{
+            position: "absolute",
+            left: atLeft ? -HANDLE / 2 : undefined,
+            right: atLeft ? undefined : -HANDLE / 2,
+            top: atTop ? -HANDLE / 2 : undefined,
+            bottom: atTop ? undefined : -HANDLE / 2,
+            width: HANDLE,
+            height: HANDLE,
+            cursor,
+            zIndex: 2,
+            border: "1px solid var(--color-ink-900)",
+            background: "var(--color-accent)",
+            boxSizing: "border-box",
+            pointerEvents: "auto"
+          }}
+        />
+      ))}
+    </>
+  );
+}
+
+function RepeaterResizeFrame({
+  box,
+  viewport,
+  camera,
+  zIndex,
+  handles,
+  onResizePointerDown
+}: {
+  box: { x: number; y: number; width: number; height: number };
+  viewport: Viewport;
+  camera: { x: number; y: number; zoom: number };
+  zIndex: number;
+  handles: boolean;
+  onResizePointerDown: (event: React.PointerEvent, corner: ResizeCorner) => void;
+}) {
+  const left = (box.x - camera.x) * camera.zoom + viewport.width / 2;
+  const top = (box.y - camera.y) * camera.zoom + viewport.height / 2;
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left,
+        top,
+        width: Math.max(1, box.width * camera.zoom),
+        height: Math.max(1, box.height * camera.zoom),
+        border: "1px dashed var(--color-accent)",
+        zIndex,
+        pointerEvents: "none",
+        boxSizing: "border-box"
+      }}
+    >
+      {handles ? <CornerHandles onPointerDown={onResizePointerDown} /> : null}
+    </div>
+  );
+}
 
 function resolveCell(cell: Size, natural: Size): Size {
   if (cell.width > 0 && cell.height > 0) return cell;
@@ -240,7 +377,8 @@ function StagedSprite({
   asset,
   viewport,
   camera,
-  active,
+  selected,
+  handles,
   onPointerDown,
   onResizePointerDown,
   onRotatePointerDown
@@ -249,7 +387,8 @@ function StagedSprite({
   asset: ResolvedAsset;
   viewport: Viewport;
   camera: { x: number; y: number; zoom: number };
-  active: boolean;
+  selected: boolean;
+  handles: boolean;
   onPointerDown: (event: React.PointerEvent, item: StagedItem) => void;
   onResizePointerDown: (
     event: React.PointerEvent,
@@ -293,8 +432,9 @@ function StagedSprite({
       ? undefined
       : frame && sequence
         ? frameSettings(staged.processing, sequence, frame)
-        : previewFrameSettings(staged, "source"),
-    showSheet ? undefined : frame ? frameSourceAssetId(staged.id, frame) : undefined
+        : previewFrameSettings(staged),
+    showSheet ? undefined : frame ? frameSourceAssetId(staged.id, frame) : undefined,
+    PROCESS_PRIORITY.visible
   );
 
   const bitmap = item.showSource ? preview?.sourceBitmap : preview?.processed;
@@ -332,12 +472,11 @@ function StagedSprite({
         height: screenHeight,
         zIndex: item.zIndex,
         opacity: item.opacity,
-        outline: active ? "1px solid var(--color-accent)" : "none",
+        outline: selected ? "1px solid var(--color-accent)" : "none",
         outlineOffset: 1,
         overflow: "visible",
         transform: `rotate(${item.rotation}deg)`,
         transformOrigin: "center",
-        cursor: "grab",
         touchAction: "none"
       }}
     >
@@ -350,7 +489,12 @@ function StagedSprite({
           style={{
             width: "100%",
             height: "100%",
-            transform: spriteFacingCss(item.flipHorizontal, item.flipVertical, item.isoTurn),
+            transform: spriteFacingCss(
+              item.flipHorizontal,
+              item.flipVertical,
+              item.isoTurn,
+              item.isoProjection
+            ),
             pointerEvents: "none"
           }}
         />
@@ -358,7 +502,7 @@ function StagedSprite({
         <div className="h-full w-full rounded border border-dashed border-slate-600" />
       )}
 
-      {active ? (
+      {handles ? (
         <>
           <div
             style={{
@@ -395,34 +539,14 @@ function StagedSprite({
               boxSizing: "border-box"
             }}
           />
-          {CORNERS.map(({ corner, cursor, left: atLeft, top: atTop }) => (
-            <div
-              key={corner}
-              role="button"
-              title="Drag to resize"
-              onPointerDown={(event) => {
-                event.stopPropagation();
-                onResizePointerDown(event, item, corner, {
-                  width: footprintWidth,
-                  height: footprintHeight
-                });
-              }}
-              style={{
-                position: "absolute",
-                left: atLeft ? -HANDLE / 2 : undefined,
-                right: atLeft ? undefined : -HANDLE / 2,
-                top: atTop ? -HANDLE / 2 : undefined,
-                bottom: atTop ? undefined : -HANDLE / 2,
-                width: HANDLE,
-                height: HANDLE,
-                cursor,
-                zIndex: 2,
-                border: "1px solid var(--color-ink-900)",
-                background: "var(--color-accent)",
-                boxSizing: "border-box"
-              }}
-            />
-          ))}
+          <CornerHandles
+            onPointerDown={(event, corner) =>
+              onResizePointerDown(event, item, corner, {
+                width: footprintWidth,
+                height: footprintHeight
+              })
+            }
+          />
         </>
       ) : null}
     </div>
@@ -437,6 +561,9 @@ function GroupAssetTiles({
   stamps,
   viewport,
   camera,
+  stackByDepth,
+  stampFit,
+  stampAlign,
   onReady,
   onPointerDown
 }: {
@@ -447,6 +574,9 @@ function GroupAssetTiles({
   stamps: PlannedStamp[];
   viewport: Viewport;
   camera: { x: number; y: number; zoom: number };
+  stackByDepth: boolean;
+  stampFit: StampFit;
+  stampAlign: StampAlign;
   onReady: (width: number, height: number) => void;
   onPointerDown: (event: React.PointerEvent, group: RepeatGroup) => void;
 }) {
@@ -459,8 +589,9 @@ function GroupAssetTiles({
     "source",
     sequence && frame
       ? frameSettings(staged.processing, sequence, frame)
-      : previewFrameSettings(staged, "source"),
-    frame ? frameSourceAssetId(staged.id, frame) : undefined
+      : previewFrameSettings(staged),
+    frame ? frameSourceAssetId(staged.id, frame) : undefined,
+    PROCESS_PRIORITY.visible
   );
 
   useEffect(() => {
@@ -477,20 +608,17 @@ function GroupAssetTiles({
     const top = Math.round(cellTop);
     const boxWidth = Math.round(cellLeft + stamp.width * camera.zoom) - left;
     const boxHeight = Math.round(cellTop + stamp.height * camera.zoom) - top;
-
-    const quarter = stamp.rotation === 90 || stamp.rotation === 270;
-    const fit = quarter
-      ? Math.min(boxWidth / preview.height, boxHeight / preview.width)
-      : Math.min(boxWidth / preview.width, boxHeight / preview.height);
-
-    const width = preview.width * fit;
-    const height = preview.height * fit;
+    const draw = stampDrawRect(
+      { width: boxWidth, height: boxHeight },
+      { width: preview.width, height: preview.height },
+      { fit: stampFit, align: stampAlign, rotation: stamp.rotation }
+    );
 
     return {
-      left: left + (boxWidth - width) / 2,
-      top: top + (boxHeight - height) / 2,
-      width,
-      height,
+      left: left + draw.x,
+      top: top + draw.y,
+      width: draw.width,
+      height: draw.height,
       rotation: stamp.rotation,
       flipH: stamp.flipH,
       flipV: stamp.flipV
@@ -524,11 +652,12 @@ function GroupAssetTiles({
             top: draw.top,
             width: draw.width,
             height: draw.height,
-            zIndex: group.zIndex,
+            zIndex: stackByDepth ? (stamp.depth ?? 0) : group.zIndex,
             opacity: group.opacity,
             transform: `rotate(${draw.rotation}deg) scale(${draw.flipH ? -1 : 1}, ${draw.flipV ? -1 : 1})`,
             cursor: "grab",
-            touchAction: "none"
+            touchAction: "none",
+            pointerEvents: "auto"
           }}
         >
           <BitmapCanvas
@@ -550,15 +679,24 @@ function GroupLayer({
   assets,
   viewport,
   camera,
-  active,
-  onPointerDown
+  selected,
+  handles,
+  onPointerDown,
+  onResizePointerDown
 }: {
   group: RepeatGroup;
   assets: ResolvedAsset[];
   viewport: Viewport;
   camera: { x: number; y: number; zoom: number };
-  active: boolean;
+  selected: boolean;
+  handles: boolean;
   onPointerDown: (event: React.PointerEvent, group: RepeatGroup) => void;
+  onResizePointerDown: (
+    event: React.PointerEvent,
+    group: RepeatGroup,
+    corner: ResizeCorner,
+    cell: Size
+  ) => void;
 }) {
   const members = group.assetIds
     .map((id) => assets.find((asset) => asset.id === id))
@@ -573,25 +711,30 @@ function GroupLayer({
   }, []);
 
   const { width: cellWidth, height: cellHeight } = resolveCell(group.cell, natural);
+  const scaleCell = scaleCellForGroup(group, natural);
+  const scaleBox = repeaterScaleBox(group, scaleCell);
 
   const originLeft = (group.x - camera.x) * camera.zoom + viewport.width / 2;
   const originTop = (group.y - camera.y) * camera.zoom + viewport.height / 2;
 
   if (members.length === 0) {
+    const pitch = isoPitchForRepeater(group);
+    const diamondRatio = isoDiamondRatioForPitch(pitch);
     const empty =
       group.placement === "scatter"
         ? {
             width: Math.max(80, group.areaWidth * camera.zoom),
             height: Math.max(80, group.areaHeight * camera.zoom)
           }
-        : group.placement === "iso"
+        : isIsoPlacement(group.placement)
           ? {
               width: Math.max(64, (cellWidth || 64) * camera.zoom),
-              height: Math.max(32, ((cellWidth || 64) / 2) * camera.zoom)
+              height: Math.max(32, isoDiamondHeightForPitch(cellWidth || 64, pitch) * camera.zoom)
             }
           : { width: Math.max(80, 48 * camera.zoom), height: Math.max(80, 48 * camera.zoom) };
 
     return (
+    <>
       <div
         onPointerDown={(event) => onPointerDown(event, group)}
         onDragOver={(event) => {
@@ -614,24 +757,24 @@ function GroupLayer({
           width: empty.width,
           height: empty.height,
           border:
-            group.placement === "iso"
+            isIsoPlacement(group.placement)
               ? "none"
-              : `1px dashed ${active ? "var(--color-accent)" : "#4a5565"}`,
+              : `1px dashed ${selected ? "var(--color-accent)" : "#4a5565"}`,
           zIndex: group.zIndex,
           cursor: "grab",
           touchAction: "none"
         }}
       >
-        {group.placement === "iso" ? (
+        {isIsoPlacement(group.placement) ? (
           <svg
-            viewBox="0 0 64 32"
+            viewBox={`0 0 ${diamondRatio} 1`}
             preserveAspectRatio="none"
             className="pointer-events-none absolute inset-0"
           >
             <polygon
-              points="32,0 64,16 32,32 0,16"
+              points={`${diamondRatio / 2},0 ${diamondRatio},0.5 ${diamondRatio / 2},1 0,0.5`}
               fill="none"
-              stroke={active ? "var(--color-accent)" : "#4a5565"}
+              stroke={selected ? "var(--color-accent)" : "#4a5565"}
               strokeWidth="1"
               strokeDasharray="4 3"
               vectorEffect="non-scaling-stroke"
@@ -640,13 +783,27 @@ function GroupLayer({
         ) : null}
         <span className="relative px-1">drop art here</span>
       </div>
+      {selected ? (
+        <RepeaterResizeFrame
+          box={scaleBox}
+          viewport={viewport}
+          camera={camera}
+          zIndex={group.zIndex}
+          handles={handles}
+          onResizePointerDown={(event, corner) =>
+            onResizePointerDown(event, group, corner, scaleCell)
+          }
+        />
+      ) : null}
+    </>
     );
   }
 
   const stepX = cellWidth + group.marginX;
   const stepY = cellHeight + group.marginY;
   const scatter = group.placement === "scatter";
-  const iso = group.placement === "iso";
+  const iso = isIsoPlacement(group.placement);
+  const isoPitch = isoPitchForRepeater(group);
   const view = {
     minX: camera.x - viewport.width / (2 * camera.zoom),
     maxX: camera.x + viewport.width / (2 * camera.zoom),
@@ -666,7 +823,12 @@ function GroupLayer({
         rowBudget
       );
 
-  const lattice = isoLattice({ width: cellWidth, height: cellHeight }, group.marginX, group.marginY);
+  const lattice = isoLattice(
+    { width: cellWidth, height: cellHeight },
+    group.marginX,
+    group.marginY,
+    isoPitch
+  );
   const isoCells = iso
     ? listIsoCells({
         origin: { x: group.x, y: group.y },
@@ -733,24 +895,6 @@ function GroupLayer({
             }
           : null;
 
-  const outline = scatter
-    ? {
-        left: originLeft - 2,
-        top: originTop - 2,
-        width: Math.max(1, group.areaWidth) * camera.zoom + 4,
-        height: Math.max(1, group.areaHeight) * camera.zoom + 4
-      }
-    : iso
-      ? null
-      : cellWidth > 0
-        ? {
-            left: originLeft - 2,
-            top: originTop - 2,
-            width: cellWidth * camera.zoom + 4,
-            height: cellHeight * camera.zoom + 4
-          }
-        : null;
-
   return (
     <>
       {backdrop ? (
@@ -783,37 +927,34 @@ function GroupLayer({
         />
       ) : null}
 
-      {active && outline ? (
-        <div
-          style={{
-            position: "absolute",
-            left: outline.left,
-            top: outline.top,
-            width: outline.width,
-            height: outline.height,
-            border: "1px dashed var(--color-accent)",
-            zIndex: group.zIndex,
-            pointerEvents: "none"
-          }}
-        />
-      ) : null}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          zIndex: group.zIndex,
+          pointerEvents: "none"
+        }}
+      >
+        {mix.map((entry, index) => (
+          <GroupAssetTiles
+            key={`${entry.asset.id}:${entry.frame?.id ?? "asset"}`}
+            group={group}
+            asset={entry.asset}
+            sequence={entry.sequence}
+            frame={entry.frame}
+            stamps={buckets[index]}
+            viewport={viewport}
+            camera={camera}
+            stackByDepth={iso}
+            stampFit={iso ? "width" : "contain"}
+            stampAlign={iso ? "bottom" : "center"}
+            onReady={index === 0 ? onReady : IGNORE_SIZE}
+            onPointerDown={onPointerDown}
+          />
+        ))}
+      </div>
 
-      {mix.map((entry, index) => (
-        <GroupAssetTiles
-          key={`${entry.asset.id}:${entry.frame?.id ?? "asset"}`}
-          group={group}
-          asset={entry.asset}
-          sequence={entry.sequence}
-          frame={entry.frame}
-          stamps={buckets[index]}
-          viewport={viewport}
-          camera={camera}
-          onReady={index === 0 ? onReady : IGNORE_SIZE}
-          onPointerDown={onPointerDown}
-        />
-      ))}
-
-      {active && iso && lattice.diamondW > 0
+      {handles && iso && lattice.diamondW > 0
         ? isoCells.map(({ col, row }) => {
             const diamond = isoDiamondOrigin(col, row, { x: group.x, y: group.y }, lattice);
             const left = (diamond.x - camera.x) * camera.zoom + viewport.width / 2;
@@ -848,6 +989,19 @@ function GroupLayer({
             );
           })
         : null}
+
+      {selected ? (
+        <RepeaterResizeFrame
+          box={scaleBox}
+          viewport={viewport}
+          camera={camera}
+          zIndex={group.zIndex}
+          handles={handles}
+          onResizePointerDown={(event, corner) =>
+            onResizePointerDown(event, group, corner, scaleCell)
+          }
+        />
+      ) : null}
     </>
   );
 }
@@ -1156,6 +1310,7 @@ function ElementsBubble() {
       fillX: false,
       fillY: false,
       ...DEFAULT_REPEATER,
+      isoPitch: useDoc.getState().settings.isoPitch,
       background: "",
       opacity: 1,
       seed: Math.floor(Math.random() * 0xffffffff)
@@ -1184,7 +1339,7 @@ function ElementsBubble() {
     >
       <div className="mb-2 flex flex-col gap-1">
         <Button
-          title="Add a repeater, then drag library art onto it. Grid tiles, an isometric diamond map, or scatter trash and grass in a rectangle"
+          title="Add a repeater, then drag library art onto it. Grid tiles, an isometric diamond map, 2:1 dimetric, or scatter trash and grass in a rectangle"
           onClick={addRepeater}
         >
           + repeater
@@ -1355,8 +1510,10 @@ function repeaterLabel(group: RepeatGroup): string {
   if (group.placement === "scatter") {
     return `scatter ${group.scatterCount} in ${Math.round(group.areaWidth)}×${Math.round(group.areaHeight)}`;
   }
-  if (group.placement === "iso") {
-    return `iso ${group.countX}x${group.countY}`;
+  if (isIsoPlacement(group.placement)) {
+    const pitch = isoPitchForRepeater(group);
+    const degrees = Number.isInteger(pitch) ? String(pitch) : pitch.toFixed(1);
+    return `iso ${degrees}° ${group.countX}x${group.countY}`;
   }
   return `repeater ${group.countX}x${group.countY}`;
 }
@@ -1509,6 +1666,8 @@ function SceneTreeBubble() {
   const scene = useActiveScene();
   const assets = useAssets();
   const activeItemId = useUi((state) => state.activeItemId);
+  const selectedItemIds = useUi((state) => state.selectedItemIds);
+  const selectedGroupIds = useUi((state) => state.selectedGroupIds);
   const activeGroupId = useUi((state) => state.activeGroupId);
   const activeTerrainId = useUi((state) => state.activeTerrainId);
   const collapsed = useUi((state) => state.collapsedBubbles.tree);
@@ -1548,7 +1707,7 @@ function SceneTreeBubble() {
                 key={row.entry.id}
                 label={assets.find((asset) => asset.id === row.entry.assetId)?.label ?? "missing art"}
                 detail={`${Math.round(row.entry.x)}, ${Math.round(row.entry.y)}`}
-                active={row.entry.id === activeItemId}
+                active={selectedItemIds.includes(row.entry.id) || row.entry.id === activeItemId}
                 onSelect={() => {
                   useUi.getState().setActiveItem(row.entry.id);
                   focus(row.entry);
@@ -1561,14 +1720,20 @@ function SceneTreeBubble() {
                   useUi.getState().setActiveItem(id);
                 }}
                 onConvert={() => convertToRepeater(row.entry.id)}
-                onRemove={() => doc().removeItem(scene.id, row.entry.id)}
+                onRemove={() => {
+                  doc().removeItem(scene.id, row.entry.id);
+                  const ui = useUi.getState();
+                  const next = ui.selectedItemIds.filter((id) => id !== row.entry.id);
+                  if (next.length === ui.selectedItemIds.length) return;
+                  ui.selectScene(next, ui.selectedGroupIds);
+                }}
               />
             ) : row.kind === "group" ? (
               <TreeRow
                 key={row.entry.id}
                 label={repeaterLabel(row.entry)}
                 detail={`${row.entry.assetIds.length} art`}
-                active={row.entry.id === activeGroupId}
+                active={selectedGroupIds.includes(row.entry.id) || row.entry.id === activeGroupId}
                 onRename={(name) => doc().patchGroup(scene.id, row.entry.id, { name })}
                 onSelect={() => {
                   useUi.getState().setActiveGroup(row.entry.id);
@@ -1587,7 +1752,13 @@ function SceneTreeBubble() {
                   });
                   useUi.getState().setActiveGroup(id);
                 }}
-                onRemove={() => doc().removeGroup(scene.id, row.entry.id)}
+                onRemove={() => {
+                  doc().removeGroup(scene.id, row.entry.id);
+                  const ui = useUi.getState();
+                  const next = ui.selectedGroupIds.filter((id) => id !== row.entry.id);
+                  if (next.length === ui.selectedGroupIds.length) return;
+                  ui.selectScene(ui.selectedItemIds, next);
+                }}
               />
             ) : (
               <TreeRow
@@ -1710,16 +1881,27 @@ function ScenesBubble() {
 /** Where a drag has moved or resized something, before it is committed. */
 interface DragPreview {
   targetId: string;
+  /** Multi-item move: apply `dx`/`dy` to every id on top of the document. */
+  moveIds?: string[];
+  dx?: number;
+  dy?: number;
   x: number;
   y: number;
   footprint?: Size;
   rotation?: number;
+  cell?: Size;
+  marginX?: number;
+  marginY?: number;
+  areaWidth?: number;
+  areaHeight?: number;
 }
 
 export function Scene() {
   const scene = useActiveScene();
   const assets = useAssets();
   const activeItemId = useUi((state) => state.activeItemId);
+  const selectedItemIds = useUi((state) => state.selectedItemIds);
+  const selectedGroupIds = useUi((state) => state.selectedGroupIds);
   const activeGroupId = useUi((state) => state.activeGroupId);
   const activeTerrainId = useUi((state) => state.activeTerrainId);
   const snapToGrid = useUi((state) => state.snapToGrid);
@@ -1748,10 +1930,22 @@ export function Scene() {
    * network updates, and gave a collaborator a hundred merges to apply.
    */
   const [preview, setPreview] = useState<DragPreview | null>(null);
+  const [marquee, setMarquee] = useState<{ x: number; y: number; width: number; height: number } | null>(
+    null
+  );
+  const [panning, setPanning] = useState(false);
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  const spaceHeldRef = useRef(false);
 
   const dragRef = useRef<{
-    mode: "pan" | "item" | "group" | "terrain" | "resize" | "rotate";
+    mode: "pan" | "move" | "terrain" | "resize" | "group-resize" | "rotate" | "marquee";
     targetId?: string;
+    itemIds?: string[];
+    groupIds?: string[];
+    origins?: Record<string, { x: number; y: number }>;
+    additive?: boolean;
+    baselineItems?: string[];
+    baselineGroups?: string[];
     corner?: ResizeCorner;
     startX: number;
     startY: number;
@@ -1765,6 +1959,13 @@ export function Scene() {
     width?: number;
     height?: number;
     rotation?: number;
+    startRepeater?: RepeatGroup;
+    startCell?: Size;
+    cell?: Size;
+    marginX?: number;
+    marginY?: number;
+    areaWidth?: number;
+    areaHeight?: number;
   } | null>(null);
 
   useEffect(() => {
@@ -1780,49 +1981,65 @@ export function Scene() {
   }, []);
 
   useEffect(() => {
+    const typingInField = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      return Boolean(
+        target &&
+          (target.isContentEditable ||
+            target.tagName === "INPUT" ||
+            target.tagName === "TEXTAREA" ||
+            target.tagName === "SELECT")
+      );
+    };
+
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code === "Space" && !typingInField(event) && !anyModalOpen()) {
+        spaceHeldRef.current = true;
+        setSpaceHeld(true);
+        event.preventDefault();
+      }
+
       if (event.key !== "Delete" && event.key !== "Backspace") return;
       if (anyModalOpen()) return;
-
-      const target = event.target as HTMLElement | null;
-      if (
-        target &&
-        (target.isContentEditable ||
-          target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.tagName === "SELECT")
-      ) {
-        return;
-      }
+      if (typingInField(event)) return;
 
       const sceneId = activeSceneId();
       if (!sceneId) return;
 
-      const { activeGroupId, activeItemId, activeTerrainId } = useUi.getState();
+      const { selectedItemIds, selectedGroupIds, activeTerrainId } = useUi.getState();
+
+      if (selectedItemIds.length > 0 || selectedGroupIds.length > 0) {
+        event.preventDefault();
+        removeSelectedScene();
+        return;
+      }
 
       if (activeTerrainId) {
         event.preventDefault();
         useDoc.getState().removeTerrain(sceneId, activeTerrainId);
         useUi.getState().setActiveTerrain(null);
-        return;
-      }
-
-      if (activeGroupId) {
-        event.preventDefault();
-        useDoc.getState().removeGroup(sceneId, activeGroupId);
-        useUi.getState().setActiveGroup(null);
-        return;
-      }
-
-      if (activeItemId) {
-        event.preventDefault();
-        useDoc.getState().removeItem(sceneId, activeItemId);
-        useUi.getState().setActiveItem(null);
       }
     };
 
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.code !== "Space") return;
+      spaceHeldRef.current = false;
+      setSpaceHeld(false);
+    };
+
+    const onBlur = () => {
+      spaceHeldRef.current = false;
+      setSpaceHeld(false);
+    };
+
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+    };
   }, []);
 
   const screenToWorld = useCallback(
@@ -1856,23 +2073,86 @@ export function Scene() {
     });
   };
 
-  const onItemPointerDown = (event: React.PointerEvent, item: StagedItem) => {
-    if (event.button !== 0 || event.altKey) return;
+  const currentSelection = (): SceneSelection => {
+    const ui = useUi.getState();
+    return { itemIds: ui.selectedItemIds, groupIds: ui.selectedGroupIds };
+  };
+
+  const beginMove = (
+    event: React.PointerEvent,
+    grabbed: { id: string; x: number; y: number },
+    next: SceneSelection
+  ) => {
+    if (!scene) return;
 
     event.stopPropagation();
-    (event.target as HTMLElement).setPointerCapture?.(event.pointerId);
+    (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+    if (!selectionsEqual(currentSelection(), next)) {
+      useUi.getState().selectScene(next.itemIds, next.groupIds);
+    }
 
-    useUi.getState().setActiveItem(item.id);
+    if (!next.itemIds.includes(grabbed.id) && !next.groupIds.includes(grabbed.id)) {
+      dragRef.current = null;
+      return;
+    }
+
+    const origins: Record<string, { x: number; y: number }> = {};
+    for (const entry of scene.items) {
+      if (next.itemIds.includes(entry.id)) origins[entry.id] = { x: entry.x, y: entry.y };
+    }
+    for (const entry of scene.groups) {
+      if (next.groupIds.includes(entry.id)) origins[entry.id] = { x: entry.x, y: entry.y };
+    }
+
     dragRef.current = {
-      mode: "item",
-      targetId: item.id,
+      mode: "move",
+      targetId: grabbed.id,
+      itemIds: next.itemIds,
+      groupIds: next.groupIds,
+      origins,
       startX: event.clientX,
       startY: event.clientY,
-      originX: item.x,
-      originY: item.y,
-      x: item.x,
-      y: item.y
+      originX: grabbed.x,
+      originY: grabbed.y,
+      x: grabbed.x,
+      y: grabbed.y
     };
+  };
+
+  const applyMarqueeSelection = (drag: {
+    originX: number;
+    originY: number;
+    x: number;
+    y: number;
+    additive?: boolean;
+    baselineItems?: string[];
+    baselineGroups?: string[];
+  }) => {
+    const next = selectionOnMarquee(
+      {
+        itemIds: drag.baselineItems ?? [],
+        groupIds: drag.baselineGroups ?? []
+      },
+      hitsInMarquee(
+        scene?.items ?? [],
+        scene?.groups ?? [],
+        rectFromPoints({ x: drag.originX, y: drag.originY }, { x: drag.x, y: drag.y })
+      ),
+      drag.additive ?? false
+    );
+
+    if (selectionsEqual(currentSelection(), next)) return;
+    useUi.getState().selectScene(next.itemIds, next.groupIds);
+  };
+
+  const onItemPointerDown = (event: React.PointerEvent, item: StagedItem) => {
+    if (event.button !== 0 || shouldPan(event, spaceHeldRef.current)) return;
+
+    beginMove(
+      event,
+      item,
+      selectionOnTargetDown(currentSelection(), "item", item.id, event.shiftKey)
+    );
   };
 
   const onResizePointerDown = (
@@ -1881,7 +2161,7 @@ export function Scene() {
     corner: ResizeCorner,
     size: Size
   ) => {
-    if (event.button !== 0 || event.altKey) return;
+    if (event.button !== 0 || shouldPan(event, spaceHeldRef.current)) return;
 
     event.preventDefault();
     event.stopPropagation();
@@ -1908,7 +2188,7 @@ export function Scene() {
   };
 
   const onRotatePointerDown = (event: React.PointerEvent, item: StagedItem, size: Size) => {
-    if (event.button !== 0 || event.altKey) return;
+    if (event.button !== 0 || shouldPan(event, spaceHeldRef.current)) return;
 
     event.preventDefault();
     event.stopPropagation();
@@ -1932,26 +2212,55 @@ export function Scene() {
   };
 
   const onGroupPointerDown = (event: React.PointerEvent, group: RepeatGroup) => {
-    if (event.button !== 0 || event.altKey) return;
+    if (event.button !== 0 || shouldPan(event, spaceHeldRef.current)) return;
 
+    beginMove(
+      event,
+      group,
+      selectionOnTargetDown(currentSelection(), "group", group.id, event.shiftKey)
+    );
+  };
+
+  const onGroupResizePointerDown = (
+    event: React.PointerEvent,
+    group: RepeatGroup,
+    corner: ResizeCorner,
+    cell: Size
+  ) => {
+    if (event.button !== 0 || shouldPan(event, spaceHeldRef.current)) return;
+
+    event.preventDefault();
     event.stopPropagation();
     (event.target as HTMLElement).setPointerCapture?.(event.pointerId);
 
+    const box = repeaterScaleBox(group, cell);
     useUi.getState().setActiveGroup(group.id);
     dragRef.current = {
-      mode: "group",
+      mode: "group-resize",
       targetId: group.id,
+      corner,
       startX: event.clientX,
       startY: event.clientY,
-      originX: group.x,
-      originY: group.y,
+      originX: box.x,
+      originY: box.y,
+      originWidth: box.width,
+      originHeight: box.height,
       x: group.x,
-      y: group.y
+      y: group.y,
+      width: box.width,
+      height: box.height,
+      startRepeater: group,
+      startCell: cell,
+      cell,
+      marginX: group.marginX,
+      marginY: group.marginY,
+      areaWidth: group.areaWidth,
+      areaHeight: group.areaHeight
     };
   };
 
   const onTerrainPointerDown = (event: React.PointerEvent, terrain: TerrainGroup) => {
-    if (event.button !== 0 || event.altKey) return;
+    if (event.button !== 0 || shouldPan(event, spaceHeldRef.current)) return;
 
     event.stopPropagation();
     (event.target as HTMLElement).setPointerCapture?.(event.pointerId);
@@ -1970,20 +2279,57 @@ export function Scene() {
   };
 
   const onBackgroundPointerDown = (event: React.PointerEvent) => {
-    if (event.button === 0 && !event.altKey) {
-      useUi.getState().setActiveItem(null);
-      useUi.getState().setActiveGroup(null);
-      useUi.getState().setActiveTerrain(null);
+    if (shouldPan(event, spaceHeldRef.current)) {
+      event.preventDefault();
+      setPanning(true);
+      dragRef.current = {
+        mode: "pan",
+        startX: event.clientX,
+        startY: event.clientY,
+        originX: camera.x,
+        originY: camera.y,
+        x: camera.x,
+        y: camera.y
+      };
+      (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+      return;
     }
 
+    if (event.button !== 0) return;
+    // Bubbled clicks from a sprite/repeater must not steal the drag into a
+    // marquee. That felt like gripping the whole canvas and moving nothing.
+    if (event.target !== event.currentTarget) return;
+
+    const bounds = containerRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+
+    const world = screenToWorld(event.clientX - bounds.left, event.clientY - bounds.top);
+    const baseline = currentSelection();
+    if (!event.shiftKey && scene) {
+      const box = selectionBounds(
+        scene.items.filter((item) => baseline.itemIds.includes(item.id)),
+        scene.groups.filter((group) => baseline.groupIds.includes(group.id))
+      );
+      const grabbed =
+        scene.items.find((item) => item.id === baseline.itemIds[0]) ??
+        scene.groups.find((group) => group.id === baseline.groupIds[0]) ??
+        null;
+      if (box && grabbed && pointInRect(world, box)) {
+        beginMove(event, grabbed, baseline);
+        return;
+      }
+    }
     dragRef.current = {
-      mode: "pan",
+      mode: "marquee",
+      additive: event.shiftKey,
+      baselineItems: baseline.itemIds,
+      baselineGroups: baseline.groupIds,
       startX: event.clientX,
       startY: event.clientY,
-      originX: camera.x,
-      originY: camera.y,
-      x: camera.x,
-      y: camera.y
+      originX: world.x,
+      originY: world.y,
+      x: world.x,
+      y: world.y
     };
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
   };
@@ -2000,6 +2346,26 @@ export function Scene() {
         x: drag.originX - deltaX,
         y: drag.originY - deltaY
       });
+      return;
+    }
+
+    if (drag.mode === "marquee") {
+      const bounds = containerRef.current?.getBoundingClientRect();
+      if (!bounds) return;
+
+      const world = screenToWorld(event.clientX - bounds.left, event.clientY - bounds.top);
+      drag.x = world.x;
+      drag.y = world.y;
+
+      if (pastDragThreshold(event.clientX - drag.startX, event.clientY - drag.startY)) {
+        setMarquee(
+          rectFromPoints(
+            { x: drag.startX - bounds.left, y: drag.startY - bounds.top },
+            { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
+          )
+        );
+        applyMarqueeSelection(drag);
+      }
       return;
     }
 
@@ -2025,6 +2391,55 @@ export function Scene() {
 
       drag.rotation = next;
       setPreview({ targetId: drag.targetId, x: drag.originX, y: drag.originY, rotation: next });
+      return;
+    }
+
+    if (
+      drag.mode === "group-resize" &&
+      drag.corner &&
+      drag.startRepeater &&
+      drag.startCell &&
+      drag.originWidth !== undefined &&
+      drag.originHeight !== undefined
+    ) {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+
+      const pointer = screenToWorld(event.clientX - rect.left, event.clientY - rect.top);
+      const next = resizeFromCorner(
+        {
+          x: drag.originX,
+          y: drag.originY,
+          width: drag.originWidth,
+          height: drag.originHeight
+        },
+        drag.corner,
+        pointer,
+        {
+          lockAspect: useUi.getState().lockFootprintAspect,
+          snap: snapToGrid ? unitsPerCell : undefined
+        }
+      );
+      const applied = applyRepeaterScale(drag.startRepeater, drag.startCell, {
+        x: drag.originX,
+        y: drag.originY,
+        width: drag.originWidth,
+        height: drag.originHeight
+      }, next);
+
+      drag.x = applied.x;
+      drag.y = applied.y;
+      drag.width = next.width;
+      drag.height = next.height;
+      drag.cell = applied.cell;
+      drag.marginX = applied.marginX;
+      drag.marginY = applied.marginY;
+      drag.areaWidth = applied.areaWidth;
+      drag.areaHeight = applied.areaHeight;
+      setPreview({
+        targetId: drag.targetId,
+        ...applied
+      });
       return;
     }
 
@@ -2068,6 +2483,10 @@ export function Scene() {
       return;
     }
 
+    if (drag.mode === "move" && !pastDragThreshold(event.clientX - drag.startX, event.clientY - drag.startY)) {
+      return;
+    }
+
     const rawX = drag.originX + deltaX;
     const rawY = drag.originY + deltaY;
     const next = snapToGrid
@@ -2077,19 +2496,67 @@ export function Scene() {
     drag.x = next.x;
     drag.y = next.y;
 
+    if (drag.mode === "move") {
+      setPreview({
+        targetId: drag.targetId,
+        moveIds: [...(drag.itemIds ?? []), ...(drag.groupIds ?? [])],
+        dx: next.x - drag.originX,
+        dy: next.y - drag.originY,
+        x: next.x,
+        y: next.y
+      });
+      return;
+    }
+
     setPreview({ targetId: drag.targetId, x: drag.x, y: drag.y });
   };
 
-  const onPointerUp = () => {
+  const onPointerUp = (event: React.PointerEvent) => {
     const drag = dragRef.current;
     dragRef.current = null;
     setPreview(null);
+    setMarquee(null);
+    setPanning(false);
 
-    if (!drag?.targetId || drag.mode === "pan") return;
+    if (!drag || drag.mode === "pan") return;
+
+    if (drag.mode === "marquee") {
+      if (!pastDragThreshold(event.clientX - drag.startX, event.clientY - drag.startY)) {
+        if (!drag.additive) useUi.getState().selectScene([], []);
+        return;
+      }
+
+      applyMarqueeSelection(drag);
+      return;
+    }
+
+    if (!drag.targetId) return;
 
     if (drag.mode === "rotate") {
       if (drag.rotation === drag.originRotation) return;
       patchItem(drag.targetId, { rotation: drag.rotation ?? 0 });
+      return;
+    }
+
+    if (drag.mode === "group-resize") {
+      if (
+        drag.width === drag.originWidth &&
+        drag.height === drag.originHeight &&
+        drag.x === drag.startRepeater?.x &&
+        drag.y === drag.startRepeater?.y
+      ) {
+        return;
+      }
+
+      patchGroup(drag.targetId, {
+        x: drag.x,
+        y: drag.y,
+        cell: drag.cell ?? drag.startCell ?? { width: 1, height: 1 },
+        marginX: drag.marginX ?? 0,
+        marginY: drag.marginY ?? 0,
+        areaWidth: drag.areaWidth ?? 1,
+        areaHeight: drag.areaHeight ?? 1
+      });
       return;
     }
 
@@ -2111,13 +2578,38 @@ export function Scene() {
       return;
     }
 
+    if (drag.mode === "move") {
+      const targetId = drag.targetId;
+      const kind = (drag.groupIds ?? []).includes(targetId) ? "group" : "item";
+
+      if (!pastDragThreshold(event.clientX - drag.startX, event.clientY - drag.startY)) {
+        const next = selectionOnTargetClick(currentSelection(), kind, targetId, event.shiftKey);
+        useUi.getState().selectScene(next.itemIds, next.groupIds);
+        return;
+      }
+
+      if (drag.x === drag.originX && drag.y === drag.originY) return;
+
+      const dx = drag.x - drag.originX;
+      const dy = drag.y - drag.originY;
+      const origins = drag.origins ?? {};
+
+      useDoc.getState().batch(() => {
+        for (const id of drag.itemIds ?? []) {
+          const origin = origins[id];
+          if (origin) patchItem(id, { x: origin.x + dx, y: origin.y + dy });
+        }
+        for (const id of drag.groupIds ?? []) {
+          const origin = origins[id];
+          if (origin) patchGroup(id, { x: origin.x + dx, y: origin.y + dy });
+        }
+      });
+      return;
+    }
+
     if (drag.x === drag.originX && drag.y === drag.originY) return;
 
-    const moved = { x: drag.x, y: drag.y };
-
-    if (drag.mode === "group") patchGroup(drag.targetId, moved);
-    else if (drag.mode === "terrain") patchTerrain(drag.targetId, moved);
-    else patchItem(drag.targetId, moved);
+    if (drag.mode === "terrain") patchTerrain(drag.targetId, { x: drag.x, y: drag.y });
   };
 
   const onDrop = (event: React.DragEvent) => {
@@ -2143,6 +2635,13 @@ export function Scene() {
   const gridOffsetX = (-camera.x * camera.zoom + viewport.width / 2) % cellPixels;
   const gridOffsetY = (-camera.y * camera.zoom + viewport.height / 2) % cellPixels;
 
+  const liveSelectedIds = selectedItemIds.filter((id) =>
+    scene.items.some((item) => item.id === id)
+  );
+  const liveSelectedGroupIds = selectedGroupIds.filter((id) =>
+    scene.groups.some((group) => group.id === id)
+  );
+  const selectedCount = liveSelectedIds.length + liveSelectedGroupIds.length;
   const activeItem = scene.items.find((item) => item.id === activeItemId) ?? null;
   const activeAsset = activeItem
     ? assets.find((entry) => entry.id === activeItem.assetId) ?? null
@@ -2152,13 +2651,25 @@ export function Scene() {
 
   /** Applies an in-flight drag on top of what the document says. */
   const dragged = <T extends { id: string; x: number; y: number }>(entry: T): T => {
+    if (preview?.moveIds?.includes(entry.id) && preview.dx !== undefined && preview.dy !== undefined) {
+      return { ...entry, x: entry.x + preview.dx, y: entry.y + preview.dy };
+    }
     if (!preview || preview.targetId !== entry.id) return entry;
     return {
       ...entry,
       x: preview.x,
       y: preview.y,
       ...("footprint" in entry && preview.footprint ? { footprint: preview.footprint } : {}),
-      ...("rotation" in entry && preview.rotation !== undefined ? { rotation: preview.rotation } : {})
+      ...("rotation" in entry && preview.rotation !== undefined ? { rotation: preview.rotation } : {}),
+      ...("cell" in entry && preview.cell
+        ? {
+            cell: preview.cell,
+            marginX: preview.marginX ?? 0,
+            marginY: preview.marginY ?? 0,
+            areaWidth: preview.areaWidth ?? 1,
+            areaHeight: preview.areaHeight ?? 1
+          }
+        : {})
     };
   };
 
@@ -2175,6 +2686,9 @@ export function Scene() {
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
+            onMouseDown={(event) => {
+              if (event.button === 1) event.preventDefault();
+            }}
             onDragOver={(event) => {
               if (!isAssetDrag(event)) return;
               event.preventDefault();
@@ -2194,7 +2708,7 @@ export function Scene() {
                 : undefined,
               backgroundSize: showGrid ? `${cellPixels}px ${cellPixels}px` : undefined,
               backgroundPosition: showGrid ? `${gridOffsetX}px ${gridOffsetY}px` : undefined,
-              cursor: "grab",
+              cursor: panning ? "grabbing" : spaceHeld ? "grab" : "default",
               touchAction: "none",
               zIndex: 0,
               boxShadow: dropping ? "inset 0 0 0 2px var(--color-accent)" : undefined
@@ -2231,8 +2745,10 @@ export function Scene() {
                 assets={assets}
                 viewport={viewport}
                 camera={camera}
-                active={group.id === activeGroupId}
+                selected={liveSelectedGroupIds.includes(group.id)}
+                handles={selectedCount === 1 && liveSelectedGroupIds.includes(group.id)}
                 onPointerDown={onGroupPointerDown}
+                onResizePointerDown={onGroupResizePointerDown}
               />
             ))}
 
@@ -2247,13 +2763,30 @@ export function Scene() {
                   asset={asset}
                   viewport={viewport}
                   camera={camera}
-                  active={item.id === activeItemId}
+                  selected={liveSelectedIds.includes(item.id)}
+                  handles={selectedCount === 1 && liveSelectedIds.includes(item.id)}
                   onPointerDown={onItemPointerDown}
                   onResizePointerDown={onResizePointerDown}
                   onRotatePointerDown={onRotatePointerDown}
                 />
               );
             })}
+
+            {marquee ? (
+              <div
+                style={{
+                  position: "absolute",
+                  left: marquee.x,
+                  top: marquee.y,
+                  width: marquee.width,
+                  height: marquee.height,
+                  border: "1px dashed var(--color-accent)",
+                  background: "color-mix(in srgb, var(--color-accent) 12%, transparent)",
+                  pointerEvents: "none",
+                  zIndex: 10000
+                }}
+              />
+            ) : null}
           </div>
         )}
 
@@ -2278,9 +2811,11 @@ export function Scene() {
             <SceneTreeBubble />
             <span className="flex-1" />
 
-            {activeTerrain ? (
+            {activeTerrain && selectedCount === 0 ? (
               <TerrainControls terrain={activeTerrain} assets={assets} />
-            ) : activeGroup ? (
+            ) : selectedCount > 1 ? (
+              <SelectedItemsControls count={selectedCount} />
+            ) : activeGroup && liveSelectedGroupIds.length === 1 ? (
               <GroupControls group={activeGroup} assets={assets} />
             ) : activeItem && activeAsset ? (
               <StagedItemControls item={activeItem} asset={activeAsset} />
@@ -2288,7 +2823,7 @@ export function Scene() {
               <span className="self-end text-[10px] text-slate-600">
                 {sceneView === "terrain"
                   ? "drag to orbit, wheel to zoom"
-                  : "wheel to zoom, drag the background to pan, drag a sprite to move it"}
+                  : "wheel to zoom, drag to select, space or middle-drag to pan"}
               </span>
             )}
           </div>
@@ -2317,6 +2852,28 @@ function SceneViewTabs({ sceneId }: { sceneId: string }) {
       >
         Terrain
       </Button>
+    </div>
+  );
+}
+
+function SelectedItemsControls({ count }: { count: number }) {
+  return (
+    <div
+      className="pointer-events-auto max-h-full w-64 overflow-y-auto rounded-lg border border-[var(--color-edge)] bg-[var(--color-ink-800)]/95 p-2 shadow-xl backdrop-blur-sm"
+      style={{ zIndex: 1 }}
+    >
+      <Row>
+        <span className="min-w-0 flex-1 truncate text-[11px] text-slate-300">
+          {count} selected
+        </span>
+        <TextButton
+          danger
+          title="Take these off the scene. The art stays in your library"
+          onClick={() => removeSelectedScene()}
+        >
+          remove
+        </TextButton>
+      </Row>
     </div>
   );
 }
@@ -2603,10 +3160,25 @@ function StagedItemControls({ item, asset }: { item: StagedItem; asset: Resolved
         </Button>
         <Button
           variant={item.isoTurn ? "primary" : "ghost"}
-          title="Yaw 90° on the 2:1 diamond (SE → NE → NW → SW). Flip X is the other pair."
+          title={
+            item.isoProjection === "dimetric"
+              ? "Yaw 90° on the 2:1 diamond (SE → NE → NW → SW). Flip X is the other pair."
+              : "Yaw 90° on the true isometric diamond (SE → NE → NW → SW). Flip X is the other pair."
+          }
           onClick={() => patchItem(item.id, { isoTurn: clampIsoTurn(item.isoTurn + 1) })}
         >
           {item.isoTurn ? `iso ${item.isoTurn * 90}` : "iso turn"}
+        </Button>
+        <Button
+          variant={item.isoProjection === "dimetric" ? "primary" : "ghost"}
+          title="Yaw on the 2:1 diamond instead of true isometric (120°)."
+          onClick={() =>
+            patchItem(item.id, {
+              isoProjection: item.isoProjection === "dimetric" ? "true" : "dimetric"
+            })
+          }
+        >
+          2:1
         </Button>
         <Button
           variant={item.showSource ? "primary" : "ghost"}
@@ -2639,6 +3211,7 @@ function StagedItemControls({ item, asset }: { item: StagedItem; asset: Resolved
           disabled={item.footprint.width < 1 || item.footprint.height < 1}
           onClick={() =>
             useDoc.getState().patchProcessing(asset.id, {
+              downsample: true,
               targetSize: {
                 width: Math.round(item.footprint.width),
                 height: Math.round(item.footprint.height)
@@ -2655,6 +3228,8 @@ function StagedItemControls({ item, asset }: { item: StagedItem; asset: Resolved
 
 function GroupControls({ group, assets }: { group: RepeatGroup; assets: ResolvedAsset[] }) {
   const [dropping, setDropping] = useState(false);
+  const locked = useUi((state) => state.lockFootprintAspect);
+  const defaultIsoPitch = useDoc((state) => state.settings.isoPitch);
 
   const patch = (change: Partial<RepeatGroup>) => patchGroup(group.id, change);
 
@@ -2762,11 +3337,21 @@ function GroupControls({ group, assets }: { group: RepeatGroup; assets: Resolved
               placement === "scatter"
                 ? "Throw stamps at random inside a rectangle"
                 : placement === "iso"
-                  ? "Tile on a 2:1 isometric diamond lattice"
-                  : "Tile on a regular grid"
+                  ? "Tile on a true isometric diamond lattice (120° axes, √3:1)"
+                  : placement === "iso21"
+                    ? "Tile on a 2:1 dimetric diamond lattice"
+                    : "Tile on a regular grid"
             }
             onClick={() => {
               if (placement === group.placement) return;
+              if (placement === "iso") {
+                patch({ placement, isoPitch: defaultIsoPitch });
+                return;
+              }
+              if (placement === "iso21") {
+                patch({ placement, isoPitch: DIMETRIC_PITCH });
+                return;
+              }
               if (placement !== "scatter") {
                 patch({ placement });
                 return;
@@ -2793,6 +3378,18 @@ function GroupControls({ group, assets }: { group: RepeatGroup; assets: Resolved
           </Button>
         ))}
       </Row>
+
+      {isIsoPlacement(group.placement) ? (
+        <IsoPitchField
+          pitch={isoPitchForRepeater(group)}
+          onChange={(isoPitch) =>
+            patch({
+              isoPitch,
+              placement: isoPitchesEqual(isoPitch, DIMETRIC_PITCH) ? "iso21" : "iso"
+            })
+          }
+        />
+      ) : null}
 
       <label className="mb-2 block text-[10px] tracking-wide text-slate-400 uppercase">
         spin
@@ -2917,33 +3514,48 @@ function GroupControls({ group, assets }: { group: RepeatGroup; assets: Resolved
         })
       )}
 
-      <div className="mt-2 grid grid-cols-2 gap-2">
-        <label className="text-[10px] tracking-wide text-slate-400 uppercase">
+      <div className="mt-2 mb-2 flex items-end gap-1">
+        <label className="min-w-0 flex-1 text-[10px] tracking-wide text-slate-400 uppercase">
           cell w
           <NumberInput
             min={0}
             title={
-              group.placement === "iso"
-                ? "Diamond width. Height of the tile footprint is half of this (2:1)"
+              isIsoPlacement(group.placement)
+                ? `Diamond width. Height of the tile footprint follows the ${isoPitchForRepeater(group).toFixed(1)}° camera`
                 : "0 follows the other edge at the asset's aspect ratio, or its pixel size if both are 0"
             }
             value={group.cell.width}
             onChange={(value) => patch({ cell: { ...group.cell, width: value } })}
           />
         </label>
-        <label className="text-[10px] tracking-wide text-slate-400 uppercase">
+        <Button
+          variant={locked ? "primary" : "ghost"}
+          className="mb-[1px] shrink-0"
+          title={
+            locked
+              ? "Proportions locked: corner drag scales both edges"
+              : "Proportions free: edges move independently"
+          }
+          onClick={() => useUi.getState().toggleFootprintLock()}
+        >
+          {locked ? "\u{1F512}" : "\u{1F513}"}
+        </Button>
+        <label className="min-w-0 flex-1 text-[10px] tracking-wide text-slate-400 uppercase">
           cell h
           <NumberInput
             min={0}
             title={
-              group.placement === "iso"
-                ? "Art box height. Taller than half the width hangs the sprite north of the diamond"
+              isIsoPlacement(group.placement)
+                ? "Scale-frame height. Sprites pin to diamond width and sit on the south tip; taller art hangs north"
                 : "0 follows the other edge at the asset's aspect ratio, or its pixel size if both are 0"
             }
             value={group.cell.height}
             onChange={(value) => patch({ cell: { ...group.cell, height: value } })}
           />
         </label>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
         <label className="text-[10px] tracking-wide text-slate-400 uppercase">
           z index
           <NumberInput integer value={group.zIndex} onChange={(value) => patch({ zIndex: value })} />

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { centerOf, resizeFromCorner, rotateAbout, snapPointToGrid } from "@/client/grid";
+import {
+  applyRepeaterScale,
+  centerOf,
+  repeaterScaleBox,
+  resizeFromCorner,
+  rotateAbout,
+  snapPointToGrid
+} from "@/client/grid";
 import { DEFAULT_TERRAIN, emptyTiles } from "@/core/terrain";
 import type { RepeatGroup, StagedItem, TerrainGroup } from "@/shared/model";
 
@@ -142,6 +149,7 @@ describe("centerOf", () => {
     zIndex: 0,
     flipHorizontal: false,
     isoTurn: 0,
+    isoProjection: "true",
     flipVertical: false,
     showSource: false,
     opacity: 1,
@@ -177,6 +185,7 @@ describe("centerOf", () => {
     zIndex: 0,
     opacity: 1,
     seed: 0,
+    isoPitch: 30,
     ...patch
   });
 
@@ -209,7 +218,7 @@ describe("centerOf", () => {
     expect(
       centerOf(
         group({
-          placement: "iso",
+          placement: "iso21",
           x: 0,
           y: 0,
           cell: { width: 16, height: 8 },
@@ -220,6 +229,122 @@ describe("centerOf", () => {
         })
       )
     ).toEqual({ x: 8, y: 8 });
+  });
+
+  it("stretches an iso map when the camera pitch changes", () => {
+    const at30 = centerOf(
+      group({
+        placement: "iso",
+        isoPitch: 30,
+        cell: { width: 16, height: 8 },
+        countX: 2,
+        countY: 2
+      })
+    );
+    const at45 = centerOf(
+      group({
+        placement: "iso",
+        isoPitch: 45,
+        cell: { width: 16, height: 8 },
+        countX: 2,
+        countY: 2
+      })
+    );
+
+    expect(at30.x).toBeCloseTo(at45.x);
+    expect(at45.y).toBeGreaterThan(at30.y);
+  });
+
+  it("scales a grid from the south-east without moving the origin", () => {
+    const start = repeaterScaleBox(group(), { width: 16, height: 16 });
+    expect(start).toEqual({ x: 0, y: 0, width: 64, height: 32 });
+
+    const next = applyRepeaterScale(
+      group(),
+      { width: 16, height: 16 },
+      start,
+      { x: 0, y: 0, width: 128, height: 64 }
+    );
+
+    expect(next).toMatchObject({
+      x: 0,
+      y: 0,
+      cell: { width: 32, height: 32 },
+      marginX: 0,
+      marginY: 0
+    });
+  });
+
+  it("plants the opposite corner when scaling a grid from the north-west", () => {
+    const layout = group({ x: 10, y: 20 });
+    const start = repeaterScaleBox(layout, { width: 16, height: 16 });
+    const next = applyRepeaterScale(
+      layout,
+      { width: 16, height: 16 },
+      start,
+      { x: start.x - 32, y: start.y - 16, width: start.width + 32, height: start.height + 16 }
+    );
+
+    expect(next.cell).toEqual({ width: 24, height: 24 });
+    expect(next.x + repeaterScaleBox({ ...layout, ...next }, next.cell).width).toBeCloseTo(
+      start.x + start.width
+    );
+    expect(next.y + repeaterScaleBox({ ...layout, ...next }, next.cell).height).toBeCloseTo(
+      start.y + start.height
+    );
+  });
+
+  it("scales scatter area and stamp cell together", () => {
+    const layout = group({
+      placement: "scatter",
+      x: 10,
+      y: 20,
+      areaWidth: 100,
+      areaHeight: 40,
+      cell: { width: 8, height: 8 }
+    });
+    const start = repeaterScaleBox(layout, { width: 8, height: 8 });
+    expect(start).toEqual({ x: 10, y: 20, width: 100, height: 40 });
+
+    const next = applyRepeaterScale(layout, { width: 8, height: 8 }, start, {
+      x: 10,
+      y: 20,
+      width: 200,
+      height: 80
+    });
+
+    expect(next).toMatchObject({
+      x: 10,
+      y: 20,
+      cell: { width: 16, height: 16 },
+      areaWidth: 200,
+      areaHeight: 80
+    });
+  });
+
+  it("plants the far iso corner when the map scales", () => {
+    const layout = group({
+      placement: "iso21",
+      cell: { width: 16, height: 8 },
+      countX: 2,
+      countY: 2
+    });
+    const start = repeaterScaleBox(layout, { width: 16, height: 8 });
+    const nextBox = { x: start.x, y: start.y, width: start.width * 2, height: start.height * 2 };
+    const next = applyRepeaterScale(layout, { width: 16, height: 8 }, start, nextBox);
+    const box = repeaterScaleBox({ ...layout, ...next }, next.cell);
+
+    expect(next.cell).toEqual({ width: 32, height: 16 });
+    expect(box.x).toBeCloseTo(nextBox.x);
+    expect(box.y).toBeCloseTo(nextBox.y);
+    expect(box.width).toBeCloseTo(nextBox.width);
+    expect(box.height).toBeCloseTo(nextBox.height);
+  });
+
+  it("uses one cell when a fill axis has no far edge", () => {
+    expect(
+      repeaterScaleBox(group({ fillX: true, fillY: true }), { width: 16, height: 16 })
+    ).toEqual({ x: 0, y: 0, width: 16, height: 16 });
   });
 
   it("centres a terrain on its tile grid", () => {

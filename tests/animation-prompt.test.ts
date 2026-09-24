@@ -50,6 +50,22 @@ describe("gridInstructions", () => {
   it("mentions padded rows when the aspect force-adds them", () => {
     expect(gridInstructions([{ name: "walk", frames: 8 }], 8, 3)).toContain("bottom 2 rows");
   });
+
+  it("does not describe a hidden mask when the plate is a pixel grid", () => {
+    const text = gridInstructions(trio, 4, 3, { pixelConstraint: true });
+    expect(text).toContain("own pixel grid");
+    expect(text).toContain("stay empty");
+    expect(text).not.toContain("Covered cells are masked");
+    expect(text).not.toContain("No grid lines");
+  });
+
+  it("describes empty white cells when the plate is frames-only", () => {
+    const text = gridInstructions(trio, 4, 3, { frames: true });
+    expect(text).toContain("white rectangle");
+    expect(text).toContain("black gutters");
+    expect(text).not.toContain("pixel grid");
+    expect(text).not.toContain("Covered cells are masked");
+  });
 });
 
 describe("planAnimation", () => {
@@ -200,6 +216,58 @@ describe("sequencesFromPlan", () => {
       expect(frame.rect.width).toBe(sheet.cell);
       expect(frame.rect.x + frame.rect.width).toBeLessThanOrEqual(sheet.size.width);
     }
+  });
+
+  it("uses the stored plate cells instead of even-dividing the canvas", () => {
+    const sequences = sequencesFromPlan(
+      "sheet",
+      { width: 64, height: 64 },
+      {
+        columns: 2,
+        rows: 2,
+        fps: 6,
+        actions: [
+          { name: "walk", frames: 2 },
+          { name: "idle", frames: 1 }
+        ],
+        plate: {
+          canvas: { width: 64, height: 64 },
+          origin: { x: 8, y: 8 },
+          cell: { width: 24, height: 24 },
+          sprite: { width: 4, height: 4 },
+          gutter: 8
+        }
+      },
+      ids()
+    );
+
+    expect(sequences[0].frames[0].rect).toEqual({ x: 8, y: 8, width: 24, height: 24 });
+    expect(sequences[0].frames[1].rect).toEqual({ x: 40, y: 8, width: 24, height: 24 });
+    expect(sequences[1].frames[0].rect).toEqual({ x: 8, y: 40, width: 24, height: 24 });
+  });
+
+  it("scales stored plate cells when the PNG is not the asked canvas", () => {
+    const [sequence] = sequencesFromPlan(
+      "sheet",
+      { width: 128, height: 128 },
+      {
+        columns: 2,
+        rows: 1,
+        fps: 6,
+        actions: [{ name: "walk", frames: 2 }],
+        plate: {
+          canvas: { width: 64, height: 64 },
+          origin: { x: 8, y: 8 },
+          cell: { width: 24, height: 24 },
+          sprite: { width: 4, height: 4 },
+          gutter: 8
+        }
+      },
+      ids()
+    );
+
+    expect(sequence.frames[0].rect).toEqual({ x: 16, y: 16, width: 48, height: 48 });
+    expect(sequence.frames[1].rect).toEqual({ x: 80, y: 16, width: 48, height: 48 });
   });
 
   it("flattens a set plan into one items sequence, row-major", () => {

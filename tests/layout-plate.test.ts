@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { ISO_DIAMOND_TEMPLATE_ID } from "@/core/isoMask";
+import { SHEET_FRAME_INK, SHEET_FRAMES_TEMPLATE_ID, sheetFrameLayout } from "@/core/frameMask";
+import { ISO_21_TEMPLATE_ID, ISO_DIAMOND_SIZE, ISO_DIAMOND_TEMPLATE_ID } from "@/core/isoMask";
 import { layoutPlateForJob, overlayPlateForView } from "@/core/layoutPlate";
 import {
   PIXEL_CONSTRAINT_GREY_A,
   PIXEL_CONSTRAINT_GREY_B,
-  PIXEL_CONSTRAINT_TEMPLATE_ID
+  PIXEL_CONSTRAINT_TEMPLATE_ID,
+  sheetCellRect,
+  sheetPixelConstraintLayout
 } from "@/core/pixelMask";
 
 function at(image: { width: number; data: Uint8ClampedArray }, x: number, y: number) {
@@ -106,8 +109,152 @@ describe("layout plate overlay", () => {
       targetSize: { width: 0, height: 0 }
     });
 
+    expect(plate?.width).toBe(ISO_DIAMOND_SIZE.width);
+    expect(plate?.height).toBe(ISO_DIAMOND_SIZE.height);
+  });
+
+  it("builds the 2:1 diamond for that plate", () => {
+    const plate = layoutPlateForJob({
+      mask: { source: { kind: "template", templateId: ISO_21_TEMPLATE_ID } },
+      edits: [],
+      sourceSize: { width: 1024, height: 1024 },
+      targetSize: { width: 0, height: 0 }
+    });
+
     expect(plate?.width).toBe(256);
     expect(plate?.height).toBe(128);
+  });
+
+  it("rebuilds the full sheet plate for a pixel-constrained animation", () => {
+    const plateLayout = sheetPixelConstraintLayout({ width: 64, height: 64 }, { width: 4, height: 4 }, 2, 2);
+    const plate = layoutPlateForJob({
+      mask: {
+        source: { kind: "template", templateId: PIXEL_CONSTRAINT_TEMPLATE_ID },
+        window: { width: 4, height: 4 }
+      },
+      edits: [
+        {
+          kind: "pixelGrid",
+          columns: 4,
+          rows: 4,
+          canvasWidth: plateLayout.cell.width,
+          canvasHeight: plateLayout.cell.height,
+          originX: 0,
+          originY: 0,
+          cell: 7
+        }
+      ],
+      sourceSize: { width: 64, height: 64 },
+      targetSize: { width: 4, height: 4 },
+      sequencePlan: {
+        columns: 2,
+        rows: 2,
+        fps: 6,
+        actions: [
+          { name: "walk", frames: 2 },
+          { name: "idle", frames: 1 }
+        ],
+        plate: plateLayout
+      }
+    });
+
+    expect(plate?.width).toBe(64);
+    const first = sheetCellRect(plateLayout, 0, 0);
+    const unused = sheetCellRect(plateLayout, 1, 1);
+    expect(at(plate!, first.x, first.y)).toEqual([
+      PIXEL_CONSTRAINT_GREY_A,
+      PIXEL_CONSTRAINT_GREY_A,
+      PIXEL_CONSTRAINT_GREY_A,
+      255
+    ]);
+    expect(at(plate!, unused.x, unused.y)).toEqual([255, 255, 255, 255]);
+  });
+
+  it("samples one animation cell for the processed overlay, not the whole sheet", () => {
+    const plateLayout = sheetPixelConstraintLayout({ width: 64, height: 64 }, { width: 4, height: 4 }, 2, 2);
+    const edits = [
+      {
+        kind: "pixelGrid" as const,
+        columns: 4,
+        rows: 4,
+        canvasWidth: plateLayout.cell.width,
+        canvasHeight: plateLayout.cell.height,
+        originX: 0,
+        originY: 0,
+        cell: Math.max(1, Math.floor(plateLayout.cell.width / 4))
+      }
+    ];
+    const plate = layoutPlateForJob({
+      mask: {
+        source: { kind: "template", templateId: PIXEL_CONSTRAINT_TEMPLATE_ID },
+        window: { width: 4, height: 4 }
+      },
+      edits,
+      sourceSize: { width: 64, height: 64 },
+      targetSize: { width: 4, height: 4 },
+      sequencePlan: {
+        columns: 2,
+        rows: 2,
+        fps: 6,
+        actions: [{ name: "walk", frames: 2 }],
+        plate: plateLayout
+      }
+    });
+    if (!plate) throw new Error("expected plate");
+
+    const overlay = overlayPlateForView(plate, edits, "processed", {
+      columns: 2,
+      rows: 2,
+      fps: 6,
+      actions: [{ name: "walk", frames: 2 }],
+      plate: plateLayout
+    });
+
+    expect(overlay.width).toBe(4);
+    expect(overlay.height).toBe(4);
+    expect(at(overlay, 0, 0)).toEqual([
+      PIXEL_CONSTRAINT_GREY_A,
+      PIXEL_CONSTRAINT_GREY_A,
+      PIXEL_CONSTRAINT_GREY_A,
+      255
+    ]);
+    expect(at(overlay, 1, 0)).toEqual([
+      PIXEL_CONSTRAINT_GREY_B,
+      PIXEL_CONSTRAINT_GREY_B,
+      PIXEL_CONSTRAINT_GREY_B,
+      255
+    ]);
+  });
+
+  it("rebuilds empty white cells for a frames sheet", () => {
+    const plateLayout = sheetFrameLayout({ width: 64, height: 64 }, 2, 2);
+    const plate = layoutPlateForJob({
+      mask: { source: { kind: "template", templateId: SHEET_FRAMES_TEMPLATE_ID } },
+      edits: [],
+      sourceSize: { width: 64, height: 64 },
+      targetSize: { width: 0, height: 0 },
+      sequencePlan: {
+        columns: 2,
+        rows: 2,
+        fps: 6,
+        actions: [
+          { name: "walk", frames: 2 },
+          { name: "idle", frames: 1 }
+        ],
+        plate: plateLayout
+      }
+    });
+
+    expect(plate?.width).toBe(64);
+    const first = sheetCellRect(plateLayout, 0, 0);
+    const unused = sheetCellRect(plateLayout, 1, 1);
+    expect(at(plate!, first.x, first.y)).toEqual([255, 255, 255, 255]);
+    expect(at(plate!, unused.x, unused.y)).toEqual([
+      SHEET_FRAME_INK,
+      SHEET_FRAME_INK,
+      SHEET_FRAME_INK,
+      255
+    ]);
   });
 
   it("returns nothing when the job had no mask", () => {

@@ -1,33 +1,51 @@
 "use client";
 
-import { useEffect, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { sourceUrl } from "@/client/api";
 import { canAcceptTemplateDrop, readTemplateDrop } from "@/client/dragAssets";
 import { useServer } from "@/client/stores/server";
 import { useUi } from "@/client/stores/ui";
 import {
+  ISO_21_TEMPLATE_ID,
+  ISO_21_TEMPLATE_NAME,
   ISO_DIAMOND_TEMPLATE_ID,
   ISO_DIAMOND_TEMPLATE_NAME,
-  isIsoDiamondTemplate
+  isIsoDiamondTemplate,
+  isoProjectionForTemplate
 } from "@/core/isoMask";
+import {
+  SHEET_FRAMES_TEMPLATE_ID,
+  SHEET_FRAMES_TEMPLATE_NAME,
+  buildSheetFramesTemplate,
+  isSheetFramesTemplate,
+  previewSheetFramesPlan
+} from "@/core/frameMask";
 import {
   PIXEL_CONSTRAINT_TEMPLATE_ID,
   PIXEL_CONSTRAINT_TEMPLATE_NAME,
+  buildPixelConstraintTemplate,
+  buildSheetPixelConstraintTemplate,
   isLayoutGuideTemplate,
   isPixelConstraintTemplate,
   pixelConstraintWindow
 } from "@/core/pixelMask";
-import { MASK_SOURCES, TEMPLATE_FIT_MODES, type Size } from "@/core/types";
+import { MASK_SOURCES, TEMPLATE_FIT_MODES, type RgbaImage, type Size } from "@/core/types";
 import { snapRequestSize } from "@/providers/models";
+import { planAnimation, planItemGrid } from "@/shared/animationPrompt";
+import { activeFeaturePrompts } from "@/shared/featurePrompt";
 import type { BaseSpec, ImageSource, MaskSpec } from "@/shared/model";
+import { SuggestedPrompt } from "./SuggestedPrompt";
 import { Button, ExpandablePreview, Field, NumberInput, Row, Select, Slider } from "./ui";
 
-type TemplateMode = "none" | "iso" | "pixel" | "custom";
+type TemplateMode = "none" | "iso" | "iso21" | "pixel" | "frames" | "custom";
 
 function templateMode(mask: MaskSpec | null, custom: boolean): TemplateMode {
   const id = mask?.source.kind === "template" ? mask.source.templateId : null;
-  if (id && isIsoDiamondTemplate(id)) return "iso";
+  if (id && isIsoDiamondTemplate(id)) {
+    return isoProjectionForTemplate(id) === "dimetric" ? "iso21" : "iso";
+  }
   if (id && isPixelConstraintTemplate(id)) return "pixel";
+  if (id && isSheetFramesTemplate(id)) return "frames";
   if (mask || custom) return "custom";
   return "none";
 }
@@ -40,19 +58,19 @@ const MASK_LABELS: Record<string, string> = {
   keepOutsideShape: "protect the shape, edit around it"
 };
 
-function templateBase(templateId: string, previous: BaseSpec | null): BaseSpec {
+function templateBase(templateId: string, previous: BaseSpec[]): BaseSpec {
   return {
     source: { kind: "template", templateId },
-    fit: previous?.fit ?? "contain",
-    matchAspect: previous?.matchAspect ?? true
+    fit: previous[0]?.fit ?? "contain",
+    matchAspect: previous[0]?.matchAspect ?? true
   };
 }
 
-function assetBase(assetId: string, previous: BaseSpec | null): BaseSpec {
+function assetBase(assetId: string, previous: BaseSpec[]): BaseSpec {
   return {
     source: { kind: "asset", assetId },
-    fit: previous?.fit ?? "contain",
-    matchAspect: previous?.matchAspect ?? true
+    fit: previous[0]?.fit ?? "contain",
+    matchAspect: previous[0]?.matchAspect ?? true
   };
 }
 
@@ -76,6 +94,15 @@ function templateMask(templateId: string, previous: MaskSpec | null): MaskSpec {
     };
   }
 
+  if (isSheetFramesTemplate(templateId)) {
+    return {
+      source: { kind: "template", templateId },
+      maskSource: "transparentWhereLight",
+      dilatePixels: 0,
+      fit: "stretch"
+    };
+  }
+
   return {
     source: { kind: "template", templateId },
     maskSource: previous?.maskSource ?? "keepOutsideShape",
@@ -90,7 +117,11 @@ function sourcePreview(
   templates: Array<{ id: string; name: string; width: number; height: number }>,
   assets: Array<{ id: string; seq: number; hasSource: boolean }>,
   alpha: boolean,
-  plate?: { canvas: Size; window: Size }
+  plate?: {
+    canvas: Size;
+    window: Size;
+    sheet?: { columns: number; rows: number; used?: number[] };
+  }
 ): { src: string; label: string; size: string } | null {
   if (source.kind === "template") {
     const current = templates.find((entry) => entry.id === source.templateId);
@@ -104,13 +135,20 @@ function sourcePreview(
       params.set("ch", String(plate.canvas.height));
       params.set("ww", String(plate.window.width));
       params.set("wh", String(plate.window.height));
+      if (plate.sheet) {
+        params.set("sc", String(plate.sheet.columns));
+        params.set("sr", String(plate.sheet.rows));
+        if (plate.sheet.used?.length) params.set("used", plate.sheet.used.join(","));
+      }
     }
     return {
       src: `/api/projects/${projectId}/templates/file?${params}`,
       label: current.name,
       size:
         isPixelConstraintTemplate(source.templateId) && plate
-          ? `${plate.canvas.width}x${plate.canvas.height} · ${plate.window.width}×${plate.window.height} cells`
+          ? plate.sheet
+            ? `${plate.canvas.width}x${plate.canvas.height} · ${plate.sheet.columns}×${plate.sheet.rows} of ${plate.window.width}×${plate.window.height}`
+            : `${plate.canvas.width}x${plate.canvas.height} · ${plate.window.width}×${plate.window.height} cells`
           : `${current.width}x${current.height}`
     };
   }
@@ -122,6 +160,40 @@ function sourcePreview(
     label: String(asset.seq).padStart(3, "0"),
     size: asset.hasSource ? "asset" : "rolled off"
   };
+}
+
+function PlateCanvas({ image, maxHeight }: { image: RgbaImage; maxHeight: number }) {
+  const ref = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.putImageData(new ImageData(image.data, image.width, image.height), 0, 0);
+  }, [image]);
+
+  return (
+    <canvas
+      ref={ref}
+      className="max-w-full"
+      style={{ maxHeight, height: "auto", imageRendering: "pixelated" }}
+    />
+  );
+}
+
+function PlateThumb({ image, alt, size }: { image: RgbaImage; alt: string; size: string }) {
+  return (
+    <ExpandablePreview
+      title={`${alt} · ${size}`}
+      className="checkerboard mb-2 flex w-full items-center justify-center rounded border-0 bg-transparent p-2"
+      expanded={<PlateCanvas image={image} maxHeight={800} />}
+    >
+      <PlateCanvas image={image} maxHeight={140} />
+    </ExpandablePreview>
+  );
 }
 
 function TemplateThumb({ src, alt, size }: { src: string; alt: string; size: string }) {
@@ -145,15 +217,15 @@ function TemplateThumb({ src, alt, size }: { src: string; alt: string; size: str
   );
 }
 
-function DropZone({
+export function DropZone({
   hint,
-  onFile,
-  onAsset,
+  onFiles,
+  onAssets,
   assetsOnly
 }: {
   hint: string;
-  onFile?: (file: File) => void;
-  onAsset: (assetId: string) => void;
+  onFiles?: (files: File[]) => void;
+  onAssets: (assetIds: string[]) => void;
   assetsOnly?: boolean;
 }) {
   const [dragOver, setDragOver] = useState(false);
@@ -182,8 +254,8 @@ function DropZone({
         setDragOver(false);
         const drop = readTemplateDrop(event);
         if (!drop) return;
-        if (drop.kind === "asset") onAsset(drop.assetId);
-        else if (!assetsOnly && onFile) onFile(drop.file);
+        if (drop.kind === "assets") onAssets(drop.assetIds);
+        else if (!assetsOnly && onFiles) onFiles(drop.files);
       }}
       className={`mb-2 rounded border border-dashed p-3 text-center text-[11px] ${
         dragOver
@@ -197,25 +269,56 @@ function DropZone({
 }
 
 export function TemplatePanel() {
-  const base = useUi((state) => state.base);
+  const bases = useUi((state) => state.bases);
   const mask = useUi((state) => state.mask);
   const loop = useUi((state) => state.loop);
   const chunk = useUi((state) => state.chunk);
+  const each = useUi((state) => state.each);
   const templates = useServer((state) => state.templates);
   const assets = useServer((state) => state.assets);
   const settings = useServer((state) => state.settings);
+  const animation = useUi((state) => state.animation);
+  const itemGrid = useUi((state) => state.itemGrid);
   const generation = settings.generation;
   const pixelWindow = pixelConstraintWindow(settings.processing.targetSize);
   const pixelCanvas = snapRequestSize(generation.size, generation.model);
+  const sheet = animation.enabled
+    ? planAnimation({
+        subject: "",
+        actions: animation.actions,
+        cellSize: animation.cellSize
+      })
+    : itemGrid.enabled
+      ? planItemGrid({
+          subject: "",
+          columns: itemGrid.columns,
+          rows: itemGrid.rows,
+          cellSize: itemGrid.cellSize
+        })
+      : null;
   const projectId = useServer((state) => state.project?.id ?? null);
   const busy = useUi((state) => state.busy);
   const store = useServer.getState;
   const ui = useUi.getState;
 
-  const starting = loop.enabled || chunk.enabled;
+  const starting = loop.enabled || chunk.enabled || each.enabled;
+  const assetsOnly = loop.enabled || chunk.enabled;
   const [showAlpha, setShowAlpha] = useState(false);
   const [custom, setCustom] = useState(false);
   const mode = templateMode(mask, custom);
+  const sheetOn = animation.enabled || itemGrid.enabled;
+  const extras = activeFeaturePrompts({
+    model: generation.model,
+    mask,
+    base: sheetOn ? null : (bases[0] ?? null),
+    each: each.enabled,
+    animation,
+    itemGrid
+  });
+  const suggested = (id: (typeof extras)[number]["id"]) => {
+    const entry = extras.find((item) => item.id === id);
+    return entry ? <SuggestedPrompt text={entry.defaultText} /> : null;
+  };
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
@@ -239,69 +342,151 @@ export function TemplatePanel() {
   }, [store]);
 
   useEffect(() => {
-    const id = base?.source.kind === "template" ? base.source.templateId : null;
-    if (!id || !isLayoutGuideTemplate(id)) return;
-    if (!mask) ui().setMask(templateMask(id, null));
-    ui().setBase(null);
-  }, [base, mask, ui]);
+    const guides = bases.filter(
+      (entry) => entry.source.kind === "template" && isLayoutGuideTemplate(entry.source.templateId)
+    );
+    if (guides.length === 0) return;
 
-  const basePreview =
-    base && projectId ? sourcePreview(base.source, projectId, templates, assets, showAlpha) : null;
+    const id = guides[0].source.kind === "template" ? guides[0].source.templateId : null;
+    if (id && !mask) ui().setMask(templateMask(id, null));
+    ui().setBases(
+      bases.filter(
+        (entry) =>
+          !(entry.source.kind === "template" && isLayoutGuideTemplate(entry.source.templateId))
+      )
+    );
+  }, [bases, mask, ui]);
+
+  const basePreviews = projectId
+    ? bases.map((entry) => sourcePreview(entry.source, projectId, templates, assets, showAlpha))
+    : [];
+  const base = bases[0] ?? null;
   const maskPreview =
-    mask && projectId
-      ? sourcePreview(
-          mask.source,
-          projectId,
-          templates,
-          assets,
-          showAlpha,
-          mask.source.kind === "template" && isPixelConstraintTemplate(mask.source.templateId)
-            ? { canvas: pixelCanvas, window: pixelWindow }
-            : undefined
-        )
+    mask && projectId && mode !== "pixel" && mode !== "frames"
+      ? sourcePreview(mask.source, projectId, templates, assets, showAlpha)
       : null;
+  const pixelPlate = useMemo(() => {
+    if (mode !== "pixel") return null;
+    const canvas = { width: pixelCanvas.width, height: pixelCanvas.height };
+    const cells = { width: pixelWindow.width, height: pixelWindow.height };
+    if (animation.enabled) {
+      return buildSheetPixelConstraintTemplate(
+        canvas,
+        cells,
+        planAnimation({
+          subject: "",
+          actions: animation.actions,
+          cellSize: animation.cellSize
+        }).plan
+      );
+    }
+    if (itemGrid.enabled) {
+      return buildSheetPixelConstraintTemplate(
+        canvas,
+        cells,
+        planItemGrid({
+          subject: "",
+          columns: itemGrid.columns,
+          rows: itemGrid.rows,
+          cellSize: itemGrid.cellSize
+        }).plan
+      );
+    }
+    return buildPixelConstraintTemplate(canvas, cells);
+  }, [
+    mode,
+    pixelCanvas.width,
+    pixelCanvas.height,
+    pixelWindow.width,
+    pixelWindow.height,
+    animation.enabled,
+    animation.actions,
+    animation.cellSize,
+    itemGrid.enabled,
+    itemGrid.columns,
+    itemGrid.rows,
+    itemGrid.cellSize
+  ]);
+  const pixelPlateSize = sheet
+    ? `${pixelCanvas.width}x${pixelCanvas.height} · ${sheet.plan.columns}×${sheet.plan.rows} of ${pixelWindow.width}×${pixelWindow.height}`
+    : `${pixelCanvas.width}x${pixelCanvas.height} · ${pixelWindow.width}×${pixelWindow.height} cells`;
+
+  const framesCanvas = sheet
+    ? snapRequestSize(sheet.sheet.size, generation.model)
+    : pixelCanvas;
+  const framesPlate = useMemo(() => {
+    if (mode !== "frames") return null;
+    const plan = sheet
+      ? sheet.plan
+      : previewSheetFramesPlan();
+    return buildSheetFramesTemplate(framesCanvas, plan);
+  }, [
+    mode,
+    framesCanvas.width,
+    framesCanvas.height,
+    sheet,
+    animation.enabled,
+    animation.actions,
+    animation.cellSize,
+    itemGrid.enabled,
+    itemGrid.columns,
+    itemGrid.rows,
+    itemGrid.cellSize
+  ]);
+  const framesPlateSize = sheet
+    ? `${framesCanvas.width}x${framesCanvas.height} · ${sheet.plan.columns}×${sheet.plan.rows} cells`
+    : `${framesCanvas.width}x${framesCanvas.height} · 2×2 cells`;
 
   return (
     <div>
       <div className="mb-3">
         <Row className="mb-2 justify-between">
           <span className="text-[11px] uppercase tracking-wide text-slate-400">
-            {starting ? "Starting image" : "Reference"}
+            {each.enabled ? "Images to edit" : starting ? "Starting images" : "References"}
           </span>
-          {base ? (
-            <Button variant="ghost" onClick={() => ui().setBase(null)}>
-              clear
-            </Button>
-          ) : null}
+          <Row>
+            {!assetsOnly ? (
+              <Button variant="ghost" onClick={() => ui().openTemplateBuilder()}>
+                build
+              </Button>
+            ) : null}
+            {bases.length > 0 ? (
+              <Button variant="ghost" onClick={() => ui().setBases([])}>
+                clear
+              </Button>
+            ) : null}
+          </Row>
         </Row>
 
         <DropZone
-          assetsOnly={starting}
+          assetsOnly={assetsOnly}
           hint={
             busy === "saving template"
               ? "processing template..."
-              : starting
-                ? "drag an asset from the library"
-                : "drop a PNG, or drag an asset here"
+              : each.enabled
+                ? "drop PNGs or drag assets — each one is its own edit"
+                : starting
+                  ? loop.enabled
+                    ? "drag assets from the library — each one is its own loop"
+                    : "drag assets from the library — each one is its own grid"
+                  : "drop PNGs or drag assets — each one is its own job"
           }
-          onFile={(file) => void store().uploadTemplate(file, { slot: "base" })}
-          onAsset={(assetId) => ui().setBase(assetBase(assetId, base))}
+          onFiles={(files) => void store().uploadTemplates(files, { slot: "base" })}
+          onAssets={(assetIds) =>
+            ui().addBases(assetIds.map((assetId) => assetBase(assetId, bases)))
+          }
         />
 
-        {!starting && templates.some((entry) => !isLayoutGuideTemplate(entry.id)) ? (
+        {!assetsOnly && templates.some((entry) => !isLayoutGuideTemplate(entry.id)) ? (
           <Field label="Saved templates">
             <select
-              value={
-                base?.source.kind === "template" && !isLayoutGuideTemplate(base.source.templateId)
-                  ? base.source.templateId
-                  : ""
-              }
+              value=""
               onChange={(event) => {
                 const value = event.target.value;
-                ui().setBase(value ? templateBase(value, base) : null);
+                if (value) ui().addBases([templateBase(value, bases)]);
               }}
             >
-              <option value="">(none)</option>
+              <option value="">add…</option>
               {templates
                 .filter((entry) => !isLayoutGuideTemplate(entry.id))
                 .map((entry) => (
@@ -316,13 +501,13 @@ export function TemplatePanel() {
         {starting && assets.length > 0 ? (
           <Field label="Project assets">
             <select
-              value={base?.source.kind === "asset" ? base.source.assetId : ""}
+              value=""
               onChange={(event) => {
                 const value = event.target.value;
-                ui().setBase(value ? assetBase(value, base) : null);
+                if (value) ui().addBases([assetBase(value, bases)]);
               }}
             >
-              <option value="">(none)</option>
+              <option value="">add…</option>
               {assets
                 .filter((entry) => entry.hasSource)
                 .map((entry) => (
@@ -334,34 +519,63 @@ export function TemplatePanel() {
           </Field>
         ) : null}
 
-        {base && basePreview ? (
+        {bases.length > 0 ? (
           <>
-            <TemplateThumb src={basePreview.src} alt={basePreview.label} size={basePreview.size} />
+            <div className="mb-2 grid grid-cols-2 gap-2">
+              {bases.map((entry, index) => {
+                const preview = basePreviews[index];
+                return (
+                  <div key={`${entry.source.kind}:${index}`} className="relative">
+                    {preview ? (
+                      <TemplateThumb src={preview.src} alt={preview.label} size={preview.size} />
+                    ) : (
+                      <div className="mb-2 rounded border border-[var(--color-edge)] p-2 text-[10px] text-slate-500">
+                        missing
+                      </div>
+                    )}
+                    <Row className="mb-1 justify-between">
+                      <span className="truncate text-[10px] text-slate-500">
+                        {preview?.label ?? "ref"}
+                      </span>
+                      <Button variant="ghost" onClick={() => ui().removeBase(index)}>
+                        remove
+                      </Button>
+                    </Row>
+                  </div>
+                );
+              })}
+            </div>
             <Row className="mb-2 justify-between">
-              <span className="text-[10px] text-slate-500">{basePreview.size}</span>
+              <span className="text-[10px] text-slate-500">
+                {bases.length === 1
+                  ? basePreviews[0]?.size
+                  : `${bases.length} ${starting ? "starts" : "templates"} — one job each`}
+              </span>
               <Button variant="ghost" onClick={() => setShowAlpha(!showAlpha)}>
                 {showAlpha ? "show colour" : "show alpha"}
               </Button>
             </Row>
-            <Field label="Fit" hint="how the image maps onto the request size">
+            <Field label="Fit" hint="how each image maps onto the request size">
               <Select
-                value={base.fit}
+                value={base?.fit ?? "contain"}
                 options={TEMPLATE_FIT_MODES}
-                onChange={(fit) => ui().setBase({ ...base, fit })}
+                onChange={(fit) => ui().patchBases({ fit })}
               />
             </Field>
             <div className="mb-2">
               <label className="flex items-center gap-2 text-[11px] text-slate-400">
                 <input
                   type="checkbox"
-                  checked={base.matchAspect}
-                  onChange={(event) => ui().setBase({ ...base, matchAspect: event.target.checked })}
+                  checked={base?.matchAspect ?? true}
+                  onChange={(event) => ui().patchBases({ matchAspect: event.target.checked })}
                 />
                 Match the request aspect to the image
               </label>
             </div>
           </>
         ) : null}
+
+        {each.enabled ? null : suggested("reference")}
       </div>
 
       <div>
@@ -385,7 +599,9 @@ export function TemplatePanel() {
             [
               ["none", "None"],
               ["iso", ISO_DIAMOND_TEMPLATE_NAME],
+              ["iso21", ISO_21_TEMPLATE_NAME],
               ["pixel", PIXEL_CONSTRAINT_TEMPLATE_NAME],
+              ["frames", SHEET_FRAMES_TEMPLATE_NAME],
               ["custom", "Custom"]
             ] as const
           ).map(([id, label]) => (
@@ -394,12 +610,16 @@ export function TemplatePanel() {
               variant={mode === id ? "primary" : "ghost"}
               title={
                 id === "iso"
-                  ? "2:1 diamond plate. The model draws inside the tile footprint."
-                  : id === "pixel"
+                  ? "True isometric diamond (120° axes, √3:1). The model draws inside the tile footprint."
+                  : id === "iso21"
+                    ? "2:1 dimetric diamond. Pixel-art tiles that step 2 across and 1 down."
+                    : id === "pixel"
                     ? "Grey checkerboard at request size; each square is one asset pixel."
-                    : id === "custom"
-                      ? "Upload or paste a sketch and treat it as a stencil."
-                      : "No layout plate"
+                    : id === "frames"
+                      ? "Empty white cells with dark gutters. A sheet layout without the pixel grid."
+                      : id === "custom"
+                        ? "Upload or paste a sketch and treat it as a stencil."
+                        : "No layout plate"
               }
               onClick={() => {
                 if (id === "none") {
@@ -412,9 +632,19 @@ export function TemplatePanel() {
                   ui().setMask(templateMask(ISO_DIAMOND_TEMPLATE_ID, mask));
                   return;
                 }
+                if (id === "iso21") {
+                  setCustom(false);
+                  ui().setMask(templateMask(ISO_21_TEMPLATE_ID, mask));
+                  return;
+                }
                 if (id === "pixel") {
                   setCustom(false);
                   ui().setMask(templateMask(PIXEL_CONSTRAINT_TEMPLATE_ID, mask));
+                  return;
+                }
+                if (id === "frames") {
+                  setCustom(false);
+                  ui().setMask(templateMask(SHEET_FRAMES_TEMPLATE_ID, mask));
                   return;
                 }
                 setCustom(true);
@@ -436,6 +666,18 @@ export function TemplatePanel() {
           </p>
         ) : null}
 
+        {mode === "frames" ? (
+          <p className="mb-2 text-[10px] leading-snug text-slate-500">
+            Empty white cells for each frame, dark gutters between them. No pixel grid and no
+            downsample from this plate. Turn on an animation sheet or item grid to size the cells.
+          </p>
+        ) : null}
+
+        {mode === "iso" || mode === "iso21" ? suggested("iso-diamond") : null}
+        {mode === "pixel" ? suggested("pixel-constraint") : null}
+        {mode === "frames" ? suggested("frames") : null}
+        {mode === "custom" ? suggested("guide") : null}
+
         {mode === "custom" ? (
           <>
             <DropZone
@@ -444,8 +686,14 @@ export function TemplatePanel() {
                   ? "processing template..."
                   : "paste a sketch, drop a PNG, or drag an asset here"
               }
-              onFile={(file) => void store().uploadTemplate(file, { slot: "mask" })}
-              onAsset={(assetId) => void store().uploadTemplateFromAsset(assetId, "mask")}
+              onFiles={(files) => {
+                const file = files[0];
+                if (file) void store().uploadTemplate(file, { slot: "mask" });
+              }}
+              onAssets={(assetIds) => {
+                const assetId = assetIds[0];
+                if (assetId) void store().uploadTemplateFromAsset(assetId, "mask");
+              }}
             />
 
             <label className="mb-2 flex items-center gap-2 text-[11px] text-slate-400">
@@ -497,7 +745,25 @@ export function TemplatePanel() {
           </>
         ) : null}
 
-        {mask && maskPreview && (mode === "iso" || mode === "pixel" || mode === "custom") ? (
+        {mode === "pixel" && pixelPlate ? (
+          <>
+            <PlateThumb image={pixelPlate} alt={PIXEL_CONSTRAINT_TEMPLATE_NAME} size={pixelPlateSize} />
+            <Row className="mb-2 justify-between">
+              <span className="text-[10px] text-slate-500">{pixelPlateSize}</span>
+            </Row>
+          </>
+        ) : null}
+
+        {mode === "frames" && framesPlate ? (
+          <>
+            <PlateThumb image={framesPlate} alt={SHEET_FRAMES_TEMPLATE_NAME} size={framesPlateSize} />
+            <Row className="mb-2 justify-between">
+              <span className="text-[10px] text-slate-500">{framesPlateSize}</span>
+            </Row>
+          </>
+        ) : null}
+
+        {mask && maskPreview && (mode === "iso" || mode === "iso21" || mode === "custom") ? (
           <>
             <TemplateThumb src={maskPreview.src} alt={maskPreview.label} size={maskPreview.size} />
             <Row className="mb-2 justify-between">

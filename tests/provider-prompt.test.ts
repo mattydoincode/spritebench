@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { composePrompt, DEFAULT_GENERATION } from "@/shared/model";
-import { GEMINI_GUIDE_INSTRUCTIONS } from "@/shared/featurePrompt";
+import { GEMINI_GUIDE_INSTRUCTIONS, GEMINI_REVISE_INSTRUCTIONS } from "@/shared/featurePrompt";
 import {
   composeProviderPrompt,
   providerAttachmentPlan,
@@ -84,6 +84,58 @@ describe("providerPrompt", () => {
       { id: "base", label: "base image" },
       { id: "mask", label: "mask · transparent = draw" }
     ]);
+  });
+
+  it("adds the original start when a later loop step sends it again", () => {
+    const step = {
+      ...grass,
+      generation: { ...DEFAULT_GENERATION, model: "gpt-image-2" },
+      inputs: {
+        base: {
+          source: { kind: "asset" as const, assetId: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" },
+          fit: "contain" as const,
+          matchAspect: true
+        },
+        start: {
+          source: { kind: "asset" as const, assetId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" },
+          fit: "contain" as const,
+          matchAspect: true
+        },
+        loop: { steps: 4, index: 2, sendStart: true }
+      }
+    };
+
+    expect(providerAttachmentPlan(step)).toEqual([
+      { id: "base", label: "base image" },
+      { id: "start", label: "original start" }
+    ]);
+  });
+
+  it("treats an each-mode Gemini base as an image to revise", () => {
+    const revise = {
+      prompt: { prefix: "", body: "clean the edges", suffix: "" },
+      composedPrompt: "clean the edges",
+      generation: { ...DEFAULT_GENERATION, model: "gemini-3.1-flash-image" },
+      inputs: {
+        each: true,
+        base: {
+          source: { kind: "asset" as const, assetId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" },
+          fit: "contain" as const,
+          matchAspect: true
+        }
+      },
+      sequencePlan: null
+    };
+
+    expect(providerAttachmentPlan(revise)).toEqual([{ id: "reference", label: "image to revise" }]);
+    expect(providerPromptSections(revise)[0]).toEqual({
+      id: "system",
+      label: "guide",
+      text: GEMINI_REVISE_INSTRUCTIONS
+    });
+    expect(
+      providerAuditLines(revise).find((line) => line.label === "call")?.value
+    ).toBe("edit · each");
   });
 
   it("has no attachments on a plain generate", () => {

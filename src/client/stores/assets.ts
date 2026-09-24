@@ -3,7 +3,8 @@
 import { useMemo } from "react";
 import { attachSet, setByAssetId } from "@/shared/assetSet";
 import { resolveAsset } from "@/shared/doc";
-import type { Scene, ResolvedAsset } from "@/shared/model";
+import { isLibraryJob } from "@/shared/libraryItems";
+import type { JobRecord, Scene, ResolvedAsset } from "@/shared/model";
 import { useDoc } from "./doc";
 import { useServer } from "./server";
 import { useUi } from "./ui";
@@ -60,6 +61,19 @@ export function useAsset(assetId: string | null): ResolvedAsset | null {
 export function useSelectedAsset(): ResolvedAsset | null {
   const selectedIds = useUi((state) => state.selectedIds);
   return useAsset(selectedIds[selectedIds.length - 1] ?? null);
+}
+
+/** A pending or failed job, if that is what is selected. */
+export function useSelectedJob(): JobRecord | null {
+  const selectedIds = useUi((state) => state.selectedIds);
+  const jobs = useServer((state) => state.jobs);
+  const id = selectedIds[selectedIds.length - 1] ?? null;
+
+  return useMemo(() => {
+    if (!id) return null;
+    const job = jobs.find((entry) => entry.id === id);
+    return job && isLibraryJob(job) ? job : null;
+  }, [id, jobs]);
 }
 
 /**

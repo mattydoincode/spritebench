@@ -1,59 +1,43 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useActiveScene, useAsset, useSelectedAsset } from "@/client/stores/assets";
+import { useActiveScene, useAsset, useSelectedAsset, useSelectedJob } from "@/client/stores/assets";
 import { useDoc } from "@/client/stores/doc";
 import { useServer } from "@/client/stores/server";
 import { DEFAULT_INSPECTOR_PREVIEW, useUi } from "@/client/stores/ui";
-import {
-  CUTOUT_MODES,
-  DISTANCE_MODES,
-  DITHER_MODES,
-  ORIENTATIONS,
-  PIXELATE_MODES
-} from "@/core/types";
+import { MAX_CHROMA_KEYS } from "@/core/settings";
+import { isoProjectionFromSource } from "@/core/isoMask";
+import { CUTOUT_LABELS, CUTOUT_MODES, DISTANCE_MODES, DITHER_MODES, ORIENTATIONS } from "@/core/types";
+import { useMaskOverlay } from "@/client/maskOverlay";
+import { PROCESS_PRIORITY } from "@/client/processor";
 import { useSequenceFrames, useSequencePlayback } from "@/client/sequence";
 import { isSetAsset } from "@/shared/repeaterMix";
 import { frameSettings, frameSourceAssetId, type Sequence } from "@/shared/sequence";
 import { AnimationSection } from "./AnimationSection";
 import { SetSection } from "./SetSection";
-import { useMaskOverlay } from "@/client/maskOverlay";
 import { BitmapCanvas, useAssetPalette, useProcessed } from "./AssetBitmap";
+import { DownsampleControls } from "./DownsampleControls";
 import { ExportDialog } from "./ExportDialog";
 import { GenerationHistory } from "./GenerationHistory";
+import { JobInspector } from "./JobInspector";
 import { ResizeHandle } from "./ResizeHandle";
+import { RightTabs } from "./RightTabs";
 import {
   Button,
   ColorInput,
-  Divider,
   ExpandablePreview,
+  Section,
   Field,
   NumberInput,
   Panel,
   Row,
   Select,
   Slider,
+  TextButton,
   Toggle
 } from "./ui";
 
 type ViewMode = "processed" | "source" | "alpha";
-
-const PIXELATE_LABELS: Record<string, string> = {
-  dominantColor: "dominant colour (chunky pixel art)",
-  boxAverage: "box average (soft pixel art)",
-  nearest: "nearest (hard, aliased)",
-  bilinear: "bilinear (smooth shrink)",
-  bicubic: "bicubic (smooth shrink)",
-  lanczos: "lanczos (sharpest smooth shrink)"
-};
-
-const CUTOUT_LABELS: Record<string, string> = {
-  none: "keep the background",
-  edgeFloodFill: "flood fill from the edges",
-  chromaKey: "chroma key a colour",
-  luminanceAbove: "clear pixels brighter than",
-  luminanceBelow: "clear pixels darker than"
-};
 
 const EMPTY_SEQUENCES: Sequence[] = [];
 
@@ -68,6 +52,7 @@ export function InspectorPanel() {
   const scene = useActiveScene();
   const busy = useUi((state) => state.busy);
   const asset = useSelectedAsset();
+  const job = useSelectedJob();
   const activeSequenceId = useUi((state) => state.activeSequenceId);
   const previewHeight = useUi((state) => state.inspectorPreview);
   const panelWidth = useUi((state) => state.layout.right);
@@ -85,7 +70,6 @@ export function InspectorPanel() {
   const [showMask, setShowMask] = useState(false);
   const [exportName, setExportName] = useState("");
   const [exporting, setExporting] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Seeded from the asset's label, which is its pretty name if it has one and
   // its number otherwise, so a never-renamed asset downloads as `001`.
@@ -126,15 +110,18 @@ export function InspectorPanel() {
   const { preview, error, loading } = useProcessed(
     asset,
     palette,
-    view === "source",
+    true,
     "source",
     frameOverride,
-    frameAssetId
+    frameAssetId,
+    PROCESS_PRIORITY.selected
   );
+
+  if (job) return <JobInspector job={job} />;
 
   if (!asset) {
     return (
-      <Panel title="Inspector" pane="right">
+      <Panel title="Inspector" pane="right" lead={<RightTabs />}>
         <p className="text-[11px] text-slate-500">
           Select an asset in the library to tune its size, cutout, and palette. Every asset keeps
           its own snapshot, so editing one never touches the others.
@@ -167,6 +154,7 @@ export function InspectorPanel() {
     <Panel
       title="Inspector"
       pane="right"
+      lead={<RightTabs />}
       actions={
         <Button
           variant="danger"
@@ -181,166 +169,170 @@ export function InspectorPanel() {
         </Button>
       }
     >
-      <Row className="mb-2">
-        {(["processed", "source", "alpha"] as ViewMode[]).map((mode) => (
-          <Button
-            key={mode}
-            variant={view === mode ? "primary" : "ghost"}
-            onClick={() => setView(mode)}
-          >
-            {mode}
-          </Button>
-        ))}
-
-        {maskAvailable ? (
-          <label className="flex items-center gap-1 text-[10px] text-slate-400">
-            <input
-              type="checkbox"
-              checked={showMask}
-              onChange={(event) => setShowMask(event.target.checked)}
-              className="h-3 w-3 accent-[var(--color-accent)]"
-            />
-            mask
-          </label>
-        ) : null}
-
-        <span className="flex-1" />
-
-        {sequence && sequence.frames.length > 0 ? (
-          <Button
-            variant={playback.playing ? "primary" : "default"}
-            title={playback.playing ? "Pause the animation" : "Play the animation"}
-            onClick={playback.toggle}
-          >
-            {playback.playing ? "pause" : "play"}
-          </Button>
-        ) : null}
-
-        <Button
-          variant={processing.edits.length > 0 ? "primary" : "default"}
-          title="Crop this image without touching the raw file, for every instance at once"
-          onClick={() => ui().openImageEditor(asset.id)}
-        >
-          {processing.edits.length > 0 ? `edit (${processing.edits.length})` : "edit"}
-        </Button>
-      </Row>
-
-      {sequence && sequence.frames.length > 1 ? (
+      <Section id="inspector.preview" label="preview">
         <Row className="mb-2">
-          <input
-            type="range"
-            className="flex-1"
-            min={0}
-            max={sequence.frames.length - 1}
-            step={1}
-            value={playback.index}
-            onChange={(event) => playback.seek(Number(event.target.value))}
-          />
-          <span className="w-12 shrink-0 text-right text-[10px] tabular-nums text-slate-400">
-            {playback.index + 1}/{sequence.frames.length}
-          </span>
-        </Row>
-      ) : null}
+          {(["processed", "source", "alpha"] as ViewMode[]).map((mode) => (
+            <Button
+              key={mode}
+              variant={view === mode ? "primary" : "ghost"}
+              onClick={() => setView(mode)}
+            >
+              {mode}
+            </Button>
+          ))}
 
-      <div className="mb-2">
-        <ExpandablePreview
-          title={`${asset.label} · ${bitmapWidth}×${bitmapHeight}`}
-          className="checkerboard flex w-full items-center justify-center rounded-t border-0 bg-transparent p-2"
-          style={{ height: previewHeight }}
-          expanded={
-            showBitmap ? (
+          {maskAvailable ? (
+            <label className="flex items-center gap-1 text-[10px] text-slate-400">
+              <input
+                type="checkbox"
+                checked={showMask}
+                onChange={(event) => setShowMask(event.target.checked)}
+                className="h-3 w-3 accent-[var(--color-accent)]"
+              />
+              mask
+            </label>
+          ) : null}
+
+          <span className="flex-1" />
+
+          {sequence && sequence.frames.length > 0 ? (
+            <Button
+              variant={playback.playing ? "primary" : "default"}
+              title={playback.playing ? "Pause the animation" : "Play the animation"}
+              onClick={playback.toggle}
+            >
+              {playback.playing ? "pause" : "play"}
+            </Button>
+          ) : null}
+
+          <Button
+            variant={processing.edits.length > 0 ? "primary" : "default"}
+            title="Crop this image without touching the raw file, for every instance at once"
+            onClick={() => ui().openImageEditor(asset.id)}
+          >
+            {processing.edits.length > 0 ? `edit (${processing.edits.length})` : "edit"}
+          </Button>
+        </Row>
+
+        {sequence && sequence.frames.length > 1 ? (
+          <Row className="mb-2">
+            <input
+              type="range"
+              className="flex-1"
+              min={0}
+              max={sequence.frames.length - 1}
+              step={1}
+              value={playback.index}
+              onChange={(event) => playback.seek(Number(event.target.value))}
+            />
+            <span className="w-12 shrink-0 text-right text-[10px] tabular-nums text-slate-400">
+              {playback.index + 1}/{sequence.frames.length}
+            </span>
+          </Row>
+        ) : null}
+
+        <div className="mb-2">
+          <ExpandablePreview
+            title={`${asset.label} · ${bitmapWidth}×${bitmapHeight}`}
+            className="checkerboard flex w-full items-center justify-center rounded-t border-0 bg-transparent p-2"
+            style={{ height: previewHeight }}
+            expanded={
+              showBitmap ? (
+                <BitmapCanvas
+                  bitmap={showBitmap}
+                  width={bitmapWidth}
+                  height={bitmapHeight}
+                  showAlpha={view === "alpha"}
+                  overlay={showMask ? maskOverlay : null}
+                  pixelated
+                  style={{
+                    width: Math.max(1, Math.round(bitmapWidth * lightboxScale(bitmapWidth, bitmapHeight))),
+                    height: Math.max(
+                      1,
+                      Math.round(bitmapHeight * lightboxScale(bitmapWidth, bitmapHeight))
+                    )
+                  }}
+                />
+              ) : (
+                <span className="text-[11px] text-slate-400">{error ?? "no preview"}</span>
+              )
+            }
+          >
+            {error ? (
+              <span className="p-2 text-center text-[11px] text-rose-300">{error}</span>
+            ) : showBitmap ? (
               <BitmapCanvas
                 bitmap={showBitmap}
                 width={bitmapWidth}
                 height={bitmapHeight}
                 showAlpha={view === "alpha"}
                 overlay={showMask ? maskOverlay : null}
-                pixelated
+                pixelated={previewScale >= 1}
                 style={{
-                  width: Math.max(1, Math.round(bitmapWidth * lightboxScale(bitmapWidth, bitmapHeight))),
-                  height: Math.max(
-                    1,
-                    Math.round(bitmapHeight * lightboxScale(bitmapWidth, bitmapHeight))
-                  )
+                  width: Math.max(1, Math.round(bitmapWidth * previewScale)),
+                  height: Math.max(1, Math.round(bitmapHeight * previewScale))
                 }}
               />
             ) : (
-              <span className="text-[11px] text-slate-400">{error ?? "no preview"}</span>
-            )
-          }
-        >
-          {error ? (
-            <span className="p-2 text-center text-[11px] text-rose-300">{error}</span>
-          ) : showBitmap ? (
-            <BitmapCanvas
-              bitmap={showBitmap}
-              width={bitmapWidth}
-              height={bitmapHeight}
-              showAlpha={view === "alpha"}
-              overlay={showMask ? maskOverlay : null}
-              pixelated={previewScale >= 1}
-              style={{
-                width: Math.max(1, Math.round(bitmapWidth * previewScale)),
-                height: Math.max(1, Math.round(bitmapHeight * previewScale))
-              }}
-            />
-          ) : (
-            <span className="text-[11px] text-slate-500">{loading ? "processing..." : ""}</span>
-          )}
-        </ExpandablePreview>
-        <ResizeHandle
-          orientation="horizontal"
-          onDrag={(delta) => ui().setInspectorPreview(previewHeight + delta)}
-          onReset={() => ui().setInspectorPreview(DEFAULT_INSPECTOR_PREVIEW)}
-        />
-      </div>
-
-      <p className="mb-3 text-[10px] leading-snug text-slate-500">
-        {preview ? (
-          <>
-            source {preview.sourceWidth}x{preview.sourceHeight} to {preview.width}x{preview.height}
-            {preview.description ? <> &middot; {preview.description}</> : null}
-          </>
-        ) : null}
-      </p>
-
-      <Field label="Name" hint={`asset ${asset.seq}, blank to use the number`}>
-        <input
-          type="text"
-          value={asset.name}
-          placeholder={asset.label}
-          onChange={(event) => doc().rename(asset.id, event.target.value)}
-        />
-      </Field>
-
-      <Row>
-        <div className="flex-1">
-          <Field label="Folder">
-            <input
-              type="text"
-              value={asset.folder}
-              onChange={(event) => doc().setFolder(asset.id, event.target.value)}
-            />
-          </Field>
+              <span className="text-[11px] text-slate-500">{loading ? "processing..." : ""}</span>
+            )}
+          </ExpandablePreview>
+          <ResizeHandle
+            orientation="horizontal"
+            onDrag={(delta) => ui().setInspectorPreview(previewHeight + delta)}
+            onReset={() => ui().setInspectorPreview(DEFAULT_INSPECTOR_PREVIEW)}
+          />
         </div>
-        <div className="flex-1">
-          <Field label="Tags" hint="comma separated">
-            <input
-              type="text"
-              value={asset.tags.join(", ")}
-              onChange={(event) =>
-                doc().setTags(
-                  asset.id,
-                  event.target.value
-                    .split(",")
-                    .map((tag) => tag.trim())
-                    .filter((tag) => tag.length > 0)
-                )
-              }
-            />
-          </Field>
-        </div>
-      </Row>
+
+        <p className="mb-3 text-[10px] leading-snug text-slate-500">
+          {preview ? (
+            <>
+              source {preview.sourceWidth}x{preview.sourceHeight} to {preview.width}x{preview.height}
+              {preview.description ? <> &middot; {preview.description}</> : null}
+            </>
+          ) : null}
+        </p>
+      </Section>
+
+      <Section id="inspector.asset" label="asset">
+        <Field label="Name" hint={`asset ${asset.seq}, blank to use the number`}>
+          <input
+            type="text"
+            value={asset.name}
+            placeholder={asset.label}
+            onChange={(event) => doc().rename(asset.id, event.target.value)}
+          />
+        </Field>
+
+        <Row>
+          <div className="flex-1">
+            <Field label="Folder">
+              <input
+                type="text"
+                value={asset.folder}
+                onChange={(event) => doc().setFolder(asset.id, event.target.value)}
+              />
+            </Field>
+          </div>
+          <div className="flex-1">
+            <Field label="Tags" hint="comma separated">
+              <input
+                type="text"
+                value={asset.tags.join(", ")}
+                onChange={(event) =>
+                  doc().setTags(
+                    asset.id,
+                    event.target.value
+                      .split(",")
+                      .map((tag) => tag.trim())
+                      .filter((tag) => tag.length > 0)
+                  )
+                }
+              />
+            </Field>
+          </div>
+        </Row>
+      </Section>
 
       {asset.set ? (
         <SetSection
@@ -361,59 +353,11 @@ export function InspectorPanel() {
         />
       )}
 
-      <Divider label="size" />
+      <Section id="inspector.size" label="size">
+        <DownsampleControls processing={processing} onChange={update} />
+      </Section>
 
-      <Row>
-        <div className="flex-1">
-          <Field label="Width" hint="0 = from height">
-            <NumberInput
-              value={processing.targetSize.width}
-              min={0}
-              onChange={(value) =>
-                update({
-                  targetSize: { ...processing.targetSize, width: Math.max(0, Math.round(value)) }
-                })
-              }
-            />
-          </Field>
-        </div>
-        <div className="flex-1">
-          <Field label="Height" hint="0 = from width">
-            <NumberInput
-              value={processing.targetSize.height}
-              min={0}
-              onChange={(value) =>
-                update({
-                  targetSize: { ...processing.targetSize, height: Math.max(0, Math.round(value)) }
-                })
-              }
-            />
-          </Field>
-        </div>
-      </Row>
-
-      <Field label="Downsample" hint="pixelated or smooth">
-        <Select
-          value={processing.pixelate}
-          options={PIXELATE_MODES}
-          labels={PIXELATE_LABELS}
-          onChange={(value) => update({ pixelate: value })}
-        />
-      </Field>
-
-      <Row className="mb-2">
-        {[16, 24, 32, 48, 64, 128].map((height) => (
-          <Button
-            key={height}
-            variant="ghost"
-            onClick={() => update({ targetSize: { width: 0, height } })}
-          >
-            {height}
-          </Button>
-        ))}
-      </Row>
-
-      <Divider label="transparency" />
+      <Section id="inspector.transparency" label="transparency">
 
       <Field label="Cutout">
         <Select
@@ -447,13 +391,48 @@ export function InspectorPanel() {
       ) : null}
 
       {processing.cutout === "chromaKey" ? (
-        <Field label="Key colour">
-          <ColorInput
-            value={processing.chromaKey}
-            fallback="#ff00ff"
-            onChange={(value) => update({ chromaKey: value })}
-          />
-        </Field>
+        <div className="mb-2">
+          <span className="mb-1 block text-[11px] uppercase tracking-wide text-slate-400">
+            Key colours
+          </span>
+          {processing.chromaKeys.map((colour, index) => (
+            <Row key={index} className="mb-1">
+              <ColorInput
+                value={colour}
+                fallback="#ff00ff"
+                onChange={(value) => {
+                  const next = processing.chromaKeys.slice();
+                  next[index] = value;
+                  update({ chromaKeys: next });
+                }}
+              />
+              <TextButton
+                danger
+                title="Remove this key colour"
+                onClick={() =>
+                  update({ chromaKeys: processing.chromaKeys.filter((_, at) => at !== index) })
+                }
+              >
+                remove
+              </TextButton>
+            </Row>
+          ))}
+          <Button
+            className="w-full"
+            disabled={processing.chromaKeys.length >= MAX_CHROMA_KEYS}
+            title="Add another colour to punch out"
+            onClick={() =>
+              update({
+                chromaKeys: [
+                  ...processing.chromaKeys,
+                  processing.chromaKeys.at(-1) ?? "#ff00ff"
+                ]
+              })
+            }
+          >
+            add colour
+          </Button>
+        </div>
       ) : null}
 
       {processing.cutout === "luminanceAbove" || processing.cutout === "luminanceBelow" ? (
@@ -485,231 +464,230 @@ export function InspectorPanel() {
       <Toggle
         label="Trim to content"
         checked={processing.trimToContent}
+        disabled={processing.clipToIso}
         onChange={(value) => update({ trimToContent: value })}
       />
 
-      <Divider label="palette" />
+      <Toggle
+        label="Clip to iso diamond"
+        checked={processing.clipToIso}
+        onChange={(value) => update({ clipToIso: value })}
+      />
+      </Section>
 
-      <Field label="Palette" hint={`${palette.length} colours`}>
-        <select
-          value={processing.paletteId}
-          onChange={(event) => update({ paletteId: event.target.value })}
-        >
-          <option value="">(full colour)</option>
-          {palettes.map((entry) => (
-            <option key={entry.id} value={entry.id}>
-              {entry.name}
-            </option>
-          ))}
-        </select>
-      </Field>
+      <Section id="inspector.palette" label="palette">
+        <Field label="Palette" hint={`${palette.length} colours`}>
+          <select
+            value={processing.paletteId}
+            onChange={(event) => update({ paletteId: event.target.value })}
+          >
+            <option value="">(full colour)</option>
+            {palettes.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.name}
+              </option>
+            ))}
+          </select>
+        </Field>
 
-      {processing.paletteId === "" && scenePalette !== "" ? (
-        <p className="mb-2 text-[10px] leading-snug text-amber-300">
-          The scene is previewing this with {paletteName(scenePalette)}, but it exports
-          in full colour until you pick a palette here or bake the scene one in. Choosing one
-          here always wins over the scene.
-        </p>
-      ) : null}
+        {processing.paletteId === "" && scenePalette !== "" ? (
+          <p className="mb-2 text-[10px] leading-snug text-amber-300">
+            The scene is previewing this with {paletteName(scenePalette)}, but it exports
+            in full colour until you pick a palette here or bake the scene one in. Choosing one
+            here always wins over the scene.
+          </p>
+        ) : null}
 
-      {palette.length > 0 ? (
-        <div className="mb-2 flex flex-wrap gap-0.5">
-          {palette.slice(0, 64).map((colour, index) => (
-            <span
-              key={index}
-              className="h-3 w-3 rounded-sm"
-              style={{ background: `rgb(${colour.r},${colour.g},${colour.b})` }}
-            />
-          ))}
-        </div>
-      ) : null}
+        {palette.length > 0 ? (
+          <div className="mb-2 flex flex-wrap gap-0.5">
+            {palette.slice(0, 64).map((colour, index) => (
+              <span
+                key={index}
+                className="h-3 w-3 rounded-sm"
+                style={{ background: `rgb(${colour.r},${colour.g},${colour.b})` }}
+              />
+            ))}
+          </div>
+        ) : null}
 
-      {processing.paletteId ? (
-        <>
-          <Field label="Dither">
-            <Select
-              value={processing.dither}
-              options={DITHER_MODES}
-              onChange={(value) => update({ dither: value })}
-            />
-          </Field>
-
-          {processing.dither !== "none" ? (
-            <Field label="Dither strength">
-              <Slider
-                min={0}
-                max={1}
-                value={processing.ditherStrength}
-                onChange={(value) => update({ ditherStrength: value })}
+        {processing.paletteId ? (
+          <>
+            <Field label="Dither">
+              <Select
+                value={processing.dither}
+                options={DITHER_MODES}
+                onChange={(value) => update({ dither: value })}
               />
             </Field>
-          ) : null}
 
-          <Field label="Colour matching">
-            <Select
-              value={processing.distanceMode}
-              options={DISTANCE_MODES}
-              onChange={(value) => update({ distanceMode: value })}
-            />
-          </Field>
-        </>
-      ) : null}
+            {processing.dither !== "none" ? (
+              <Field label="Dither strength">
+                <Slider
+                  min={0}
+                  max={1}
+                  value={processing.ditherStrength}
+                  onChange={(value) => update({ ditherStrength: value })}
+                />
+              </Field>
+            ) : null}
 
-      <Divider />
+            <Field label="Colour matching">
+              <Select
+                value={processing.distanceMode}
+                options={DISTANCE_MODES}
+                onChange={(value) => update({ distanceMode: value })}
+              />
+            </Field>
+          </>
+        ) : null}
+      </Section>
 
-      <Row className="mb-2">
-        <Button variant="ghost" onClick={() => setShowAdvanced(!showAdvanced)}>
-          {showAdvanced ? "\u25be" : "\u25b8"} orientation and cleanup
-        </Button>
-      </Row>
-
-      {showAdvanced ? (
-        <>
-          <Field label="Rotate">
-            <Select
-              value={processing.orientation}
-              options={ORIENTATIONS}
-              onChange={(value) => update({ orientation: value })}
-            />
-          </Field>
-
-          <Row>
-            <Toggle
-              label="flip x"
-              checked={processing.flipHorizontal}
-              onChange={(value) => update({ flipHorizontal: value })}
-            />
-            <Toggle
-              label="flip y"
-              checked={processing.flipVertical}
-              onChange={(value) => update({ flipVertical: value })}
-            />
-          </Row>
-
-          <Field label="Despeckle" hint="min opaque neighbours">
-            <NumberInput
-              value={processing.despeckleMinimumNeighbors}
-              min={0}
-              onChange={(value) =>
-                update({ despeckleMinimumNeighbors: Math.max(0, Math.round(value)) })
-              }
-            />
-          </Field>
-
-          <Toggle
-            label="Fill single-pixel holes"
-            checked={processing.fillHoles}
-            onChange={(value) => update({ fillHoles: value })}
+      <Section id="inspector.cleanup" label="orientation and cleanup">
+        <Field label="Rotate">
+          <Select
+            value={processing.orientation}
+            options={ORIENTATIONS}
+            onChange={(value) => update({ orientation: value })}
           />
+        </Field>
 
-          <Field label="Erode edges" hint="pixels">
-            <NumberInput
-              value={processing.erodePixels}
-              min={0}
-              onChange={(value) => update({ erodePixels: Math.max(0, Math.round(value)) })}
-            />
-          </Field>
-
-          <Field label="Trim padding" hint="pixels">
-            <NumberInput
-              value={processing.trimPadding}
-              min={0}
-              onChange={(value) => update({ trimPadding: Math.max(0, Math.round(value)) })}
-            />
-          </Field>
-
-          <Field label="Skip cutout when the border is this transparent">
-            <Slider
-              min={0}
-              max={1}
-              value={processing.skipCutoutTransparentBorder}
-              onChange={(value) => update({ skipCutoutTransparentBorder: value })}
-            />
-          </Field>
-
+        <Row>
           <Toggle
-            label="Sample only the corners for the background colour"
-            checked={processing.sampleCornersOnly}
-            onChange={(value) => update({ sampleCornersOnly: value })}
+            label="flip x"
+            checked={processing.flipHorizontal}
+            onChange={(value) => update({ flipHorizontal: value })}
           />
-        </>
-      ) : null}
+          <Toggle
+            label="flip y"
+            checked={processing.flipVertical}
+            onChange={(value) => update({ flipVertical: value })}
+          />
+        </Row>
 
-      <Divider label="history" />
+        <Field label="Despeckle" hint="min opaque neighbours">
+          <NumberInput
+            value={processing.despeckleMinimumNeighbors}
+            min={0}
+            onChange={(value) =>
+              update({ despeckleMinimumNeighbors: Math.max(0, Math.round(value)) })
+            }
+          />
+        </Field>
 
-      <GenerationHistory asset={frameAsset ?? asset} />
+        <Toggle
+          label="Fill single-pixel holes"
+          checked={processing.fillHoles}
+          onChange={(value) => update({ fillHoles: value })}
+        />
 
-      <Divider label="output" />
+        <Field label="Erode edges" hint="pixels">
+          <NumberInput
+            value={processing.erodePixels}
+            min={0}
+            onChange={(value) => update({ erodePixels: Math.max(0, Math.round(value)) })}
+          />
+        </Field>
 
-      {selectedIds.length > 1 ? (
+        <Field label="Trim padding" hint="pixels">
+          <NumberInput
+            value={processing.trimPadding}
+            min={0}
+            onChange={(value) => update({ trimPadding: Math.max(0, Math.round(value)) })}
+          />
+        </Field>
+
+        <Field label="Skip cutout when the border is this transparent">
+          <Slider
+            min={0}
+            max={1}
+            value={processing.skipCutoutTransparentBorder}
+            onChange={(value) => update({ skipCutoutTransparentBorder: value })}
+          />
+        </Field>
+
+        <Toggle
+          label="Sample only the corners for the background colour"
+          checked={processing.sampleCornersOnly}
+          onChange={(value) => update({ sampleCornersOnly: value })}
+        />
+      </Section>
+
+      <Section id="inspector.history" label="history">
+        <GenerationHistory asset={frameAsset ?? asset} />
+      </Section>
+
+      <Section id="inspector.output" label="output">
+        {selectedIds.length > 1 ? (
+          <Button
+            className="mb-2 w-full"
+            title="Copy this asset's processing settings onto every selected asset"
+            onClick={() => {
+              // Crops are per-image; copying them onto a different sprite would
+              // cut it in the wrong place.
+              const { edits, ...shared } = processing;
+              void edits;
+              doc().applyProcessingToMany(selectedIds, shared as typeof processing);
+            }}
+          >
+            apply these settings to all {selectedIds.length} selected
+          </Button>
+        ) : null}
+
         <Button
           className="mb-2 w-full"
-          title="Copy this asset's processing settings onto every selected asset"
+          disabled={!scene}
           onClick={() => {
-            // Crops are per-image; copying them onto a different sprite would
-            // cut it in the wrong place.
-            const { edits, ...shared } = processing;
-            void edits;
-            doc().applyProcessingToMany(selectedIds, shared as typeof processing);
+            if (!scene) return;
+
+            doc().addItem(scene.id, {
+              id: crypto.randomUUID(),
+              assetId: asset.id,
+              x: (scene.items.length % 6) * 96,
+              y: Math.floor(scene.items.length / 6) * 96,
+              footprint: { width: 0, height: 0 },
+              flipHorizontal: false,
+              flipVertical: false,
+              isoTurn: 0,
+              isoProjection: isoProjectionFromSource(useUi.getState().mask?.source),
+              showSource: false,
+              opacity: 1,
+              paused: false,
+              sequenceId: "",
+              heldFrame: 0,
+              rotation: 0,
+              display: isSetAsset(asset) ? "sheet" : "cell"
+            });
           }}
         >
-          apply these settings to all {selectedIds.length} selected
+          add to scene
         </Button>
-      ) : null}
 
-      <Button
-        className="mb-2 w-full"
-        disabled={!scene}
-        onClick={() => {
-          if (!scene) return;
+        <Field label="Download filename" hint="no extension">
+          <input
+            type="text"
+            value={exportName}
+            onChange={(event) => setExportName(event.target.value)}
+          />
+        </Field>
 
-          doc().addItem(scene.id, {
-            id: crypto.randomUUID(),
-            assetId: asset.id,
-            x: (scene.items.length % 6) * 96,
-            y: Math.floor(scene.items.length / 6) * 96,
-            footprint: { width: 0, height: 0 },
-            flipHorizontal: false,
-            flipVertical: false,
-            isoTurn: 0,
-            showSource: false,
-            opacity: 1,
-            paused: false,
-            sequenceId: "",
-            heldFrame: 0,
-            rotation: 0,
-            display: isSetAsset(asset) ? "sheet" : "cell"
-          });
-        }}
-      >
-        add to scene
-      </Button>
+        <Button variant="primary" className="w-full" onClick={() => setExporting(true)}>
+          download
+        </Button>
 
-      <Field label="Download filename" hint="no extension">
-        <input
-          type="text"
-          value={exportName}
-          onChange={(event) => setExportName(event.target.value)}
-        />
-      </Field>
+        <Button
+          variant="ghost"
+          className="mt-1 w-full"
+          disabled={busy !== null}
+          title="Writes a copy into this app's own storage instead of downloading it. Counts against your storage."
+          onClick={() => void server().approve(asset.id, exportName)}
+        >
+          {busy === "exporting" ? "saving..." : "save a server-side copy"}
+        </Button>
 
-      <Button variant="primary" className="w-full" onClick={() => setExporting(true)}>
-        download
-      </Button>
-
-      <Button
-        variant="ghost"
-        className="mt-1 w-full"
-        disabled={busy !== null}
-        title="Writes a copy into this app's own storage instead of downloading it. Counts against your storage."
-        onClick={() => void server().approve(asset.id, exportName)}
-      >
-        {busy === "exporting" ? "saving..." : "save a server-side copy"}
-      </Button>
-
-      {asset.exportPath ? (
-        <p className="mt-2 text-[10px] break-all text-emerald-400">{asset.exportPath}</p>
-      ) : null}
+        {asset.exportPath ? (
+          <p className="mt-2 text-[10px] break-all text-emerald-400">{asset.exportPath}</p>
+        ) : null}
+      </Section>
 
       {exporting ? (
         <ExportDialog

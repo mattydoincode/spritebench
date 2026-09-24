@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useDoc } from "@/client/stores/doc";
 import { useServer } from "@/client/stores/server";
-import { useUi } from "@/client/stores/ui";
+import { sectionCollapsed, useUi } from "@/client/stores/ui";
 import {
   applySizeSelection,
   defaultModelForProvider,
@@ -20,28 +20,30 @@ import {
 } from "@/providers/models";
 import { isPixelConstraintTemplate, pixelConstraintWindow } from "@/core/pixelMask";
 import { suggestedFolder } from "@/shared/folder";
-import { composePrompt, type PromptSnippetKind } from "@/shared/model";
+import { composePrompt } from "@/shared/model";
 import { planAnimation, planItemGrid } from "@/shared/animationPrompt";
-import {
-  activeFeaturePrompts,
-  resolveFeatureText,
-  workingPrompt
-} from "@/shared/featurePrompt";
+import { activeFeaturePrompts } from "@/shared/featurePrompt";
+import { SuggestedPrompt } from "./SuggestedPrompt";
 import {
   bindPrompt,
   expandPrompt,
   insertSlot,
+  joinValues,
   LOOP_SLOT_NAMES,
   loopBindings,
   loopReservedSlots,
   nextVariableName,
   offeredVariables,
-  planCreate
+  parseValues,
+  planCreate,
+  removeSlot,
+  renameSlot
 } from "@/shared/promptVars";
-import { Button, Divider, Field, NumberInput, Panel, Row, Select, TextButton, Toggle } from "./ui";
-import { TemplatePanel } from "./TemplatePanel";
-
-const SIZE_PRESETS = [16, 24, 32, 48, 64, 128, 256] as const;
+import { sourceUrl } from "@/client/api";
+import type { BaseSpec, ImageSource } from "@/shared/model";
+import { DownsampleControls } from "./DownsampleControls";
+import { Button, Field, NumberInput, Panel, Row, Section, Select, TextButton, Toggle } from "./ui";
+import { DropZone, TemplatePanel } from "./TemplatePanel";
 
 function keyCaption(key: { provider: string; label: string; keySuffix: string }): string {
   const suffix = key.keySuffix.replace(/^\.\.\./, "");
@@ -56,13 +58,8 @@ function keyCaption(key: { provider: string; label: string; keySuffix: string })
  * than a trip to settings. The chevron is the model/size disclosure -- putting
  * those fields behind it keeps the prompt at the top of the working area.
  */
-function ProviderHeader({
-  expanded,
-  onToggle
-}: {
-  expanded: boolean;
-  onToggle: () => void;
-}) {
+function ProviderHeader() {
+  const expanded = !useUi((state) => sectionCollapsed("generate.model", state.collapsedSections));
   const project = useServer((state) => state.project);
   const keys = useServer((state) => state.projectKeys);
   const remembered = useUi((state) => (project ? state.providerKeyId[project.id] : undefined));
@@ -105,7 +102,7 @@ function ProviderHeader({
         type="button"
         title={expanded ? "Hide model and size" : "Show model and size"}
         aria-expanded={expanded}
-        onClick={onToggle}
+        onClick={() => useUi.getState().toggleSection("generate.model")}
         className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-[var(--color-edge)] bg-[var(--color-ink-700)] text-[11px] leading-none text-slate-400 hover:border-slate-500 hover:text-white"
       >
         {expanded ? "\u25b4" : "\u25be"}
@@ -126,6 +123,7 @@ function ModelAndSize() {
   const settings = useServer((state) => state.settings);
   const animation = useUi((state) => state.animation);
   const itemGrid = useUi((state) => state.itemGrid);
+  const mask = useUi((state) => state.mask);
   const billingKey = useSelectedProjectKey();
   const store = useServer.getState;
 
@@ -150,7 +148,11 @@ function ModelAndSize() {
           cellSize: itemGrid.cellSize
         }).sheet
       : null;
-  const sheetSize = sheet ? snapRequestSize(sheet.size, generation.model) : null;
+  const pixelOn =
+    mask?.source.kind === "template" && isPixelConstraintTemplate(mask.source.templateId);
+  const sheetOwnsCanvas = Boolean(sheet && !pixelOn);
+  const sheetSize =
+    sheet && sheetOwnsCanvas ? snapRequestSize(sheet.size, generation.model) : null;
 
   return (
     <div className="mb-3 rounded border border-[var(--color-edge)] bg-[var(--color-ink-800)]/60 p-2">
@@ -205,7 +207,7 @@ function ModelAndSize() {
         </div>
       </Row>
 
-      {sheet && sheetSize ? (
+      {sheetOwnsCanvas && sheetSize ? (
         <p className="mb-2 text-[10px] leading-snug text-slate-500">
           Sheets pick their own canvas -- this job will request {sheetSize.width}x
           {sheetSize.height}. The size below is only used for stills.
@@ -262,22 +264,19 @@ function ModelAndSize() {
 }
 
 /**
- * Opt-in library of named versions for one prompt part.
+ * Opt-in library of named prompts.
  *
  * Hidden behind "saved" so the working field stays the thing you see. Saving
  * writes to the shared document; loading copies into the working field.
  */
 function SnippetLibrary({
-  kind,
   value,
   onLoad
 }: {
-  kind: PromptSnippetKind;
   value: string;
   onLoad: (text: string) => void;
 }) {
-  const all = useDoc((state) => state.snippets);
-  const snippets = useMemo(() => all.filter((entry) => entry.kind === kind), [all, kind]);
+  const snippets = useDoc((state) => state.snippets);
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
 
@@ -285,7 +284,7 @@ function SnippetLibrary({
     const trimmed = name.trim();
     if (!trimmed || value.trim().length === 0) return;
 
-    useDoc.getState().savePromptSnippet(kind, trimmed, value);
+    useDoc.getState().savePromptSnippet(trimmed, value);
     setName("");
   };
 
@@ -353,117 +352,111 @@ function SnippetLibrary({
   );
 }
 
-function PromptSection({
-  title,
-  kind,
-  value,
-  onChange,
-  rows,
-  hint,
-  locked = false,
-  startOpen = false,
-  onReset
+function VariableValues({
+  values,
+  onChange
 }: {
-  title: string;
-  kind: PromptSnippetKind | "body" | "feature";
-  value: string;
-  onChange: (value: string) => void;
-  rows: number;
-  hint?: string;
-  locked?: boolean;
-  startOpen?: boolean;
-  onReset?: () => void;
+  values: string;
+  onChange: (values: string) => void;
 }) {
-  const [open, setOpen] = useState(startOpen);
+  const chips = parseValues(values);
+  const [draft, setDraft] = useState("");
+
+  const write = (next: string[]) => onChange(joinValues(next));
 
   return (
-    <div className="mb-2">
-      <div className="mb-1 flex items-center gap-2">
-        {locked ? (
-          <span className="text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
-            {title}
-          </span>
-        ) : (
-          <TextButton
-            className="text-[11px] font-semibold tracking-wider uppercase"
-            onClick={() => setOpen(!open)}
+    <div className="flex min-w-0 flex-wrap items-center gap-1 rounded border border-[var(--color-edge)] bg-[var(--color-ink-800)] px-1 py-0.5">
+      {chips.map((chip, index) => (
+        <span
+          key={`${chip}-${index}`}
+          className="flex items-center gap-0.5 rounded bg-[var(--color-ink-600)] px-1 py-0.5 text-[10px] leading-none text-slate-200"
+        >
+          {chip}
+          <button
+            type="button"
+            title={`Remove ${chip}`}
+            onClick={() => write(chips.filter((_, at) => at !== index))}
+            className="text-slate-500 hover:text-white"
           >
-            {open ? "\u25be" : "\u25b8"} {title}
-          </TextButton>
-        )}
-
-        <span className="flex-1" />
-        {hint ? <span className="text-[10px] text-slate-500">{hint}</span> : null}
-        {onReset ? (
-          <TextButton title="Restore the default instructions" onClick={onReset}>
-            reset
-          </TextButton>
-        ) : null}
-        {kind !== "body" && kind !== "feature" ? (
-          <SnippetLibrary kind={kind} value={value} onLoad={onChange} />
-        ) : null}
-      </div>
-
-      {locked || open ? (
-        <textarea
-          rows={rows}
-          value={value}
-          placeholder={
-            kind === "scratch"
-              ? "park prompts here, nothing here is ever sent anywhere"
-              : kind === "prefix"
-                ? "prepended to every prompt in this project"
-                : kind === "suffix"
-                  ? "appended to every prompt in this project"
-                  : kind === "feature"
-                    ? "extra instructions sent with this feature"
-                    : "a rusty steel footlocker, closed lid, worn paint"
+            ×
+          </button>
+        </span>
+      ))}
+      <input
+        type="text"
+        value={draft}
+        placeholder={chips.length === 0 ? "green, red, blue" : "add"}
+        spellCheck={false}
+        style={{
+          width: "auto",
+          minWidth: chips.length === 0 ? "8rem" : "3.5rem",
+          border: "none",
+          background: "transparent",
+          padding: "2px 4px"
+        }}
+        className="min-w-0 flex-1 text-[11px]"
+        onChange={(event) => {
+          const text = event.target.value;
+          if (!text.includes(",")) {
+            setDraft(text);
+            return;
           }
-          onChange={(event) => onChange(event.target.value)}
-        />
-      ) : null}
+          const parts = text.split(",");
+          const rest = parts.pop() ?? "";
+          const added = parts.map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+          if (added.length > 0) write([...chips, ...added]);
+          setDraft(rest);
+        }}
+        onPaste={(event) => {
+          const text = event.clipboardData.getData("text");
+          if (!text.includes(",")) return;
+          event.preventDefault();
+          write([...chips, ...parseValues(`${draft}${text}`)]);
+          setDraft("");
+        }}
+        onKeyDown={(event) => {
+          if ((event.key === "Enter" || event.key === ",") && draft.trim()) {
+            event.preventDefault();
+            write([...chips, draft.trim()]);
+            setDraft("");
+            return;
+          }
+          if (event.key === "Backspace" && draft === "" && chips.length > 0) {
+            write(chips.slice(0, -1));
+          }
+        }}
+        onBlur={() => {
+          if (!draft.trim()) return;
+          write([...chips, draft.trim()]);
+          setDraft("");
+        }}
+      />
     </div>
   );
 }
 
-/**
- * Asking for an animation sheet instead of a single image.
- *
- * The table is the unit: each row is a cycle, columns are the longest cycle,
- * unused cells are masked. The canvas size falls out of that plus the sprite
- * size -- you cannot pick an 8x1 strip because the provider would refuse it.
- */
 function VariablesEditor() {
   const promptBody = useUi((state) => state.promptBody);
   const variables = useUi((state) => state.variables);
   const loop = useUi((state) => state.loop);
-  const animation = useUi((state) => state.animation);
-  const itemGrid = useUi((state) => state.itemGrid);
-  const mask = useUi((state) => state.mask);
-  const base = useUi((state) => state.base);
-  const featurePrompts = useUi((state) => state.featurePrompts);
-  const model = useServer((state) => state.settings.generation.model);
-  const projectSettings = useDoc((state) => state.project);
   const ui = useUi.getState;
 
   const reserved = loopReservedSlots(loop.enabled);
-  const sheetOn = animation.enabled || itemGrid.enabled;
-  const prompt = workingPrompt({
-    prefix: projectSettings.promptPrefix,
-    body: promptBody,
-    suffix: projectSettings.promptSuffix,
-    model,
-    mask: sheetOn ? null : mask,
-    base: sheetOn ? null : base,
-    animation,
-    itemGrid,
-    overrides: featurePrompts
-  });
+  const prompt = { prefix: "", body: promptBody, suffix: "" };
   const rows = offeredVariables(prompt, variables, reserved).filter(
     (entry) => !reserved.includes(entry.name)
   );
 
   const write = (next: typeof rows) => ui().setVariables(next);
+
+  const rewriteSlots = (from: string, to: string) => {
+    ui().setPromptBody(renameSlot(promptBody, from, to));
+  };
+
+  const drop = (name: string, index: number) => {
+    ui().setPromptBody(removeSlot(promptBody, name));
+    write(rows.filter((_, at) => at !== index));
+  };
 
   return (
     <div className="mb-2">
@@ -488,34 +481,36 @@ function VariablesEditor() {
       ) : null}
 
       {rows.map((entry, index) => (
-        <Row key={`${entry.name}-${index}`} className="mb-1">
-          <input
-            type="text"
-            className="w-24 shrink-0"
-            value={entry.name}
-            spellCheck={false}
-            onChange={(event) => {
-              const name = event.target.value.replace(/[^A-Za-z0-9_]/g, "");
-              write(rows.map((row, at) => (at === index ? { ...row, name } : row)));
-            }}
-          />
-          <input
-            type="text"
-            className="min-w-0 flex-1"
-            value={entry.values}
-            placeholder="green, red, blue"
-            onChange={(event) =>
-              write(rows.map((row, at) => (at === index ? { ...row, values: event.target.value } : row)))
+        <div
+          key={`${entry.name}-${index}`}
+          className="mb-1.5 rounded border border-[var(--color-edge)] bg-[var(--color-ink-800)]/50 p-1.5"
+        >
+          <Row className="mb-1">
+            <input
+              type="text"
+              value={entry.name}
+              spellCheck={false}
+              title="Slot name"
+              style={{ width: 88 }}
+              onChange={(event) => {
+                const name = event.target.value.replace(/[^A-Za-z0-9_]/g, "");
+                if (name !== entry.name) rewriteSlots(entry.name, name);
+                write(rows.map((row, at) => (at === index ? { ...row, name } : row)));
+              }}
+            />
+            <span className="min-w-0 truncate text-[10px] text-slate-500">{`{${entry.name || "name"}}`}</span>
+            <span className="flex-1" />
+            <TextButton danger title="Remove this variable" onClick={() => drop(entry.name, index)}>
+              remove
+            </TextButton>
+          </Row>
+          <VariableValues
+            values={entry.values}
+            onChange={(next) =>
+              write(rows.map((row, at) => (at === index ? { ...row, values: next } : row)))
             }
           />
-          <Button
-            variant="ghost"
-            title="Remove this variable"
-            onClick={() => write(rows.filter((_, at) => at !== index))}
-          >
-            ×
-          </Button>
-        </Row>
+        </div>
       ))}
 
       <Button
@@ -534,7 +529,13 @@ function VariablesEditor() {
 
 function ItemGridMode() {
   const itemGrid = useUi((state) => state.itemGrid);
+  const mask = useUi((state) => state.mask);
+  const settings = useServer((state) => state.settings);
   const ui = useUi.getState;
+  const pixelOn =
+    mask?.source.kind === "template" && isPixelConstraintTemplate(mask.source.templateId);
+  const cells = pixelConstraintWindow(settings.processing.targetSize);
+  const request = snapRequestSize(settings.generation.size, settings.generation.model);
 
   const planned = planItemGrid({
     subject: "",
@@ -578,24 +579,30 @@ function ItemGridMode() {
             </div>
           </Row>
 
-          <Field label="Sprite size" hint="px">
-            <NumberInput
-              integer
-              min={8}
-              max={512}
-              value={itemGrid.cellSize}
-              onChange={(cellSize) => ui().setItemGrid({ cellSize })}
-            />
-          </Field>
+          {pixelOn ? null : (
+            <Field label="Sprite size" hint="px">
+              <NumberInput
+                integer
+                min={8}
+                max={512}
+                value={itemGrid.cellSize}
+                onChange={(cellSize) => ui().setItemGrid({ cellSize })}
+              />
+            </Field>
+          )}
 
           <p className="mb-2 text-[10px] leading-snug text-slate-500">
-            One image, {planned.sheet.columns}×{planned.sheet.rows} at {planned.sheet.size.width}×
-            {planned.sheet.size.height}, {planned.sheet.cell}px cells down to {itemGrid.cellSize}px
+            {pixelOn
+              ? `One image, ${planned.plan.columns}×${planned.plan.rows} at ${request.width}×${request.height}, each cell a ${cells.width}×${cells.height} pixel grid`
+              : `One image, ${planned.sheet.columns}×${planned.sheet.rows} at ${planned.sheet.size.width}×${planned.sheet.size.height}, ${planned.sheet.cell}px cells down to ${itemGrid.cellSize}px`}
             {planned.sheet.spare > 0
-              ? `. ${planned.sheet.spare} cell${planned.sheet.spare === 1 ? "" : "s"} masked`
+              ? `. ${planned.sheet.spare} cell${planned.sheet.spare === 1 ? "" : "s"} ${
+                  pixelOn ? "empty" : "masked"
+                }`
               : ""}
             . Lands as one set of {itemGrid.columns * itemGrid.rows} items.
           </p>
+          <SheetSuggestion />
         </>
       ) : null}
     </div>
@@ -625,9 +632,134 @@ function LoopMode({ canEdit }: { canEdit: boolean }) {
               onChange={(steps) => ui().setLoop({ steps })}
             />
           </Field>
+          <Toggle
+            label="Send the starting image every step"
+            checked={loop.sendStart}
+            onChange={(sendStart) => ui().setLoop({ sendStart })}
+          />
+          <Toggle
+            label="Include the starting image in the animation"
+            checked={loop.includeStart}
+            onChange={(includeStart) => ui().setLoop({ includeStart })}
+          />
           <p className="mb-2 text-[10px] leading-snug text-slate-500">
             Needs a starting image. {loop.steps} edits in series.{" "}
             {`{step}`} and {`{total_steps}`} fill per job.
+            {loop.sendStart
+              ? " Each step also gets the original start as a second reference."
+              : ""}
+            {loop.includeStart ? " The start is frame 1 of the finished loop." : ""}
+          </p>
+        </>
+      ) : !canEdit ? (
+        <p className="mb-2 text-[10px] leading-snug text-slate-500">
+          This model cannot edit an existing image.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function assetBase(assetId: string, previous: BaseSpec[]): BaseSpec {
+  return {
+    source: { kind: "asset", assetId },
+    fit: previous[0]?.fit ?? "contain",
+    matchAspect: previous[0]?.matchAspect ?? true
+  };
+}
+
+function eachPreviewSrc(source: ImageSource, projectId: string): string {
+  if (source.kind === "asset") return sourceUrl(projectId, source.assetId, "thumb");
+  return `/api/projects/${projectId}/templates/file?id=${encodeURIComponent(source.templateId)}&alpha=false`;
+}
+
+function EachImages() {
+  const bases = useUi((state) => state.bases);
+  const busy = useUi((state) => state.busy);
+  const projectId = useServer((state) => state.project?.id ?? null);
+  const store = useServer.getState;
+  const ui = useUi.getState;
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <div className="mb-2">
+      <DropZone
+        hint={
+          busy === "saving template"
+            ? "processing template..."
+            : "drop PNGs or drag assets — each one is its own edit"
+        }
+        onFiles={(files) => void store().uploadTemplates(files, { slot: "base" })}
+        onAssets={(assetIds) => ui().addBases(assetIds.map((assetId) => assetBase(assetId, bases)))}
+      />
+
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        multiple
+        hidden
+        onChange={(event) => {
+          const files = [...(event.target.files ?? [])];
+          event.target.value = "";
+          if (files.length > 0) void store().uploadTemplates(files, { slot: "base" });
+        }}
+      />
+
+      <Button className="mb-2 w-full" onClick={() => fileRef.current?.click()}>
+        upload images
+      </Button>
+
+      {bases.length > 0 ? (
+        <div className="mb-2 grid grid-cols-3 gap-1.5">
+          {bases.map((entry, index) => (
+            <div key={`${entry.source.kind}:${index}`} className="relative">
+              {projectId ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  alt=""
+                  src={eachPreviewSrc(entry.source, projectId)}
+                  className="checkerboard h-16 w-full rounded border border-[var(--color-edge)] object-contain"
+                  style={{ imageRendering: "pixelated" }}
+                />
+              ) : (
+                <div className="h-16 rounded border border-[var(--color-edge)]" />
+              )}
+              <button
+                type="button"
+                title="Remove"
+                onClick={() => ui().removeBase(index)}
+                className="absolute top-0.5 right-0.5 rounded bg-[var(--color-ink-800)]/80 px-1 text-[10px] leading-none text-slate-400 hover:text-white"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function EachMode({ canEdit }: { canEdit: boolean }) {
+  const each = useUi((state) => state.each);
+  const bases = useUi((state) => state.bases);
+  const ui = useUi.getState;
+
+  return (
+    <div className="mb-2">
+      <Toggle
+        label="Each image"
+        checked={each.enabled}
+        disabled={!canEdit}
+        onChange={(enabled) => ui().setEach({ enabled })}
+      />
+      {each.enabled ? (
+        <>
+          <EachImages />
+          <p className="mb-2 text-[10px] leading-snug text-slate-500">
+            Same prompt on every image. {bases.length > 0 ? `${bases.length} edit${bases.length === 1 ? "" : "s"}` : "Add images first"}
+            , then Create. Lands in a batch folder like variables.
           </p>
         </>
       ) : !canEdit ? (
@@ -693,7 +825,13 @@ function ChunkMode({ canEdit }: { canEdit: boolean }) {
 
 function AnimationMode() {
   const animation = useUi((state) => state.animation);
+  const mask = useUi((state) => state.mask);
+  const settings = useServer((state) => state.settings);
   const ui = useUi.getState;
+  const pixelOn =
+    mask?.source.kind === "template" && isPixelConstraintTemplate(mask.source.templateId);
+  const cells = pixelConstraintWindow(settings.processing.targetSize);
+  const request = snapRequestSize(settings.generation.size, settings.generation.model);
 
   const planned = planAnimation({
     subject: "",
@@ -768,83 +906,68 @@ function AnimationMode() {
             </Button>
           </div>
 
-          <Field label="Sprite size" hint="px">
-            <NumberInput
-              integer
-              min={8}
-              max={512}
-              value={animation.cellSize}
-              onChange={(cellSize) => ui().setAnimation({ cellSize })}
-            />
-          </Field>
+          {pixelOn ? null : (
+            <Field label="Sprite size" hint="px">
+              <NumberInput
+                integer
+                min={8}
+                max={512}
+                value={animation.cellSize}
+                onChange={(cellSize) => ui().setAnimation({ cellSize })}
+              />
+            </Field>
+          )}
 
           <p className="mb-2 text-[10px] leading-snug text-slate-500">
-            One image, {planned.sheet.columns}×{planned.sheet.rows} at {planned.sheet.size.width}×
-            {planned.sheet.size.height}, {planned.sheet.cell}px cells down to {animation.cellSize}px
+            {pixelOn
+              ? `One image, ${planned.plan.columns}×${planned.plan.rows} at ${request.width}×${request.height}, each cell a ${cells.width}×${cells.height} pixel grid`
+              : `One image, ${planned.sheet.columns}×${planned.sheet.rows} at ${planned.sheet.size.width}×${planned.sheet.size.height}, ${planned.sheet.cell}px cells down to ${animation.cellSize}px`}
             {planned.sheet.spare > 0
-              ? `. ${planned.sheet.spare} cell${planned.sheet.spare === 1 ? "" : "s"} masked`
+              ? `. ${planned.sheet.spare} cell${planned.sheet.spare === 1 ? "" : "s"} ${
+                  pixelOn ? "empty" : "masked"
+                }`
               : ""}
             . Each action becomes its own animation when it lands.
           </p>
+          <SheetSuggestion />
         </>
       ) : null}
     </div>
   );
 }
 
-function SizeAxis({
-  label,
-  value,
-  onChange
-}: {
-  label: string;
-  value: number;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <div className="mb-1.5">
-      <Row>
-        <span className="w-10 shrink-0 text-[11px] tracking-wide text-slate-400 uppercase">
-          {label}
-        </span>
-        <NumberInput integer min={0} width={52} value={value} onChange={onChange} />
-        <div className="flex min-w-0 flex-1 flex-wrap gap-px">
-          {SIZE_PRESETS.map((size) => (
-            <button
-              type="button"
-              key={size}
-              title={`Set ${label.toLowerCase()} to ${size}px`}
-              onClick={() => onChange(size)}
-              className={`rounded px-1 py-0.5 text-[10px] tabular-nums transition ${
-                value === size
-                  ? "bg-[var(--color-accent-dim)] text-white"
-                  : "text-slate-500 hover:bg-[var(--color-ink-600)] hover:text-white"
-              }`}
-            >
-              {size}
-            </button>
-          ))}
-        </div>
-      </Row>
-    </div>
-  );
+function SheetSuggestion() {
+  const generation = useServer((state) => state.settings.generation);
+  const animation = useUi((state) => state.animation);
+  const itemGrid = useUi((state) => state.itemGrid);
+  const mask = useUi((state) => state.mask);
+  const bases = useUi((state) => state.bases);
+  const extras = activeFeaturePrompts({
+    model: generation.model,
+    mask,
+    base: animation.enabled || itemGrid.enabled ? null : (bases[0] ?? null),
+    animation,
+    itemGrid
+  });
+  const sheet = extras.find((entry) => entry.id === "animation" || entry.id === "item-grid");
+  if (!sheet) return null;
+  return <SuggestedPrompt text={sheet.defaultText} />;
 }
 
 export function GeneratePanel() {
   const settings = useServer((state) => state.settings);
   const project = useServer((state) => state.project);
   const projectKeys = useServer((state) => state.projectKeys);
-  const projectSettings = useDoc((state) => state.project);
   const promptBody = useUi((state) => state.promptBody);
   const animation = useUi((state) => state.animation);
   const itemGrid = useUi((state) => state.itemGrid);
   const loop = useUi((state) => state.loop);
   const chunk = useUi((state) => state.chunk);
-  const base = useUi((state) => state.base);
+  const each = useUi((state) => state.each);
+  const bases = useUi((state) => state.bases);
   const mask = useUi((state) => state.mask);
   const variables = useUi((state) => state.variables);
-  const featurePrompts = useUi((state) => state.featurePrompts);
-  const scratch = useUi((state) => state.scratch);
+  const animateExpansions = useUi((state) => state.animateExpansions);
   const batches = useUi((state) => state.batches);
   const folder = useUi((state) => state.folder);
   const busy = useUi((state) => state.busy);
@@ -854,10 +977,11 @@ export function GeneratePanel() {
   const canGenerate = project !== null && (project.isOwner || project.canGenerate);
   const projectHasKey = project === null || projectKeys.length > 0;
 
-  const [showModel, setShowModel] = useState(false);
+  const showModel = !useUi((state) => sectionCollapsed("generate.model", state.collapsedSections));
 
   const generation = settings.generation;
   const processing = settings.processing;
+  const projectCutout = useDoc((state) => state.settings.cutout);
   const billingKey = useSelectedProjectKey();
 
   useEffect(() => {
@@ -873,24 +997,7 @@ export function GeneratePanel() {
   }, [billingKey, generation.imageCount, generation.model, store]);
 
   const sheetOn = animation.enabled || itemGrid.enabled;
-  const extras = activeFeaturePrompts({
-    model: generation.model,
-    mask: sheetOn ? null : mask,
-    base: sheetOn ? null : base,
-    animation,
-    itemGrid
-  });
-  const promptSpec = workingPrompt({
-    prefix: projectSettings.promptPrefix,
-    body: promptBody,
-    suffix: projectSettings.promptSuffix,
-    model: generation.model,
-    mask: sheetOn ? null : mask,
-    base: sheetOn ? null : base,
-    animation,
-    itemGrid,
-    overrides: featurePrompts
-  });
+  const promptSpec = { prefix: "", body: promptBody, suffix: "" };
   const composed = composePrompt(promptSpec);
   const reserved = loopReservedSlots(loop.enabled);
   const create = planCreate({
@@ -901,10 +1008,18 @@ export function GeneratePanel() {
     sheet: animation.enabled || itemGrid.enabled,
     loopSteps: loop.enabled ? loop.steps : 0,
     chunkCells: chunk.enabled ? chunk.columns * chunk.rows : 0,
-    requiresStart: loop.enabled || chunk.enabled,
-    hasStart: base?.source.kind === "asset",
-    reserved
+    bases: sheetOn ? 0 : bases.length,
+    startNoun: each.enabled ? "image" : loop.enabled || chunk.enabled ? "start" : "template",
+    requiresStart: loop.enabled || chunk.enabled || each.enabled,
+    hasStart: each.enabled
+      ? bases.length > 0
+      : bases.length > 0 && bases.every((entry) => entry.source.kind === "asset"),
+    missingStart: each.enabled ? "add images to edit first" : undefined,
+    each: each.enabled,
+    reserved,
+    animate: animateExpansions && !loop.enabled && !chunk.enabled && !each.enabled && !sheetOn
   });
+  const canAnimate = create.expansions > 1 && !loop.enabled && !chunk.enabled && !each.enabled && !sheetOn;
   const expansions = expandPrompt(promptSpec, variables, reserved).map((entry) =>
     loop.enabled
       ? { ...entry, prompt: bindPrompt(entry.prompt, loopBindings({ steps: loop.steps, index: 1 })) }
@@ -919,7 +1034,7 @@ export function GeneratePanel() {
   return (
     <Panel
       pane="left"
-      lead={<ProviderHeader expanded={showModel} onToggle={() => setShowModel(!showModel)} />}
+      lead={<ProviderHeader />}
     >
       {!canGenerate ? (
         <p className="mb-3 rounded border border-amber-700 bg-amber-950/40 p-2 text-[11px] text-amber-200">
@@ -944,70 +1059,43 @@ export function GeneratePanel() {
 
       {showModel ? <ModelAndSize /> : null}
 
-      <PromptSection
-        title="Scratch"
-        kind="scratch"
-        rows={8}
-        value={scratch}
-        onChange={(value) => ui().setScratch(value)}
-      />
-
-      <PromptSection
-        title="Prefix"
-        kind="prefix"
-        rows={4}
-        value={projectSettings.promptPrefix}
-        onChange={(value) => useDoc.getState().patchProjectSettings({ promptPrefix: value })}
-      />
-
-      <PromptSection
-        title="Prompt"
-        kind="body"
-        locked
-        rows={5}
-        hint={`${promptBody.length} chars`}
-        value={promptBody}
-        onChange={(value) => ui().setPromptBody(value)}
-      />
-
-      <PromptSection
-        title="Suffix"
-        kind="suffix"
-        rows={2}
-        value={projectSettings.promptSuffix}
-        onChange={(value) => useDoc.getState().patchProjectSettings({ promptSuffix: value })}
-      />
-
-      {extras.map((entry) => {
-        const text = resolveFeatureText(entry, featurePrompts);
-        const edited = Object.prototype.hasOwnProperty.call(featurePrompts, entry.id);
-        return (
-          <PromptSection
-            key={entry.id}
-            title={entry.label}
-            kind="feature"
-            rows={entry.slot === "guide" ? 5 : 4}
-            startOpen
-            hint={edited ? "edited" : "sent with this request"}
-            value={text}
-            onChange={(value) => ui().setFeaturePrompt(entry.id, value)}
-            onReset={edited ? () => ui().resetFeaturePrompt(entry.id) : undefined}
+      <Section id="generate.prompt" label="prompt">
+        <div className="mb-2">
+          <div className="mb-1 flex items-center gap-2">
+            <span className="text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
+              Prompt
+            </span>
+            <span className="flex-1" />
+            <span className="text-[10px] text-slate-500">{promptBody.length} chars</span>
+            <TextButton
+              title="Reset prompt, modes, templates, and job settings. Keeps the current model."
+              onClick={() => store().resetGenerateDefaults()}
+            >
+              reset
+            </TextButton>
+            <SnippetLibrary value={promptBody} onLoad={(value) => ui().setPromptBody(value)} />
+          </div>
+          <textarea
+            rows={8}
+            value={promptBody}
+            placeholder="a rusty steel footlocker, closed lid, worn paint"
+            onChange={(event) => ui().setPromptBody(event.target.value)}
           />
-        );
-      })}
+        </div>
 
-      <VariablesEditor />
+        <VariablesEditor />
 
-      <details className="mb-2">
-        <summary className="cursor-pointer text-[11px] text-slate-400">
-          Preview composed prompt
-          {expansions.length > 1 ? ` · first of ${expansions.length}` : ""}
-        </summary>
-        <pre className="mt-1 max-h-40 overflow-auto rounded bg-[var(--color-ink-800)] p-2 text-[10px] whitespace-pre-wrap text-slate-400">
-          {(expansions[0] ? composePrompt(expansions[0].prompt) : composed) || "(empty)"}
-          {expansions.length > 1 ? `\n\n+${expansions.length - 1} more` : ""}
-        </pre>
-      </details>
+        <details className="mb-2">
+          <summary className="cursor-pointer text-[11px] text-slate-400">
+            Preview composed prompt
+            {expansions.length > 1 ? ` · first of ${expansions.length}` : ""}
+          </summary>
+          <pre className="mt-1 max-h-40 overflow-auto rounded bg-[var(--color-ink-800)] p-2 text-[10px] whitespace-pre-wrap text-slate-400">
+            {(expansions[0] ? composePrompt(expansions[0].prompt) : composed) || "(empty)"}
+            {expansions.length > 1 ? `\n\n+${expansions.length - 1} more` : ""}
+          </pre>
+        </details>
+      </Section>
 
       <Field
         label="Folder"
@@ -1021,6 +1109,14 @@ export function GeneratePanel() {
           onChange={(event) => ui().setFolder(event.target.value)}
         />
       </Field>
+
+      {canAnimate ? (
+        <Toggle
+          label="Collect into an animation"
+          checked={animateExpansions}
+          onChange={(value) => ui().setAnimateExpansions(value)}
+        />
+      ) : null}
 
       <Button
         variant="primary"
@@ -1043,69 +1139,74 @@ export function GeneratePanel() {
         <div className="mb-3" />
       )}
 
-      <LoopMode canEdit={modelOrDefault(generation.model).supportsEdit} />
-      <ChunkMode canEdit={modelOrDefault(generation.model).supportsEdit} />
-      <AnimationMode />
-      <ItemGridMode />
+      <Section id="generate.modes" label="modes">
+        <LoopMode canEdit={modelOrDefault(generation.model).supportsEdit} />
+        <ChunkMode canEdit={modelOrDefault(generation.model).supportsEdit} />
+        <EachMode canEdit={modelOrDefault(generation.model).supportsEdit} />
+        <AnimationMode />
+        <ItemGridMode />
+      </Section>
 
-      <Row className="mb-2">
-        <div className="flex-1">
-          <Field label="Batches" hint="parallel jobs">
-            <NumberInput value={batches} min={1} onChange={(value) => ui().setBatches(value)} />
-          </Field>
-        </div>
-        <div className="flex-1">
-          <Field label="Images per job">
-            <NumberInput
-              value={loop.enabled || chunk.enabled || animation.enabled || itemGrid.enabled ? 1 : generation.imageCount}
-              min={1}
-              max={modelOrDefault(generation.model).maxImagesPerRequest}
-              disabled={loop.enabled || chunk.enabled || animation.enabled || itemGrid.enabled}
-              onChange={(value) =>
-                store().setGeneration({
-                  imageCount: Math.min(
-                    modelOrDefault(generation.model).maxImagesPerRequest,
-                    Math.max(1, value)
-                  )
-                })
-              }
-            />
-          </Field>
-        </div>
-      </Row>
+      <Section id="generate.job" label="job">
+        <Row className="mb-2">
+          <div className="flex-1">
+            <Field label="Batches" hint="parallel jobs">
+              <NumberInput value={batches} min={1} onChange={(value) => ui().setBatches(value)} />
+            </Field>
+          </div>
+          <div className="flex-1">
+            <Field label="Images per job">
+              <NumberInput
+                value={
+                  loop.enabled || chunk.enabled || each.enabled || animation.enabled || itemGrid.enabled || (canAnimate && animateExpansions)
+                    ? 1
+                    : generation.imageCount
+                }
+                min={1}
+                max={modelOrDefault(generation.model).maxImagesPerRequest}
+                disabled={
+                  loop.enabled ||
+                  chunk.enabled ||
+                  each.enabled ||
+                  animation.enabled ||
+                  itemGrid.enabled ||
+                  (canAnimate && animateExpansions)
+                }
+                onChange={(value) =>
+                  store().setGeneration({
+                    imageCount: Math.min(
+                      modelOrDefault(generation.model).maxImagesPerRequest,
+                      Math.max(1, value)
+                    )
+                  })
+                }
+              />
+            </Field>
+          </div>
+        </Row>
+      </Section>
 
-      <div className="mb-1 text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
-        Asset size
-      </div>
+      <Section id="generate.size" label="size">
+        <DownsampleControls
+          processing={processing}
+          onChange={(patch) => store().setDefaultProcessing(patch)}
+          hint={
+            mask?.source.kind === "template" && isPixelConstraintTemplate(mask.source.templateId)
+              ? `Pixel constraint uses this as the checkerboard (${pixelConstraintWindow(processing.targetSize).width}×${pixelConstraintWindow(processing.targetSize).height} cells if an axis is 0). Unchecking keeps these values for the plate but skips sampling.`
+              : "New assets shrink to this. 0 on one axis takes the other. The raw source is always kept."
+          }
+        />
+      </Section>
 
-      <SizeAxis
-        label="W"
-        value={processing.targetSize.width}
-        onChange={(width) =>
-          store().setDefaultProcessing({
-            targetSize: { ...processing.targetSize, width: Math.max(0, Math.round(width)) }
-          })
-        }
-      />
-      <SizeAxis
-        label="H"
-        value={processing.targetSize.height}
-        onChange={(height) =>
-          store().setDefaultProcessing({
-            targetSize: { ...processing.targetSize, height: Math.max(0, Math.round(height)) }
-          })
-        }
-      />
-
-      <p className="mb-2 text-[10px] leading-snug text-slate-500">
-        {mask?.source.kind === "template" && isPixelConstraintTemplate(mask.source.templateId)
-          ? `Pixel constraint uses this as the checkerboard (${pixelConstraintWindow(processing.targetSize).width}×${pixelConstraintWindow(processing.targetSize).height} cells if an axis is 0). The request size above is the plate; each cell is one finished pixel.`
-          : "0 keeps the generated size. Otherwise new assets downsample to this, keeping their aspect. The raw source is always kept, so you can change it per asset later in the inspector."}
-      </p>
-
-      <Divider />
-
-      <TemplatePanel />
+      <Section id="generate.template" label="template">
+        <TemplatePanel />
+        <Toggle
+          label="Clip result to iso diamond"
+          checked={projectCutout.clipToIso}
+          disabled={project?.role === "viewer"}
+          onChange={(clipToIso) => useDoc.getState().patchSettings({ cutout: { clipToIso } })}
+        />
+      </Section>
     </Panel>
   );
 }

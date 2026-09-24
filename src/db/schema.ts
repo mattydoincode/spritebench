@@ -15,6 +15,7 @@ import {
 } from "drizzle-orm/pg-core";
 import type { ProcessingSettings } from "@/core/settings";
 import type { Size } from "@/core/types";
+import type { EngineSlotIntent, EngineSlotKind } from "@/shared/engineSlot";
 import type {
   GenerationParams,
   JobStatus,
@@ -222,6 +223,29 @@ export const projectDocUpdates = pgTable("project_doc_updates", {
  * one, say -- so there is no unique constraint on (user, provider). Which key
  * a given generation billed is recorded on the job, chosen at enqueue.
  */
+/**
+ * Personal access tokens for the Godot plugin (and anything else on /api/v1).
+ * Every token has the same fixed capability set: the bearer is the user.
+ * Project membership still gates each request. The plaintext is shown once.
+ */
+export const apiTokens = pgTable("api_tokens", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  /** SHA-256 hex of the full token. Unique so a lookup is one index read. */
+  hash: text("hash").notNull(),
+  /** Leading characters of the token, for the list UI (`sbp_ab12…`). */
+  prefix: text("prefix").notNull(),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+}, (table) => [
+  uniqueIndex("api_tokens_hash_key").on(table.hash),
+  index("api_tokens_user_idx").on(table.userId)
+]);
+
 export const providerKeys = pgTable("provider_keys", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id")
@@ -381,6 +405,29 @@ export const palettes = pgTable("palettes", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
 }, (table) => [index("palettes_project_idx").on(table.projectId)]);
 
+/**
+ * A Godot-owned slot. The plugin upserts the catalog; SpriteBench assigns
+ * one or more assets and records hashes so the two sides can tell who edited last.
+ */
+export const engineSlots = pgTable("engine_slots", {
+  id: uuid("id").primaryKey(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  kind: text("kind").$type<EngineSlotKind>().notNull(),
+  intent: text("intent").$type<EngineSlotIntent>().notNull().default("texture"),
+  label: text("label").notNull(),
+  godotPath: text("godot_path").notNull().default(""),
+  assignedAssetIds: jsonb("assigned_asset_ids").$type<string[]>().notNull().default([]),
+  localHash: text("local_hash"),
+  lastPushedHash: text("last_pushed_hash"),
+  remoteHash: text("remote_hash"),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  tombstonedAt: timestamp("tombstoned_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+}, (table) => [index("engine_slots_project_idx").on(table.projectId)]);
+
 /** One row per provider call. Written even while everything is free. */
 export const usageEvents = pgTable("usage_events", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -406,7 +453,9 @@ export type ProjectRow = typeof projects.$inferSelect;
 export type ProjectMemberRow = typeof projectMembers.$inferSelect;
 export type ProjectInviteRow = typeof projectInvites.$inferSelect;
 export type ProjectDocRow = typeof projectDocs.$inferSelect;
+export type ApiTokenRow = typeof apiTokens.$inferSelect;
 export type ProviderKeyRow = typeof providerKeys.$inferSelect;
+export type EngineSlotRow = typeof engineSlots.$inferSelect;
 export type AssetRow = typeof assets.$inferSelect;
 export type JobRow = typeof jobs.$inferSelect;
 export type TemplateRow = typeof templates.$inferSelect;

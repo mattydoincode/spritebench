@@ -1,6 +1,6 @@
 /**
  * Exercises the asset lifecycle against a scratch database and data directory:
- * migrations from empty, quota accounting, source roll-off, and metering.
+ * migrations from empty, source roll-off, and metering.
  *
  * Point DATABASE_URL at a throwaway database -- it writes and deletes rows:
  *
@@ -16,12 +16,9 @@ import {
   listExpiredSources,
   softDeleteAsset
 } from "@/db/repo/assets";
-import { insertJob } from "@/db/repo/jobs";
 import { createProject } from "@/db/repo/projects";
 import { users } from "@/db/schema";
 import { recordUsage, usageSince } from "@/db/repo/usage";
-import { assertCapacity, QuotaExceededError } from "@/server/generation";
-import { freeAssetLimit, maxImagesPerRequest } from "@/server/config";
 import { DEFAULT_PROCESSING } from "@/core/settings";
 import { DEFAULT_GENERATION } from "@/shared/model";
 import { sourceKey, thumbKey } from "@/storage/keys";
@@ -117,59 +114,9 @@ async function main(): Promise<void> {
   check("a second run finds nothing", rolled.length === 0);
   check("prune is idempotent", (await pruneExpiredSources()) === 0);
 
-  // --- quota ------------------------------------------------------------
-  // The fan-out cap is checked first and is normally well below the quota, so
-  // this needs a small FREE_ASSET_LIMIT to reach the quota branch at all.
-  const limit = freeAssetLimit();
-  const headroom = limit - 3;
-
-  if (headroom > maxImagesPerRequest()) {
-    throw new Error(
-      `run with FREE_ASSET_LIMIT below ${maxImagesPerRequest() + 3} so the quota is reached before the fan-out cap`
-    );
-  }
-
-  await assertCapacity(projectId, headroom);
-  check("quota allows exactly the remaining headroom", true, `${headroom} of ${limit}`);
-
-  const over = await assertCapacity(projectId, headroom + 1)
-    .then(() => null)
-    .catch((error: unknown) => error);
-  check("quota refuses one image too many", over instanceof QuotaExceededError);
-
-  // A rolled-off asset still counts: the row and thumbnail remain.
-  check("rolled-off assets still count against the quota", (await countAssets(projectId)) === 3);
-
-  await insertJob({
-    projectId,
-    userId,
-    providerKeyId: null,
-    label: "pending",
-    batchId: null,
-    batchIndex: 1,
-    batchSize: 1,
-    prompt: { prefix: "", body: "pending", suffix: "" },
-    composedPrompt: "pending",
-    generation: { ...DEFAULT_GENERATION, imageCount: 5 },
-    processing: DEFAULT_PROCESSING,
-    folder: "verify",
-    inputs: null,
-    sequencePlan: null,
-    rerunOf: null
-  });
-
-  const withPending = await assertCapacity(projectId, headroom)
-    .then(() => null)
-    .catch((error: unknown) => error);
-  check(
-    "a queued job's images count against the quota",
-    withPending instanceof QuotaExceededError,
-    withPending instanceof Error ? withPending.message : ""
-  );
-
   // --- soft delete ------------------------------------------------------
   await softDeleteAsset(projectId, fresh.id);
-  check("a deleted asset frees quota", (await countAssets(projectId)) === 2);
+  check("a deleted asset is gone", (await countAssets(projectId)) === 2);
 
   // --- metering ---------------------------------------------------------
   await recordUsage({

@@ -18,6 +18,9 @@ export async function buildThumbnail(source: Uint8Array): Promise<Uint8Array> {
       // Nearest keeps pixel art crisp instead of smearing it.
       kernel: "nearest"
     })
-    .webp({ quality: 80, alphaQuality: 90, effort: 4 })
+    // Lossy WebP smears alpha. The library then flood-fills and snaps that
+    // noise, so sprites go see-through or vanish while the inspector (PNG
+    // source) stays solid.
+    .webp({ lossless: true, effort: 4 })
     .toBuffer();
 }

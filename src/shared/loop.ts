@@ -13,8 +13,17 @@ export function successorInputs(inputs: JobInputs, assetId: string): JobInputs {
       source: { kind: "asset", assetId },
       fit: inputs.base?.fit ?? "contain",
       matchAspect: inputs.base?.matchAspect ?? true
-    }
+    },
+    start: inputs.start ?? inputs.base ?? null
   };
+}
+
+export function loopSendsStart(loop: JobInputs["loop"]): boolean {
+  return Boolean(loop && "sendStart" in loop && loop.sendStart);
+}
+
+export function loopIncludesStart(loop: JobInputs["loop"]): boolean {
+  return Boolean(loop && "includeStart" in loop && loop.includeStart);
 }
 
 /**

@@ -1,12 +1,34 @@
+import {
+  DEFAULT_ISO_PROJECTION,
+  isoDiamondSize,
+  type IsoProjection
+} from "./iso";
 import { createImage } from "./pixels";
 import type { RgbaImage, Size } from "./types";
 
 export const ISO_DIAMOND_TEMPLATE_ID = "builtin:iso-diamond";
-export const ISO_DIAMOND_TEMPLATE_NAME = "2:1 iso diamond";
-export const ISO_DIAMOND_SIZE: Size = { width: 256, height: 128 };
+export const ISO_DIAMOND_TEMPLATE_NAME = "isometric diamond";
+export const ISO_DIAMOND_SIZE: Size = isoDiamondSize("true");
+
+export const ISO_21_TEMPLATE_ID = "builtin:iso-diamond-21";
+export const ISO_21_TEMPLATE_NAME = "2:1 diamond";
+export const ISO_21_SIZE: Size = isoDiamondSize("dimetric");
+
+export function isoProjectionForTemplate(id: string): IsoProjection | null {
+  if (id === ISO_DIAMOND_TEMPLATE_ID) return "true";
+  if (id === ISO_21_TEMPLATE_ID) return "dimetric";
+  return null;
+}
 
 export function isIsoDiamondTemplate(id: string): boolean {
-  return id === ISO_DIAMOND_TEMPLATE_ID;
+  return isoProjectionForTemplate(id) !== null;
+}
+
+export function isoProjectionFromSource(
+  source: { kind: string; templateId?: string } | null | undefined
+): IsoProjection {
+  if (source?.kind !== "template" || !source.templateId) return DEFAULT_ISO_PROJECTION;
+  return isoProjectionForTemplate(source.templateId) ?? DEFAULT_ISO_PROJECTION;
 }
 
 export function isoDiamondTemplateInfo(): {
@@ -23,7 +45,25 @@ export function isoDiamondTemplateInfo(): {
   };
 }
 
-/** Pixel centre inside the 2:1 diamond that fills `width` × `height`. */
+export function iso21TemplateInfo(): {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+} {
+  return {
+    id: ISO_21_TEMPLATE_ID,
+    name: ISO_21_TEMPLATE_NAME,
+    width: ISO_21_SIZE.width,
+    height: ISO_21_SIZE.height
+  };
+}
+
+export function isoTemplateSize(id: string): Size {
+  return isoProjectionForTemplate(id) === "dimetric" ? ISO_21_SIZE : ISO_DIAMOND_SIZE;
+}
+
+/** Pixel centre inside the diamond that fills `width` × `height`. */
 export function pointInIsoDiamond(
   x: number,
   y: number,
@@ -35,6 +75,20 @@ export function pointInIsoDiamond(
   const nx = Math.abs((x + 0.5) / width - 0.5) * 2;
   const ny = Math.abs((y + 0.5) / height - 0.5) * 2;
   return nx + ny <= 1 + 1 / Math.min(width, height);
+}
+
+/** Clear pixels outside the diamond that fills the frame. Size is unchanged. */
+export function clipToIsoDiamond(image: RgbaImage): RgbaImage {
+  const next = { ...image, data: new Uint8ClampedArray(image.data) };
+
+  for (let y = 0; y < image.height; y++) {
+    for (let x = 0; x < image.width; x++) {
+      if (pointInIsoDiamond(x, y, image.width, image.height)) continue;
+      next.data[(y * image.width + x) * 4 + 3] = 0;
+    }
+  }
+
+  return next;
 }
 
 /** Opaque diamond on transparent. Dark enough for keepInsideShape. */

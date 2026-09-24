@@ -2,12 +2,16 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_ANIMATION,
   DEFAULT_CHUNK,
+  DEFAULT_COLLAPSED_SECTIONS,
   DEFAULT_ITEM_GRID,
+  DEFAULT_EACH,
   DEFAULT_LOOP,
   DEFAULT_PROJECT_DRAFT,
   persistProjectDrafts,
+  readCollapsedSections,
   readProjectDraft,
   readProjectDrafts,
+  sectionCollapsed,
   switchProjectDraft,
   type ProjectDraft
 } from "@/client/stores/ui";
@@ -20,7 +24,15 @@ describe("project prompt drafts", () => {
   it("keeps each project's prompt when switching", () => {
     const afterB = switchProjectDraft(
       {
-        ...draft({ promptBody: "a rusty chest", scratch: "chest notes" }),
+        ...draft({
+          promptBody: "a rusty chest",
+          mask: {
+            source: { kind: "template", templateId: "builtin:iso-diamond" },
+            maskSource: "keepInsideShape",
+            dilatePixels: 0,
+            fit: "contain"
+          }
+        }),
         activeProjectId: "alpha",
         drafts: {}
       },
@@ -28,8 +40,12 @@ describe("project prompt drafts", () => {
     );
 
     expect(afterB.promptBody).toBe("");
-    expect(afterB.scratch).toBe("");
+    expect(afterB.mask).toBeNull();
     expect(afterB.drafts.alpha?.promptBody).toBe("a rusty chest");
+    expect(afterB.drafts.alpha?.mask?.source).toEqual({
+      kind: "template",
+      templateId: "builtin:iso-diamond"
+    });
 
     const back = switchProjectDraft(
       { ...afterB, promptBody: "a marble fountain" },
@@ -37,7 +53,10 @@ describe("project prompt drafts", () => {
     );
 
     expect(back.promptBody).toBe("a rusty chest");
-    expect(back.scratch).toBe("chest notes");
+    expect(back.mask?.source).toEqual({
+      kind: "template",
+      templateId: "builtin:iso-diamond"
+    });
     expect(back.drafts.beta?.promptBody).toBe("a marble fountain");
   });
 
@@ -85,12 +104,10 @@ describe("project prompt drafts", () => {
   it("attributes a legacy single prompt to the last open project", () => {
     const drafts = readProjectDrafts({
       activeProjectId: "alpha",
-      promptBody: "old global prompt",
-      scratch: "old scratch"
+      promptBody: "old global prompt"
     });
 
     expect(drafts.alpha?.promptBody).toBe("old global prompt");
-    expect(drafts.alpha?.scratch).toBe("old scratch");
   });
 
   it("reads a already-split drafts map without using leftover top-level fields", () => {
@@ -123,11 +140,58 @@ describe("project prompt drafts", () => {
     const parsed = readProjectDraft({ promptBody: "only a prompt" });
 
     expect(parsed.promptBody).toBe("only a prompt");
-    expect(parsed.scratch).toBe("");
     expect(parsed.animation).toEqual(DEFAULT_ANIMATION);
     expect(parsed.itemGrid).toEqual(DEFAULT_ITEM_GRID);
     expect(parsed.loop).toEqual(DEFAULT_LOOP);
     expect(parsed.chunk).toEqual(DEFAULT_CHUNK);
+    expect(parsed.each).toEqual(DEFAULT_EACH);
     expect(parsed.variables).toEqual([]);
+    expect(parsed.animateExpansions).toBe(false);
+    expect(parsed.bases).toEqual([]);
+    expect(parsed.mask).toBeNull();
+  });
+
+  it("keeps bases and mask across a project switch", () => {
+    const base = {
+      source: { kind: "asset" as const, assetId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" },
+      fit: "contain" as const,
+      matchAspect: true
+    };
+
+    const afterB = switchProjectDraft(
+      {
+        ...draft({ promptBody: "first", bases: [base] }),
+        activeProjectId: "alpha",
+        drafts: {}
+      },
+      "beta"
+    );
+
+    expect(afterB.bases).toEqual([]);
+
+    const back = switchProjectDraft(afterB, "alpha");
+    expect(back.bases).toEqual([base]);
+  });
+});
+
+describe("collapsed panel sections", () => {
+  it("keeps model and cleanup closed until they are written", () => {
+    expect(sectionCollapsed("generate.model", {})).toBe(true);
+    expect(sectionCollapsed("inspector.cleanup", {})).toBe(true);
+    expect(sectionCollapsed("inspector.size", {})).toBe(false);
+    expect(sectionCollapsed("generate.prompt", {})).toBe(false);
+  });
+
+  it("honours an explicit stored choice over the default", () => {
+    expect(sectionCollapsed("generate.model", { "generate.model": false })).toBe(false);
+    expect(sectionCollapsed("inspector.size", { "inspector.size": true })).toBe(true);
+  });
+
+  it("drops junk from localStorage", () => {
+    expect(readCollapsedSections({ "inspector.size": true, leftover: "no" })).toEqual({
+      "inspector.size": true
+    });
+    expect(readCollapsedSections(null)).toEqual({});
+    expect(DEFAULT_COLLAPSED_SECTIONS["generate.model"]).toBe(true);
   });
 });

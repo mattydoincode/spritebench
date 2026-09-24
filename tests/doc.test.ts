@@ -4,7 +4,6 @@ import { DEFAULT_PROCESSING } from "@/core/settings";
 import * as doc from "@/shared/doc";
 import { emptyTiles } from "@/core/terrain";
 import {
-  DEFAULT_PROJECT_SETTINGS,
   defaultTerrain,
   paletteBakeAssetIds,
   repeaterFromItem,
@@ -23,6 +22,7 @@ function item(id: string, overrides: Partial<StagedItem> = {}): StagedItem {
     flipHorizontal: false,
     flipVertical: false,
     isoTurn: 0,
+    isoProjection: "true",
     showSource: false,
     opacity: 1,
     paused: false,
@@ -368,9 +368,12 @@ describe("defensive reads", () => {
 
   it("round-trips iso turn", () => {
     const source = seeded();
-    doc.addItem(source, "pg", item("a", { isoTurn: 1 }));
+    doc.addItem(source, "pg", item("a", { isoTurn: 1, isoProjection: "dimetric" }));
 
-    expect(doc.readScene(source, "pg")?.items[0]?.isoTurn).toBe(1);
+    expect(doc.readScene(source, "pg")?.items[0]).toMatchObject({
+      isoTurn: 1,
+      isoProjection: "dimetric"
+    });
   });
 
   it("round-trips sheet display for item grids", () => {
@@ -480,65 +483,6 @@ describe("asset edits", () => {
   });
 });
 
-describe("project settings", () => {
-  it("falls back to the house style until someone sets one", () => {
-    const target = doc.createDoc();
-
-    expect(doc.readProjectSettings(target)).toEqual(DEFAULT_PROJECT_SETTINGS);
-  });
-
-  /**
-   * Absent and empty are different. Clearing the prefix has to stay cleared,
-   * or the default would reappear on the next load and quietly change what
-   * every generation produces.
-   */
-  it("keeps a deliberately emptied prefix empty", () => {
-    const target = doc.createDoc();
-
-    doc.patchProjectSettings(target, { promptPrefix: "" });
-
-    expect(doc.readProjectSettings(target).promptPrefix).toBe("");
-    expect(doc.readProjectSettings(target).promptSuffix).toBe(
-      DEFAULT_PROJECT_SETTINGS.promptSuffix
-    );
-  });
-
-  it("merges two collaborators editing different halves of the wrapper", () => {
-    const a = doc.createDoc();
-    const b = doc.createDoc();
-
-    doc.patchProjectSettings(a, { promptPrefix: "top down" });
-    doc.patchProjectSettings(b, { promptSuffix: "no shadow" });
-
-    doc.applyRemote(a, Y.encodeStateAsUpdate(b));
-    doc.applyRemote(b, Y.encodeStateAsUpdate(a));
-
-    expect(doc.readProjectSettings(a)).toEqual(doc.readProjectSettings(b));
-    expect(doc.readProjectSettings(a)).toEqual({
-      promptPrefix: "top down",
-      promptSuffix: "no shadow"
-    });
-  });
-
-  it("survives compaction", () => {
-    const target = doc.createDoc();
-    doc.patchProjectSettings(target, { promptPrefix: "isometric" });
-
-    const restored = doc.docFromState(doc.encodeState(target));
-
-    expect(doc.readProjectSettings(restored).promptPrefix).toBe("isometric");
-  });
-
-  it("ignores a wrongly typed field rather than rendering it", () => {
-    const target = doc.createDoc();
-    doc.projectMap(target).set("promptPrefix", 42);
-
-    expect(doc.readProjectSettings(target).promptPrefix).toBe(
-      DEFAULT_PROJECT_SETTINGS.promptPrefix
-    );
-  });
-});
-
 describe("prompt snippets", () => {
   it("starts empty and round-trips a named version", () => {
     const target = doc.createDoc();
@@ -548,12 +492,11 @@ describe("prompt snippets", () => {
     doc.putPromptSnippet(target, {
       id: "s1",
       name: "16-bit house",
-      kind: "prefix",
       text: "pixel art, 16-bit"
     });
 
     expect(doc.listPromptSnippets(target)).toEqual([
-      { id: "s1", name: "16-bit house", kind: "prefix", text: "pixel art, 16-bit" }
+      { id: "s1", name: "16-bit house", text: "pixel art, 16-bit" }
     ]);
   });
 
@@ -561,8 +504,8 @@ describe("prompt snippets", () => {
     const a = doc.createDoc();
     const b = doc.createDoc();
 
-    doc.putPromptSnippet(a, { id: "a1", name: "from a", kind: "suffix", text: "transparent" });
-    doc.putPromptSnippet(b, { id: "b1", name: "from b", kind: "suffix", text: "no shadow" });
+    doc.putPromptSnippet(a, { id: "a1", name: "from a", text: "transparent" });
+    doc.putPromptSnippet(b, { id: "b1", name: "from b", text: "no shadow" });
 
     doc.applyRemote(a, Y.encodeStateAsUpdate(b));
     doc.applyRemote(b, Y.encodeStateAsUpdate(a));
@@ -571,15 +514,17 @@ describe("prompt snippets", () => {
     expect(doc.listPromptSnippets(a).map((entry) => entry.id).sort()).toEqual(["a1", "b1"]);
   });
 
-  it("drops a snippet with an unknown kind rather than inventing one", () => {
+  it("reads a snippet that still has a leftover kind field", () => {
     const target = doc.createDoc();
     const map = new Y.Map<unknown>();
-    map.set("name", "mystery");
-    map.set("kind", "style");
-    map.set("text", "nope");
-    doc.promptSnippetsMap(target).set("bad", map);
+    map.set("name", "old prefix");
+    map.set("kind", "prefix");
+    map.set("text", "top down");
+    doc.promptSnippetsMap(target).set("legacy", map);
 
-    expect(doc.listPromptSnippets(target)).toEqual([]);
+    expect(doc.listPromptSnippets(target)).toEqual([
+      { id: "legacy", name: "old prefix", text: "top down" }
+    ]);
   });
 });
 
@@ -610,6 +555,7 @@ describe("repeater names", () => {
       zIndex: 1,
       opacity: 1,
       seed: 0,
+      isoPitch: 30,
       ...overrides
     };
   }
@@ -665,9 +611,12 @@ describe("repeater names", () => {
 
   it("round-trips iso placement", () => {
     const source = seeded();
-    doc.addGroup(source, "pg", group("g1", { placement: "iso", countX: 5, countY: 4 }));
+    doc.addGroup(source, "pg", group("g1", { placement: "iso21", countX: 5, countY: 4 }));
 
-    expect(only(source)).toMatchObject({ placement: "iso", countX: 5, countY: 4 });
+    expect(only(source)).toMatchObject({ placement: "iso21", countX: 5, countY: 4, isoPitch: 30 });
+
+    doc.patchGroup(source, "pg", "g1", { placement: "iso", isoPitch: 45 });
+    expect(only(source)).toMatchObject({ placement: "iso", isoPitch: 45 });
   });
 
   /**
@@ -907,5 +856,78 @@ describe("terrain", () => {
     });
 
     expect(paletteBakeAssetIds(doc.listScenes(source)[0]).sort()).toEqual(["albedo", "sprite"]);
+  });
+});
+
+describe("project settings", () => {
+  it("reads built-in cutout defaults from an empty document", () => {
+    const settings = doc.readProjectSettings(doc.createDoc());
+    expect(settings.cutout.mode).toBe(DEFAULT_PROCESSING.cutout);
+    expect(settings.cutout.chromaKey.chromaKeys).toEqual(DEFAULT_PROCESSING.chromaKeys);
+  });
+
+  it("patches cutout fields without dropping the rest", () => {
+    const target = doc.createDoc();
+
+    doc.patchProjectSettings(target, {
+      cutout: {
+        mode: "chromaKey",
+        chromaKey: { chromaKeys: ["#00ff00"], cutoutTolerance: 0.4 },
+        edgeFloodFill: { cutoutTolerance: 0.12 }
+      }
+    });
+    doc.patchProjectSettings(target, {
+      cutout: { snapAlpha: false, chromaKey: { cutoutTolerance: 0.55 } }
+    });
+
+    const settings = doc.readProjectSettings(target);
+    expect(settings.cutout.mode).toBe("chromaKey");
+    expect(settings.cutout.snapAlpha).toBe(false);
+    expect(settings.cutout.chromaKey).toEqual({ chromaKeys: ["#00ff00"], cutoutTolerance: 0.55 });
+    expect(settings.cutout.edgeFloodFill.cutoutTolerance).toBe(0.12);
+  });
+
+  it("merges concurrent edits to different cutout fields", () => {
+    const base = doc.createDoc();
+    const state = doc.encodeState(base);
+
+    const alice = doc.docFromState(state);
+    const bob = doc.docFromState(state);
+    const fromAlice = recorder(alice);
+    const fromBob = recorder(bob);
+
+    doc.patchProjectSettings(alice, { cutout: { mode: "chromaKey" } });
+    doc.patchProjectSettings(bob, {
+      cutout: { edgeFloodFill: { cutoutTolerance: 0.33 } }
+    });
+
+    const merged = doc.docFromState(state);
+    for (const update of [...fromAlice, ...fromBob]) doc.applyRemote(merged, update);
+
+    const settings = doc.readProjectSettings(merged);
+    expect(settings.cutout.mode).toBe("chromaKey");
+    expect(settings.cutout.edgeFloodFill.cutoutTolerance).toBe(0.33);
+  });
+
+  it("stores a project iso pitch", () => {
+    const target = doc.createDoc();
+    expect(doc.readProjectSettings(target).isoPitch).toBe(30);
+
+    doc.patchProjectSettings(target, { isoPitch: 45 });
+    expect(doc.readProjectSettings(target).isoPitch).toBe(45);
+
+    doc.patchProjectSettings(target, { cutout: { snapAlpha: false } });
+    expect(doc.readProjectSettings(target).isoPitch).toBe(45);
+  });
+
+  it("stores a project iso light", () => {
+    const target = doc.createDoc();
+    expect(doc.readProjectSettings(target).isoLight).toBe("nw");
+
+    doc.patchProjectSettings(target, { isoLight: "sw" });
+    expect(doc.readProjectSettings(target).isoLight).toBe("sw");
+
+    doc.patchProjectSettings(target, { isoPitch: 45 });
+    expect(doc.readProjectSettings(target).isoLight).toBe("sw");
   });
 });

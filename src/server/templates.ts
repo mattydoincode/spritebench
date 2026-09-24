@@ -3,15 +3,23 @@ import { cut } from "@/core/cutout";
 import {
   buildIsoDiamondTemplate,
   isIsoDiamondTemplate,
-  isoDiamondTemplateInfo
+  iso21TemplateInfo,
+  isoDiamondTemplateInfo,
+  isoTemplateSize
 } from "@/core/isoMask";
+import {
+  SHEET_FRAMES_PREVIEW_SIZE,
+  buildSheetFramesTemplate,
+  isSheetFramesTemplate,
+  previewSheetFramesPlan,
+  sheetFramesTemplateInfo
+} from "@/core/frameMask";
 import {
   PIXEL_CONSTRAINT_PREVIEW_SIZE,
   buildPixelConstraintTemplate,
   isPixelConstraintTemplate,
   pixelConstraintTemplateInfo
 } from "@/core/pixelMask";
-import { hexToRgb } from "@/core/pixels";
 import {
   deleteTemplate as deleteTemplateRow,
   getTemplate,
@@ -27,11 +35,17 @@ import { decodePng, encodePng } from "./png";
 export type { TemplateInfo };
 
 export function isBuiltinTemplate(id: string): boolean {
-  return isIsoDiamondTemplate(id) || isPixelConstraintTemplate(id);
+  return isIsoDiamondTemplate(id) || isPixelConstraintTemplate(id) || isSheetFramesTemplate(id);
 }
 
 export async function listTemplates(projectId: string): Promise<TemplateInfo[]> {
-  return [isoDiamondTemplateInfo(), pixelConstraintTemplateInfo(), ...(await listTemplateRows(projectId))];
+  return [
+    isoDiamondTemplateInfo(),
+    iso21TemplateInfo(),
+    pixelConstraintTemplateInfo(),
+    sheetFramesTemplateInfo(),
+    ...(await listTemplateRows(projectId))
+  ];
 }
 
 export async function loadTemplate(
@@ -39,11 +53,15 @@ export async function loadTemplate(
   templateId: string
 ): Promise<Bytes | null> {
   if (isIsoDiamondTemplate(templateId)) {
-    return asBytes(encodePng(buildIsoDiamondTemplate()));
+    return asBytes(encodePng(buildIsoDiamondTemplate(isoTemplateSize(templateId))));
   }
 
   if (isPixelConstraintTemplate(templateId)) {
     return asBytes(encodePng(buildPixelConstraintTemplate(PIXEL_CONSTRAINT_PREVIEW_SIZE)));
+  }
+
+  if (isSheetFramesTemplate(templateId)) {
+    return asBytes(encodePng(buildSheetFramesTemplate(SHEET_FRAMES_PREVIEW_SIZE, previewSheetFramesPlan())));
   }
 
   const row = await getTemplate(projectId, templateId);
@@ -75,7 +93,7 @@ export async function saveTemplate(
     decoded = cut(
       decoded,
       "edgeFloodFill",
-      hexToRgb("#ffffff"),
+      [],
       cutTolerance,
       cutTolerance,
       0.85,

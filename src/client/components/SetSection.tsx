@@ -7,7 +7,7 @@ import { faceId, setBadge, type AssetSet } from "@/shared/assetSet";
 import type { ResolvedAsset } from "@/shared/model";
 import { sequenceKind, type Sequence } from "@/shared/sequence";
 import { BitmapCanvas } from "./AssetBitmap";
-import { Button, Divider, Field, Row } from "./ui";
+import { Button, Field, Row, Section } from "./ui";
 
 const STRIP_SIZE = 44;
 
@@ -36,9 +36,7 @@ export function SetSection({
   const grid = set.view === "grid";
 
   return (
-    <>
-      <Divider label={grid ? "tileset" : "set"} />
-
+    <Section id="inspector.sequence" label={grid ? "tileset" : "set"}>
       <p className="mb-2 text-[10px] leading-snug text-slate-500">
         {set.kind === "grid"
           ? "Chunk outputs, slotted back onto the source grid."
@@ -141,6 +139,6 @@ export function SetSection({
       ) : null}
 
       {frames.error ? <p className="mt-2 text-[10px] text-rose-300">{frames.error}</p> : null}
-    </>
+    </Section>
   );
 }

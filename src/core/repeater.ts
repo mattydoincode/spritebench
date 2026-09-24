@@ -1,5 +1,11 @@
-import type { RepeaterRotate, RepeatGroup } from "@/shared/model";
+import { isoDiamondHeightForPitch, TRUE_ISO_PITCH } from "@/core/iso";
 import type { Size } from "@/core/types";
+import {
+  isIsoPlacement,
+  isoPitchForRepeater,
+  type RepeaterRotate,
+  type RepeatGroup
+} from "@/shared/model";
 
 /**
  * Repeater placement, kept out of the scene so a scatter of trash can be
@@ -16,6 +22,12 @@ export interface PlannedStamp {
   flipH: boolean;
   flipV: boolean;
   mixIndex: number;
+  /**
+   * Iso only. `col + row`: larger is closer to camera (lower on screen)
+   * and must stack on top. Mix buckets break DOM painter order, so the
+   * scene uses this as z-index inside the group's stacking context.
+   */
+  depth?: number;
 }
 
 export function clampDegrees(value: number): number {
@@ -114,9 +126,9 @@ function boxAt(
 }
 
 /**
- * 2:1 dimetric tile: the diamond pixel-art maps actually click together on.
- * Width is the cell; height is half of that. Art may be taller and hangs
- * north of the diamond so a building covers the tile behind it.
+ * Diamond tile lattice. Width is the cell; height follows the projection
+ * (√3:1 true iso, or 2:1 dimetric). Art may be taller and hangs north of
+ * the diamond so a building covers the tile behind it.
  */
 export interface IsoLattice {
   diamondW: number;
@@ -125,9 +137,14 @@ export interface IsoLattice {
   halfH: number;
 }
 
-export function isoLattice(cell: Size, marginX: number, marginY: number): IsoLattice {
+export function isoLattice(
+  cell: Size,
+  marginX: number,
+  marginY: number,
+  pitch = TRUE_ISO_PITCH
+): IsoLattice {
   const diamondW = Math.max(0, cell.width);
-  const diamondH = diamondW / 2;
+  const diamondH = isoDiamondHeightForPitch(diamondW, pitch);
 
   return {
     diamondW,
@@ -149,6 +166,18 @@ export function isoDiamondOrigin(
   };
 }
 
+/** Larger is closer to camera (bottom of the map). */
+export function isoDepth(col: number, row: number): number {
+  return col + row;
+}
+
+function compareIsoPainter(
+  a: { col: number; row: number },
+  b: { col: number; row: number }
+): number {
+  return isoDepth(a.col, a.row) - isoDepth(b.col, b.row) || a.col - b.col;
+}
+
 export function isoStampBox(
   col: number,
   row: number,
@@ -164,6 +193,43 @@ export function isoStampBox(
   return {
     x: diamond.x + (lattice.diamondW - width) / 2,
     y: diamond.y + lattice.diamondH - height,
+    width,
+    height
+  };
+}
+
+export type StampFit = "contain" | "width";
+export type StampAlign = "center" | "bottom";
+
+/**
+ * Where the bitmap sits inside a planned stamp.
+ *
+ * Iso pins to diamond width and sits on the south tip so a flat park and a
+ * tall block share a ground line. Contain+center is for grid and scatter:
+ * those cells are a frame, not a footprint.
+ */
+export function stampDrawRect(
+  box: Size,
+  preview: Size,
+  options: { fit: StampFit; align: StampAlign; rotation?: number }
+): { x: number; y: number; width: number; height: number } {
+  const boxW = Math.max(1, box.width);
+  const boxH = Math.max(1, box.height);
+  const previewW = Math.max(1, preview.width);
+  const previewH = Math.max(1, preview.height);
+  const quarter = options.rotation === 90 || options.rotation === 270;
+  const visualW = quarter ? previewH : previewW;
+  const visualH = quarter ? previewW : previewH;
+  const fit =
+    options.fit === "width"
+      ? boxW / visualW
+      : Math.min(boxW / visualW, boxH / visualH);
+  const width = previewW * fit;
+  const height = previewH * fit;
+
+  return {
+    x: (boxW - width) / 2,
+    y: options.align === "bottom" ? boxH - height : (boxH - height) / 2,
     width,
     height
   };
@@ -287,7 +353,7 @@ export function listIsoCells(options: {
     if (cells.length >= maxTiles) break;
   }
 
-  cells.sort((a, b) => a.col + a.row - (b.col + b.row) || a.col - b.col);
+  cells.sort(compareIsoPainter);
   return cells;
 }
 
@@ -301,15 +367,19 @@ export function planIsoStamps(options: {
   mixCount: number;
   rotate: RepeaterRotate;
   scaleJitter: number;
+  pitch?: number;
 }): PlannedStamp[] {
   const mix = Math.max(1, Math.floor(options.mixCount));
-  const lattice = isoLattice(options.cell, options.marginX, options.marginY);
+  const lattice = isoLattice(
+    options.cell,
+    options.marginX,
+    options.marginY,
+    options.pitch ?? TRUE_ISO_PITCH
+  );
   if (lattice.diamondW <= 0) return [];
 
   const stamps: PlannedStamp[] = [];
-  const cells = [...options.cells].sort(
-    (a, b) => a.col + a.row - (b.col + b.row) || a.col - b.col
-  );
+  const cells = [...options.cells].sort(compareIsoPainter);
 
   for (const { col, row } of cells) {
     const random = mulberry32(
@@ -324,7 +394,8 @@ export function planIsoStamps(options: {
       rotation: style.rotation,
       flipH: style.flipH,
       flipV: style.flipV,
-      mixIndex: pickIndex(options.seed, col, row, mix)
+      mixIndex: pickIndex(options.seed, col, row, mix),
+      depth: isoDepth(col, row)
     });
   }
 
@@ -454,7 +525,7 @@ export function planRepeater(
     | "edgeBias"
     | "marginX"
     | "marginY"
-  >,
+  > & { isoPitch?: number },
   cell: Size,
   mixCount: number,
   grid: {
@@ -482,7 +553,7 @@ export function planRepeater(
     });
   }
 
-  if (group.placement === "iso") {
+  if (isIsoPlacement(group.placement)) {
     return planIsoStamps({
       origin: { x: group.x, y: group.y },
       cells: grid.cells ?? [],
@@ -492,7 +563,8 @@ export function planRepeater(
       seed: group.seed,
       mixCount,
       rotate: group.rotate,
-      scaleJitter: group.scaleJitter
+      scaleJitter: group.scaleJitter,
+      pitch: isoPitchForRepeater(group)
     });
   }
 

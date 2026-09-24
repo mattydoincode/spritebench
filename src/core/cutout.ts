@@ -182,10 +182,17 @@ function edgeFloodFill(
   return out;
 }
 
+function matchesChromaKey(r: number, g: number, b: number, keys: Rgb[], tolerance: number): boolean {
+  for (const key of keys) {
+    if (normalizedDistance(r, g, b, key.r, key.g, key.b) <= tolerance) return true;
+  }
+  return false;
+}
+
 export function cut(
   image: RgbaImage,
   mode: CutoutMode,
-  chromaKey: Rgb,
+  chromaKeys: Rgb[],
   tolerance: number,
   localTolerance: number,
   luminanceThreshold: number,
@@ -209,7 +216,7 @@ export function cut(
 
     let clear = false;
     if (mode === "chromaKey") {
-      clear = normalizedDistance(r, g, b, chromaKey.r, chromaKey.g, chromaKey.b) <= tolerance;
+      clear = matchesChromaKey(r, g, b, chromaKeys, tolerance);
     } else {
       const lum = luminance(r, g, b);
       clear = mode === "luminanceAbove" ? lum >= luminanceThreshold : lum <= luminanceThreshold;

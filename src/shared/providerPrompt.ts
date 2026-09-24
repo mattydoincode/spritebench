@@ -2,9 +2,15 @@ import { isPixelConstraintTemplate } from "@/core/pixelMask";
 import type { Size } from "@/core/types";
 import { findModel, modelOrDefault, providerLabel, snapRequestSize } from "@/providers/models";
 import { snapRatioRequest } from "@/providers/ratio";
-import { GEMINI_GUIDE_INSTRUCTIONS, GEMINI_REFERENCE_INSTRUCTIONS } from "./featurePrompt";
+import {
+  GEMINI_GUIDE_INSTRUCTIONS,
+  GEMINI_REFERENCE_INSTRUCTIONS,
+  GEMINI_REVISE_INSTRUCTIONS
+} from "./featurePrompt";
+import { loopIncludesStart, loopSendsStart } from "./loop";
 import {
   composePrompt,
+  imageSourceKey,
   isChunkSpec,
   isLoopSpec,
   jobUsesEdit,
@@ -17,7 +23,7 @@ import {
   type TokenUsage
 } from "./model";
 
-export { GEMINI_GUIDE_INSTRUCTIONS, GEMINI_REFERENCE_INSTRUCTIONS };
+export { GEMINI_GUIDE_INSTRUCTIONS, GEMINI_REFERENCE_INSTRUCTIONS, GEMINI_REVISE_INSTRUCTIONS };
 
 export type PromptSectionId = "system" | "guide" | "prefix" | "body" | "extra" | "suffix";
 
@@ -27,7 +33,7 @@ export interface PromptSection {
   text: string;
 }
 
-export type AttachmentRole = "guide" | "reference" | "base" | "mask";
+export type AttachmentRole = "guide" | "reference" | "base" | "mask" | "start";
 
 export interface AttachmentPlan {
   id: AttachmentRole;
@@ -50,6 +56,12 @@ function usesMask(input: ProviderPromptInput): boolean {
   return jobUsesMask(input);
 }
 
+function sendsDistinctStart(inputs: JobInputs | null | undefined): boolean {
+  if (!loopSendsStart(inputs?.loop) || !inputs?.start) return false;
+  if (!inputs.base) return true;
+  return imageSourceKey(inputs.start.source) !== imageSourceKey(inputs.base.source);
+}
+
 function sourceLabel(source: ImageSource): string {
   return source.kind === "template" ? source.templateId : `asset ${source.assetId.slice(0, 8)}`;
 }
@@ -58,7 +70,9 @@ export function providerSystemText(input: ProviderPromptInput): string {
   const stored = input.prompt.guide?.trim() ?? "";
   if (stored) return stored;
   if (!isGemini(input.generation.model) || !jobUsesEdit(input)) return "";
-  return usesMask(input) ? GEMINI_GUIDE_INSTRUCTIONS : GEMINI_REFERENCE_INSTRUCTIONS;
+  if (usesMask(input)) return GEMINI_GUIDE_INSTRUCTIONS;
+  if (input.inputs?.each) return GEMINI_REVISE_INSTRUCTIONS;
+  return GEMINI_REFERENCE_INSTRUCTIONS;
 }
 
 /** The exact user+system string the provider call received. */
@@ -101,18 +115,27 @@ export function providerAttachmentPlan(input: ProviderPromptInput): AttachmentPl
     if (input.inputs?.base && pixel) {
       return [
         { id: "reference", label: "starting image" },
+        ...(sendsDistinctStart(input.inputs) ? [{ id: "start" as const, label: "original start" }] : []),
         { id: "guide", label: "pixel grid" }
       ];
     }
-    return usesMask(input)
+    const gemini: AttachmentPlan[] = usesMask(input)
       ? [{ id: "guide", label: "layout guide · white = draw" }]
-      : [{ id: "reference", label: "composition reference" }];
+      : [
+          {
+            id: "reference",
+            label: input.inputs?.each ? "image to revise" : "composition reference"
+          }
+        ];
+    if (sendsDistinctStart(input.inputs)) gemini.push({ id: "start", label: "original start" });
+    return gemini;
   }
 
   const attachments: AttachmentPlan[] = [{ id: "base", label: "base image" }];
   const pixel =
     input.inputs?.mask?.source.kind === "template" &&
     isPixelConstraintTemplate(input.inputs.mask.source.templateId);
+  if (sendsDistinctStart(input.inputs)) attachments.push({ id: "start", label: "original start" });
   if (input.inputs?.base && pixel) attachments.push({ id: "guide", label: "pixel grid" });
   if (usesMask(input)) attachments.push({ id: "mask", label: "mask · transparent = draw" });
   return attachments;
@@ -172,7 +195,13 @@ export function providerAuditLines(input: ProviderAuditInput): AuditLine[] {
     { label: "model", value: `${model.label} · ${providerLabel(model.provider)}` },
     {
       label: "call",
-      value: jobUsesEdit(input) ? (usesMask(input) ? "edit · masked" : "edit · reference") : "generate"
+      value: jobUsesEdit(input)
+        ? usesMask(input)
+          ? "edit · masked"
+          : input.inputs?.each
+            ? "edit · each"
+            : "edit · reference"
+        : "generate"
     }
   ];
 
@@ -233,7 +262,14 @@ export function providerAuditLines(input: ProviderAuditInput): AuditLine[] {
   }
 
   if (inputs && isLoopSpec(inputs.loop)) {
-    lines.push({ label: "loop", value: `step ${inputs.loop.index} of ${inputs.loop.steps}` });
+    const extras = [
+      loopSendsStart(inputs.loop) ? "send start" : null,
+      loopIncludesStart(inputs.loop) ? "include start" : null
+    ].filter((part) => part);
+    lines.push({
+      label: "loop",
+      value: [`step ${inputs.loop.index} of ${inputs.loop.steps}`, ...extras].join(" · ")
+    });
   }
 
   if (inputs && isChunkSpec(inputs.chunk)) {

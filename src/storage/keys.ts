@@ -39,6 +39,19 @@ export function exportKey(projectId: string, folder: string, stem: string): stri
   return `${projectPrefix(projectId)}/exports/${dir}${stem}.png`;
 }
 
+/** One processed frame (or bag member) for a Godot slot pull. */
+export function engineFrameKey(projectId: string, slotId: string, file: string): string {
+  if (!/^[a-z0-9_]+\.png$/.test(file)) {
+    throw new Error(`unsafe engine frame name: ${file}`);
+  }
+  return `${projectPrefix(projectId)}/engine/${slotId}/${file}`;
+}
+
+/** Descriptor assign writes so pull can sign URLs without rendering again. */
+export function engineBundleKey(projectId: string, slotId: string): string {
+  return `${projectPrefix(projectId)}/engine/${slotId}/bundle.json`;
+}
+
 export function basename(key: string): string {
   return key.slice(key.lastIndexOf("/") + 1);
 }

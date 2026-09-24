@@ -29,6 +29,14 @@ export function middleware(request: NextRequest): NextResponse {
     return NextResponse.next();
   }
 
+  // Bearer auth is resolved in the handler. A cookie check here would 401
+  // every plugin call before `requireV1User` could look at the token.
+  // `/api/storage` is the local driver's signed URL; the plugin fetches it
+  // with the same PAT.
+  if (pathname.startsWith("/api/v1") || pathname.startsWith("/api/storage")) {
+    return NextResponse.next();
+  }
+
   const hasSession =
     request.cookies.has("authjs.session-token") ||
     request.cookies.has("__Secure-authjs.session-token");

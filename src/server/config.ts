@@ -15,11 +15,6 @@ export function workerConcurrency(): number {
   return count("WORKER_CONCURRENCY");
 }
 
-/** Images a free account may keep before generation is refused. */
-export function freeAssetLimit(): number {
-  return count("FREE_ASSET_LIMIT");
-}
-
 /** Days a full-resolution source is kept before roll-off. */
 export function assetRetentionDays(): number {
   return count("ASSET_RETENTION_DAYS");

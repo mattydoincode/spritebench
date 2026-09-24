@@ -1,6 +1,7 @@
+import { sheetCellRect } from "@/core/pixelMask";
 import { padGridForAspect, planSheetRequestForGrid, type SheetRequest } from "@/core/sheet";
 import { cellUsed, sliceGrid } from "@/core/slice";
-import type { Size } from "@/core/types";
+import type { Rect, Size } from "@/core/types";
 import type { SequencePlan, SequencePlanAction } from "./model";
 import { DEFAULT_FPS, SET_FPS, clampFps, type Sequence } from "./sequence";
 
@@ -20,7 +21,7 @@ export interface AnimationRequest {
   cellSize: number;
 }
 
-const SUPERSAMPLE = 4;
+export const SHEET_SUPERSAMPLE = 4;
 
 export interface AnimationGeneration {
   plan: SequencePlan;
@@ -43,15 +44,31 @@ export function actionGrid(actions: SequencePlanAction[]): { columns: number; ro
   return padGridForAspect(columns, cleaned.length);
 }
 
-export function gridInstructions(actions: SequencePlanAction[], columns: number, rows: number): string {
+export function gridInstructions(
+  actions: SequencePlanAction[],
+  columns: number,
+  rows: number,
+  options?: { pixelConstraint?: boolean; frames?: boolean }
+): string {
   const cleaned = normalizeActions(actions);
+  const pixel = Boolean(options?.pixelConstraint);
+  const frames = Boolean(options?.frames) && !pixel;
+  const open = pixel || frames;
 
   const lines = [
     `Draw a ${columns} by ${rows} sprite sheet: equal cells in a strict grid, one action per row, frames left to right.`,
-    "Exactly one character per used cell. Covered cells are masked out -- leave them empty, do not draw anything there.",
+    pixel
+      ? "Each used cell is its own pixel grid, with empty gutters between cells. Unused cells stay empty -- do not draw anything there."
+      : frames
+        ? "Each used cell is a white rectangle, separated by empty gutters. Unused cells stay empty -- do not draw anything there."
+        : "Exactly one character per used cell. Covered cells are masked out -- leave them empty, do not draw anything there.",
     "Keep the character identical across the whole sheet: same design, same colours, same proportions, same line weight. Only the pose changes.",
     "Draw the character at the same scale in every used cell, centred horizontally, standing on the same baseline, so the frames of one row line up when played.",
-    "Transparent background. No grid lines, borders, gutters, drop shadows, ground shadows, frame numbers, labels or captions anywhere in the image."
+    pixel
+      ? "Transparent background. Leave the white gutters empty. No borders, drop shadows, ground shadows, frame numbers, labels or captions anywhere in the image."
+      : frames
+        ? "Transparent background. Leave the black gutters empty. No borders, drop shadows, ground shadows, frame numbers, labels or captions anywhere in the image."
+        : "Transparent background. No grid lines, borders, gutters, drop shadows, ground shadows, frame numbers, labels or captions anywhere in the image."
   ];
 
   for (const [index, action] of cleaned.entries()) {
@@ -59,9 +76,11 @@ export function gridInstructions(actions: SequencePlanAction[], columns: number,
     const row = `Row ${index + 1} is "${action.name}": ${action.frames} consecutive frames of that cycle.`;
     lines.push(
       leftover > 0
-        ? `${row} The last ${leftover} cell${leftover === 1 ? "" : "s"} of this row ${
-            leftover === 1 ? "is" : "are"
-          } covered -- leave ${leftover === 1 ? "it" : "them"} empty.`
+        ? open
+          ? `${row} The last ${leftover} cell${leftover === 1 ? "" : "s"} of this row stay empty.`
+          : `${row} The last ${leftover} cell${leftover === 1 ? "" : "s"} of this row ${
+              leftover === 1 ? "is" : "are"
+            } covered -- leave ${leftover === 1 ? "it" : "them"} empty.`
         : row
     );
   }
@@ -69,9 +88,11 @@ export function gridInstructions(actions: SequencePlanAction[], columns: number,
   if (rows > cleaned.length) {
     const extra = rows - cleaned.length;
     lines.push(
-      `The bottom ${extra} row${extra === 1 ? "" : "s"} ${extra === 1 ? "is" : "are"} covered padding. Leave ${
-        extra === 1 ? "it" : "them"
-      } completely empty.`
+      open
+        ? `The bottom ${extra} row${extra === 1 ? "" : "s"} stay empty.`
+        : `The bottom ${extra} row${extra === 1 ? "" : "s"} ${extra === 1 ? "is" : "are"} covered padding. Leave ${
+            extra === 1 ? "it" : "them"
+          } completely empty.`
     );
   }
 
@@ -82,7 +103,7 @@ export function planAnimation(request: AnimationRequest): AnimationGeneration {
   const actions = normalizeActions(request.actions);
   const cellSize = Math.max(8, Math.floor(request.cellSize));
   const shape = actionGrid(actions);
-  const sheet = planSheetRequestForGrid(shape, cellSize * SUPERSAMPLE);
+  const sheet = planSheetRequestForGrid(shape, cellSize * SHEET_SUPERSAMPLE);
   const used = actions.reduce((sum, entry) => sum + entry.frames, 0);
 
   return {
@@ -120,24 +141,44 @@ export function itemGridInstructions(
   contentColumns: number,
   contentRows: number,
   columns: number,
-  rows: number
+  rows: number,
+  options?: { pixelConstraint?: boolean; frames?: boolean }
 ): string {
+  const pixel = Boolean(options?.pixelConstraint);
+  const frames = Boolean(options?.frames) && !pixel;
+  const open = pixel || frames;
   const lines = [
     `Draw a ${columns} by ${rows} sprite sheet: equal cells in a strict grid.`,
     "Each used cell is a different object matching the subject. Do not repeat the same object.",
-    "Exactly one object per used cell, centred, same style, same scale, same lighting across the sheet.",
-    "Covered cells are masked out -- leave them empty, do not draw anything there.",
-    "Transparent background. No grid lines, borders, gutters, drop shadows, ground shadows, frame numbers, labels or captions anywhere in the image."
+    pixel
+      ? "Exactly one object per used cell, centred, same style, same scale, same lighting across the sheet. Each used cell is its own pixel grid, with empty gutters between cells."
+      : frames
+        ? "Exactly one object per used cell, centred, same style, same scale, same lighting across the sheet. Each used cell is a white rectangle, with empty gutters between cells."
+        : "Exactly one object per used cell, centred, same style, same scale, same lighting across the sheet.",
+    open
+      ? "Unused cells stay empty -- do not draw anything there."
+      : "Covered cells are masked out -- leave them empty, do not draw anything there.",
+    pixel
+      ? "Transparent background. Leave the white gutters empty. No borders, drop shadows, ground shadows, frame numbers, labels or captions anywhere in the image."
+      : frames
+        ? "Transparent background. Leave the black gutters empty. No borders, drop shadows, ground shadows, frame numbers, labels or captions anywhere in the image."
+        : "Transparent background. No grid lines, borders, gutters, drop shadows, ground shadows, frame numbers, labels or captions anywhere in the image."
   ];
 
   if (columns !== contentColumns || rows !== contentRows) {
     const spare = columns * rows - contentColumns * contentRows;
     lines.push(
-      `Only the first ${contentRows} row${contentRows === 1 ? "" : "s"} and ${contentColumns} column${
-        contentColumns === 1 ? "" : "s"
-      } are used (${contentColumns * contentRows} objects). The remaining ${spare} cell${
-        spare === 1 ? "" : "s"
-      } ${spare === 1 ? "is" : "are"} covered padding -- leave ${spare === 1 ? "it" : "them"} empty.`
+      open
+        ? `Only the first ${contentRows} row${contentRows === 1 ? "" : "s"} and ${contentColumns} column${
+            contentColumns === 1 ? "" : "s"
+          } are used (${contentColumns * contentRows} objects). The remaining ${spare} cell${
+            spare === 1 ? "" : "s"
+          } stay empty.`
+        : `Only the first ${contentRows} row${contentRows === 1 ? "" : "s"} and ${contentColumns} column${
+            contentColumns === 1 ? "" : "s"
+          } are used (${contentColumns * contentRows} objects). The remaining ${spare} cell${
+            spare === 1 ? "" : "s"
+          } ${spare === 1 ? "is" : "are"} covered padding -- leave ${spare === 1 ? "it" : "them"} empty.`
     );
   }
 
@@ -149,7 +190,7 @@ export function planItemGrid(request: ItemGridRequest): AnimationGeneration {
   const rows = clampGridAxis(request.rows);
   const cellSize = Math.max(8, Math.floor(request.cellSize));
   const shape = padGridForAspect(columns, rows);
-  const sheet = planSheetRequestForGrid(shape, cellSize * SUPERSAMPLE);
+  const sheet = planSheetRequestForGrid(shape, cellSize * SHEET_SUPERSAMPLE);
   const actions: SequencePlanAction[] = Array.from({ length: rows }, (_, index) => ({
     name: rows === 1 ? "items" : `row ${index + 1}`,
     frames: columns
@@ -181,6 +222,38 @@ export function itemGridPromptBody(request: ItemGridRequest): string {
  * No pixels required -- the canvas is the size that was asked for -- so this
  * can run the moment the asset row arrives.
  */
+export function frameRectsFromPlan(size: Size, plan: SequencePlan): Rect[] {
+  const columns = Math.max(1, plan.columns);
+  const rows = Math.max(plan.actions?.length ?? 0, plan.rows);
+  const plate = plan.plate;
+  if (!plate) {
+    return sliceGrid(size, {
+      columns,
+      rows,
+      marginX: 0,
+      marginY: 0,
+      spacingX: 0,
+      spacingY: 0
+    });
+  }
+
+  const scaleX = size.width / plate.canvas.width;
+  const scaleY = size.height / plate.canvas.height;
+  const rects: Rect[] = [];
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < columns; column++) {
+      const rect = sheetCellRect(plate, column, row);
+      rects.push({
+        x: Math.round(rect.x * scaleX),
+        y: Math.round(rect.y * scaleY),
+        width: Math.max(1, Math.round(rect.width * scaleX)),
+        height: Math.max(1, Math.round(rect.height * scaleY))
+      });
+    }
+  }
+  return rects;
+}
+
 export function sequencesFromPlan(
   assetId: string,
   size: Size,
@@ -190,14 +263,7 @@ export function sequencesFromPlan(
   const actions = normalizeActions(plan.actions ?? []);
   const columns = Math.max(1, plan.columns);
   const rows = Math.max(actions.length, plan.rows);
-  const rects = sliceGrid(size, {
-    columns,
-    rows,
-    marginX: 0,
-    marginY: 0,
-    spacingX: 0,
-    spacingY: 0
-  });
+  const rects = frameRectsFromPlan(size, plan);
 
   const frameAt = (row: number, column: number) => ({
     id: newId(),

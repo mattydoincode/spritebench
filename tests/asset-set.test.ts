@@ -3,7 +3,9 @@ import {
   attachSet,
   faceId,
   isLibraryVisible,
+  loopOriginMember,
   sequenceFromSet,
+  setIdForJob,
   setSpecFromInputs,
   slotFromIndex,
   upsertMember,
@@ -43,6 +45,12 @@ describe("setSpecFromInputs", () => {
     ).toEqual({ kind: "animation", columns: 4, rows: 1, index: 1, col: 1, row: 0 });
   });
 
+  it("shifts slots when the start is kept in the animation", () => {
+    expect(
+      setSpecFromInputs({ loop: { steps: 4, index: 1, includeStart: true } })
+    ).toEqual({ kind: "animation", columns: 5, rows: 1, index: 1, col: 1, row: 0 });
+  });
+
   it("places a chunk cell on the source grid", () => {
     expect(
       setSpecFromInputs({
@@ -51,9 +59,43 @@ describe("setSpecFromInputs", () => {
     ).toEqual({ kind: "grid", columns: 2, rows: 2, index: 3, col: 1, row: 1 });
   });
 
+  it("names the original start as frame 0 when includeStart is on", () => {
+    expect(
+      loopOriginMember({
+        start: {
+          source: { kind: "asset", assetId: "11111111-1111-1111-1111-111111111111" },
+          fit: "contain",
+          matchAspect: true
+        },
+        loop: { steps: 4, index: 2, includeStart: true }
+      })
+    ).toEqual({ assetId: "11111111-1111-1111-1111-111111111111", index: 0, col: 0, row: 0 });
+
+    expect(loopOriginMember({ loop: { steps: 4, index: 2 } })).toBeNull();
+  });
+
   it("ignores a request that has not been expanded yet", () => {
     expect(setSpecFromInputs({ loop: { steps: 4 } })).toBeNull();
     expect(setSpecFromInputs({ chunk: { columns: 2, rows: 2 } })).toBeNull();
+  });
+
+  it("places a fan-out frame in value order", () => {
+    expect(
+      setSpecFromInputs({ animate: { id: "11111111-1111-1111-1111-111111111111", index: 2, count: 8 } })
+    ).toEqual({ kind: "animation", columns: 8, rows: 1, index: 2, col: 2, row: 0 });
+  });
+});
+
+describe("setIdForJob", () => {
+  it("prefers the fan-out animation id over the batch", () => {
+    expect(
+      setIdForJob({
+        id: "job",
+        batchId: "batch",
+        inputs: { animate: { id: "11111111-1111-1111-1111-111111111111", index: 0, count: 2 } }
+      })
+    ).toBe("11111111-1111-1111-1111-111111111111");
+    expect(setIdForJob({ id: "job", batchId: "batch" })).toBe("batch");
   });
 });
 

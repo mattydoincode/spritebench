@@ -22,15 +22,19 @@ const PALETTE: Rgb[] = [
  */
 const AGREEING_CASES: Array<{ name: string; settings: Partial<ProcessingSettings> }> = [
   { name: "no processing", settings: { cutout: "none", trimToContent: false, snapAlpha: false, targetSize: { width: 0, height: 0 } } },
-  { name: "downsample only", settings: { cutout: "none", trimToContent: false, targetSize: { width: 0, height: 32 } } },
+  {
+    name: "downsample only",
+    settings: { cutout: "none", trimToContent: false, downsample: true, targetSize: { width: 0, height: 32 } }
+  },
   {
     name: "chroma key and despeckle",
     settings: {
       cutout: "chromaKey",
-      chromaKey: "#ffffff",
+      chromaKeys: ["#ffffff"],
       despeckleMinimumNeighbors: 3,
       fillHoles: true,
       trimToContent: false,
+      downsample: true,
       targetSize: { width: 0, height: 48 }
     }
   },
@@ -42,6 +46,7 @@ const AGREEING_CASES: Array<{ name: string; settings: Partial<ProcessingSettings
       erodePixels: 2,
       snapAlpha: true,
       trimToContent: false,
+      downsample: true,
       targetSize: { width: 24, height: 24 }
     }
   },
@@ -62,6 +67,16 @@ const AGREEING_CASES: Array<{ name: string; settings: Partial<ProcessingSettings
       cutout: "none",
       edits: [{ kind: "crop", x: 10, y: 10, width: 200, height: 200 }],
       trimToContent: false,
+      targetSize: { width: 0, height: 0 }
+    }
+  },
+  {
+    name: "clip to iso diamond",
+    settings: {
+      cutout: "none",
+      clipToIso: true,
+      trimToContent: true,
+      snapAlpha: false,
       targetSize: { width: 0, height: 0 }
     }
   }

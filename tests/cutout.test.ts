@@ -15,11 +15,12 @@ import { alphaAt, countOpaque, framed, solid } from "./helpers";
 const MAGENTA: Rgb = { r: 255, g: 0, b: 255 };
 const WHITE: Rgb = { r: 255, g: 255, b: 255 };
 const BLACK: Rgb = { r: 0, g: 0, b: 0 };
+const UNUSED_KEYS: Rgb[] = [MAGENTA];
 
 describe("cut, edgeFloodFill", () => {
   it("clears a uniform background and keeps the centre", () => {
     const image = framed(16, WHITE, BLACK, 4);
-    const result = cut(image, "edgeFloodFill", MAGENTA, 0.2, 0.1, 0.85, false);
+    const result = cut(image, "edgeFloodFill", UNUSED_KEYS, 0.2, 0.1, 0.85, false);
 
     expect(alphaAt(result, 0, 0)).toBe(0);
     expect(alphaAt(result, 15, 15)).toBe(0);
@@ -27,13 +28,13 @@ describe("cut, edgeFloodFill", () => {
   });
 
   it("clears everything when the whole image is one colour", () => {
-    const result = cut(solid(12, 12, WHITE), "edgeFloodFill", MAGENTA, 0.2, 0.1, 0.85, false);
+    const result = cut(solid(12, 12, WHITE), "edgeFloodFill", UNUSED_KEYS, 0.2, 0.1, 0.85, false);
     expect(countOpaque(result)).toBe(0);
   });
 
   it("is a no-op on a fully transparent image", () => {
     const image = createImage(12, 12);
-    const result = cut(image, "edgeFloodFill", MAGENTA, 0.2, 0.1, 0.85, false);
+    const result = cut(image, "edgeFloodFill", UNUSED_KEYS, 0.2, 0.1, 0.85, false);
 
     expect(countOpaque(result)).toBe(0);
     expect(result.width).toBe(12);
@@ -53,7 +54,7 @@ describe("cut, edgeFloodFill", () => {
       }
     }
 
-    const result = cut(image, "edgeFloodFill", MAGENTA, 0.2, 0.1, 0.85, false);
+    const result = cut(image, "edgeFloodFill", UNUSED_KEYS, 0.2, 0.1, 0.85, false);
 
     expect(alphaAt(result, 0, 0)).toBe(0);
     expect(alphaAt(result, 9, 9)).toBe(255);
@@ -63,7 +64,7 @@ describe("cut, edgeFloodFill", () => {
     const image = framed(16, WHITE, BLACK, 4);
     const before = Uint8Array.from(image.data);
 
-    cut(image, "edgeFloodFill", MAGENTA, 0.2, 0.1, 0.85, false);
+    cut(image, "edgeFloodFill", UNUSED_KEYS, 0.2, 0.1, 0.85, false);
 
     expect(Uint8Array.from(image.data)).toEqual(before);
   });
@@ -71,8 +72,8 @@ describe("cut, edgeFloodFill", () => {
   it("respects sampleCornersOnly", () => {
     const image = framed(16, WHITE, BLACK, 4);
 
-    const corners = cut(image, "edgeFloodFill", MAGENTA, 0.2, 0.1, 0.85, true);
-    const wholeEdge = cut(image, "edgeFloodFill", MAGENTA, 0.2, 0.1, 0.85, false);
+    const corners = cut(image, "edgeFloodFill", UNUSED_KEYS, 0.2, 0.1, 0.85, true);
+    const wholeEdge = cut(image, "edgeFloodFill", UNUSED_KEYS, 0.2, 0.1, 0.85, false);
 
     expect(countOpaque(corners)).toBe(countOpaque(wholeEdge));
   });
@@ -89,7 +90,7 @@ describe("cut, edgeFloodFill", () => {
       }
     }
 
-    const result = cut(image, "edgeFloodFill", MAGENTA, 0.2, 0.1, 0.85, false);
+    const result = cut(image, "edgeFloodFill", UNUSED_KEYS, 0.2, 0.1, 0.85, false);
 
     expect(alphaAt(result, 0, 0)).toBe(0);
     expect(alphaAt(result, 5, 5)).toBe(0);
@@ -100,25 +101,43 @@ describe("cut, edgeFloodFill", () => {
 describe("cut, other modes", () => {
   it("returns the same object for mode none", () => {
     const image = solid(8, 8, WHITE);
-    expect(cut(image, "none", MAGENTA, 0.2, 0.1, 0.85, false)).toBe(image);
+    expect(cut(image, "none", UNUSED_KEYS, 0.2, 0.1, 0.85, false)).toBe(image);
   });
 
   it("chromaKey clears pixels near the key colour", () => {
     const image = framed(12, MAGENTA, BLACK, 3);
-    const result = cut(image, "chromaKey", MAGENTA, 0.1, 0.1, 0.85, false);
+    const result = cut(image, "chromaKey", [MAGENTA], 0.1, 0.1, 0.85, false);
 
     expect(alphaAt(result, 0, 0)).toBe(0);
     expect(alphaAt(result, 6, 6)).toBe(255);
   });
 
   it("chromaKey with zero tolerance still clears an exact match", () => {
-    const result = cut(solid(4, 4, MAGENTA), "chromaKey", MAGENTA, 0, 0.1, 0.85, false);
+    const result = cut(solid(4, 4, MAGENTA), "chromaKey", [MAGENTA], 0, 0.1, 0.85, false);
     expect(countOpaque(result)).toBe(0);
+  });
+
+  it("chromaKey clears pixels near any of several key colours", () => {
+    const image = framed(12, MAGENTA, BLACK, 3);
+    image.data[0] = WHITE.r;
+    image.data[1] = WHITE.g;
+    image.data[2] = WHITE.b;
+
+    const result = cut(image, "chromaKey", [MAGENTA, WHITE], 0.1, 0.1, 0.85, false);
+
+    expect(alphaAt(result, 0, 0)).toBe(0);
+    expect(alphaAt(result, 1, 0)).toBe(0);
+    expect(alphaAt(result, 6, 6)).toBe(255);
+  });
+
+  it("chromaKey with no keys leaves the image opaque", () => {
+    const result = cut(solid(4, 4, MAGENTA), "chromaKey", [], 0.1, 0.1, 0.85, false);
+    expect(countOpaque(result)).toBe(16);
   });
 
   it("luminanceAbove clears bright pixels", () => {
     const image = framed(12, WHITE, BLACK, 3);
-    const result = cut(image, "luminanceAbove", MAGENTA, 0.2, 0.1, 0.5, false);
+    const result = cut(image, "luminanceAbove", UNUSED_KEYS, 0.2, 0.1, 0.5, false);
 
     expect(alphaAt(result, 0, 0)).toBe(0);
     expect(alphaAt(result, 6, 6)).toBe(255);
@@ -126,7 +145,7 @@ describe("cut, other modes", () => {
 
   it("luminanceBelow clears dark pixels", () => {
     const image = framed(12, WHITE, BLACK, 3);
-    const result = cut(image, "luminanceBelow", MAGENTA, 0.2, 0.1, 0.5, false);
+    const result = cut(image, "luminanceBelow", UNUSED_KEYS, 0.2, 0.1, 0.5, false);
 
     expect(alphaAt(result, 0, 0)).toBe(255);
     expect(alphaAt(result, 6, 6)).toBe(0);
@@ -134,7 +153,7 @@ describe("cut, other modes", () => {
 
   it("skips already transparent pixels", () => {
     const image = solid(4, 4, WHITE, 0);
-    const result = cut(image, "luminanceAbove", MAGENTA, 0.2, 0.1, 0.1, false);
+    const result = cut(image, "luminanceAbove", UNUSED_KEYS, 0.2, 0.1, 0.1, false);
     expect(countOpaque(result)).toBe(0);
   });
 });

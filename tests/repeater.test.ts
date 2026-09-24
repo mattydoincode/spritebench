@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { DIMETRIC_PITCH, TRUE_ISO_PITCH, isoDiamondHeightForPitch } from "@/core/iso";
 import {
   clampDegrees,
+  isoDepth,
   isoLattice,
   isoStampBox,
   listIsoCells,
@@ -9,6 +11,7 @@ import {
   planRepeater,
   planScatterStamps,
   rotateFromCenter,
+  stampDrawRect,
   stampStyle,
   towardEdge
 } from "@/core/repeater";
@@ -114,7 +117,7 @@ describe("planGridStamps", () => {
 describe("iso lattice", () => {
   const origin = { x: 0, y: 0 };
   const cell = { width: 64, height: 32 };
-  const lattice = isoLattice(cell, 0, 0);
+  const lattice = isoLattice(cell, 0, 0, DIMETRIC_PITCH);
 
   it("is a 2:1 diamond whose neighbours share an edge", () => {
     expect(lattice).toEqual({ diamondW: 64, diamondH: 32, halfW: 32, halfH: 16 });
@@ -128,15 +131,74 @@ describe("iso lattice", () => {
     expect(south).toEqual({ x: -32, y: 16, width: 64, height: 32 });
   });
 
+  it("is a √3:1 diamond whose neighbours share an edge", () => {
+    const trueLattice = isoLattice(cell, 0, 0);
+    const diamondH = 64 / Math.sqrt(3);
+    expect(trueLattice.diamondW).toBe(64);
+    expect(trueLattice.diamondH).toBeCloseTo(diamondH);
+    expect(trueLattice.halfW).toBe(32);
+    expect(trueLattice.halfH).toBeCloseTo(diamondH / 2);
+
+    const here = isoStampBox(0, 0, origin, trueLattice, cell);
+    const east = isoStampBox(1, 0, origin, trueLattice, cell);
+    expect(east.x - here.x).toBeCloseTo(32);
+    expect(east.y - here.y).toBeCloseTo(diamondH / 2);
+  });
+
+  it("uses pitch to set diamond height, matching 2:1 at 30°", () => {
+    const custom = isoLattice(cell, 0, 0, 45);
+    expect(custom.diamondH).toBeCloseTo(isoDiamondHeightForPitch(64, 45));
+    expect(isoLattice(cell, 0, 0, DIMETRIC_PITCH).diamondH).toBeCloseTo(32);
+    expect(isoLattice(cell, 0, 0, TRUE_ISO_PITCH).diamondH).toBeCloseTo(64 / Math.sqrt(3));
+  });
+
   it("sits a tall sprite on the diamond so buildings hang north", () => {
     const tall = { width: 64, height: 80 };
-    expect(isoStampBox(0, 0, origin, isoLattice(tall, 0, 0), tall)).toEqual({
+    expect(isoStampBox(0, 0, origin, isoLattice(tall, 0, 0, DIMETRIC_PITCH), tall)).toEqual({
       x: 0,
       y: -48,
       width: 64,
       height: 80
     });
   });
+});
+
+describe("stampDrawRect", () => {
+  const cell = { width: 2026, height: 1486 };
+
+  it("pins iso art to width and sits both aspects on the south tip", () => {
+    const block = stampDrawRect(cell, { width: 2025, height: 1484 }, { fit: "width", align: "bottom" });
+    const park = stampDrawRect(cell, { width: 2752, height: 1536 }, { fit: "width", align: "bottom" });
+
+    expect(block.x + block.width).toBeCloseTo(cell.width);
+    expect(park.x + park.width).toBeCloseTo(cell.width);
+    expect(block.y + block.height).toBeCloseTo(cell.height);
+    expect(park.y + park.height).toBeCloseTo(cell.height);
+    expect(park.height).toBeLessThan(block.height);
+    expect(park.y).toBeGreaterThan(block.y);
+  });
+
+  it("lets tall art hang north of the cell when pinning width", () => {
+    const draw = stampDrawRect(cell, { width: 1000, height: 2000 }, { fit: "width", align: "bottom" });
+    expect(draw.width).toBeCloseTo(cell.width);
+    expect(draw.height).toBeCloseTo(cell.width * 2);
+    expect(draw.y).toBeCloseTo(cell.height - draw.height);
+    expect(draw.y).toBeLessThan(0);
+  });
+
+  it("contain-centers a short tile in a grid cell", () => {
+    const draw = stampDrawRect(cell, { width: 2752, height: 1536 }, { fit: "contain", align: "center" });
+    expect(draw.width).toBeCloseTo(cell.width);
+    expect(draw.x).toBeCloseTo(0);
+    expect(draw.y).toBeCloseTo((cell.height - draw.height) / 2);
+    expect(draw.y).toBeGreaterThan(0);
+  });
+});
+
+describe("iso planning", () => {
+  const origin = { x: 0, y: 0 };
+  const cell = { width: 64, height: 32 };
+  const lattice = isoLattice(cell, 0, 0, DIMETRIC_PITCH);
 
   it("plans cells back-to-front and keeps mix picks stable", () => {
     const cells = [
@@ -153,10 +215,13 @@ describe("iso lattice", () => {
       seed: 3,
       mixCount: 4,
       rotate: "none",
-      scaleJitter: 0
+      scaleJitter: 0,
+      pitch: DIMETRIC_PITCH
     });
 
     expect(stamps.map((stamp) => stamp.key)).toEqual(["0:0", "1:0", "1:1"]);
+    expect(stamps.map((stamp) => stamp.depth)).toEqual([0, 1, 2]);
+    expect(isoDepth(1, 1)).toBeGreaterThan(isoDepth(0, 0));
     expect(
       planIsoStamps({
         origin,
@@ -167,7 +232,8 @@ describe("iso lattice", () => {
         seed: 3,
         mixCount: 4,
         rotate: "none",
-        scaleJitter: 0
+        scaleJitter: 0,
+        pitch: DIMETRIC_PITCH
       }).map((stamp) => stamp.mixIndex)
     ).toEqual(stamps.map((stamp) => stamp.mixIndex));
   });
@@ -217,6 +283,34 @@ describe("iso lattice", () => {
       {
         x: 0,
         y: 0,
+        placement: "iso21",
+        rotate: "none",
+        seed: 1,
+        scaleJitter: 0,
+        scatterCount: 16,
+        areaWidth: 192,
+        areaHeight: 192,
+        minGap: 0,
+        edgeBias: 0,
+        marginX: 0,
+        marginY: 0,
+        isoPitch: DIMETRIC_PITCH
+      },
+      cell,
+      1,
+      { columns: [], rows: [], stepX: 0, stepY: 0, cells: [{ col: 1, row: 0 }] }
+    );
+
+    expect(stamps).toEqual([
+      expect.objectContaining({ key: "1:0", x: 32, y: 16, width: 64, height: 32 })
+    ]);
+  });
+
+  it("honours a custom iso pitch on the group", () => {
+    const stamps = planRepeater(
+      {
+        x: 0,
+        y: 0,
         placement: "iso",
         rotate: "none",
         seed: 1,
@@ -227,16 +321,19 @@ describe("iso lattice", () => {
         minGap: 0,
         edgeBias: 0,
         marginX: 0,
-        marginY: 0
+        marginY: 0,
+        isoPitch: 45
       },
       cell,
       1,
       { columns: [], rows: [], stepX: 0, stepY: 0, cells: [{ col: 1, row: 0 }] }
     );
 
-    expect(stamps).toEqual([
-      expect.objectContaining({ key: "1:0", x: 32, y: 16, width: 64, height: 32 })
-    ]);
+    const diamondH = isoDiamondHeightForPitch(64, 45);
+    expect(stamps).toHaveLength(1);
+    expect(stamps[0]).toMatchObject({ key: "1:0", width: 64, height: 32 });
+    expect(stamps[0].x).toBeCloseTo(32);
+    expect(stamps[0].y).toBeCloseTo(diamondH / 2 + diamondH - 32);
   });
 });
 
