@@ -844,6 +844,13 @@ export function Divider({ label }: { label?: string }) {
  * A labeled divider that hides its body. State lives in the ui store so a
  * closed section stays closed across reloads and is easy to move later.
  */
+/**
+ * A collapsible part of a docked panel.
+ *
+ * The heading is a full-width bar -- the panel body's padding is undone so it
+ * runs edge to edge -- and sticks to the top while its section scrolls under
+ * it, so you can always see which section you are in and fold it from there.
+ */
 export function Section({
   id,
   label,
@@ -856,22 +863,29 @@ export function Section({
   const collapsed = useUi((state) => sectionCollapsed(id, state.collapsedSections));
 
   return (
-    <div>
+    <section className="-mx-3 border-t border-[var(--color-edge)] first:-mt-3 first:border-t-0 last:border-b">
       <button
         type="button"
         onClick={() => useUi.getState().toggleSection(id)}
         aria-expanded={!collapsed}
         title={collapsed ? `Show ${label}` : `Hide ${label}`}
-        className="my-3 flex w-full items-center gap-2"
+        className="group sticky top-0 z-10 flex h-8 w-full items-center gap-2 bg-[var(--color-ink-800)] px-3 transition-colors hover:bg-[var(--color-ink-700)]"
       >
-        <span className="h-px flex-1 bg-[var(--color-edge)]" />
-        <span className="flex items-center gap-1 text-[10px] uppercase tracking-widest text-slate-500">
-          <span aria-hidden>{collapsed ? "\u25b8" : "\u25be"}</span>
+        <svg
+          aria-hidden
+          viewBox="0 0 10 10"
+          className={`h-2.5 w-2.5 shrink-0 text-slate-400 transition-transform group-hover:text-slate-200 ${
+            collapsed ? "" : "rotate-90"
+          }`}
+        >
+          <path d="M3 1.5 6.5 5 3 8.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+        </svg>
+        {/* Type and colour on the span: the global button rule beats them on the button. */}
+        <span className="truncate text-[11px] font-semibold tracking-wider text-slate-300 uppercase group-hover:text-white">
           {label}
         </span>
-        <span className="h-px flex-1 bg-[var(--color-edge)]" />
       </button>
-      {collapsed ? null : children}
-    </div>
+      {collapsed ? null : <div className="px-3 pt-2.5 pb-3">{children}</div>}
+    </section>
   );
 }

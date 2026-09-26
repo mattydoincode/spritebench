@@ -175,15 +175,15 @@ describe("project prompt drafts", () => {
 });
 
 describe("collapsed panel sections", () => {
-  it("keeps cleanup closed until it is written", () => {
+  it("starts every section open", () => {
     expect(sectionCollapsed("generate.model", {})).toBe(false);
-    expect(sectionCollapsed("inspector.cleanup", {})).toBe(true);
+    expect(sectionCollapsed("inspector.cleanup", {})).toBe(false);
     expect(sectionCollapsed("inspector.size", {})).toBe(false);
     expect(sectionCollapsed("generate.prompt", {})).toBe(false);
   });
 
   it("honours an explicit stored choice over the default", () => {
-    expect(sectionCollapsed("inspector.cleanup", { "inspector.cleanup": false })).toBe(false);
+    expect(sectionCollapsed("inspector.cleanup", { "inspector.cleanup": true })).toBe(true);
     expect(sectionCollapsed("inspector.size", { "inspector.size": true })).toBe(true);
   });
 
@@ -192,6 +192,6 @@ describe("collapsed panel sections", () => {
       "inspector.size": true
     });
     expect(readCollapsedSections(null)).toEqual({});
-    expect(DEFAULT_COLLAPSED_SECTIONS["inspector.cleanup"]).toBe(true);
+    expect(DEFAULT_COLLAPSED_SECTIONS).toEqual({});
   });
 });
