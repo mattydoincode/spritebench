@@ -320,34 +320,73 @@ export function Tab({
   );
 }
 
+/**
+ * A main panel's title. Every docked panel's header is a row of these: a
+ * panel on its own has one, always selected; panels that share a slot (prompt
+ * and Godot) have one each and switch on click. Same type, same underline,
+ * so a lone title and a pair of tabs read as the same kind of heading.
+ */
+export function PanelTab({
+  selected = true,
+  count,
+  onClick,
+  children
+}: {
+  selected?: boolean;
+  /** Muted number after the label, like a library's asset count. */
+  count?: number;
+  onClick?: () => void;
+  children: ReactNode;
+}) {
+  const className = `relative flex shrink-0 items-center gap-1.5 text-[11px] font-semibold tracking-wider uppercase transition ${
+    selected
+      ? "text-slate-100 after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-[var(--color-accent)]"
+      : "text-slate-500 hover:text-slate-300"
+  }`;
+
+  const content = (
+    <>
+      {children}
+      {count !== undefined ? (
+        <span className="font-normal text-slate-500 tabular-nums">{count}</span>
+      ) : null}
+    </>
+  );
+
+  if (!onClick) return <h2 className={className}>{content}</h2>;
+
+  return (
+    <button type="button" role="tab" aria-selected={selected} onClick={onClick} className={className}>
+      {content}
+    </button>
+  );
+}
+
 export function Panel({
   title,
-  lead,
+  tabs,
+  count,
   children,
   actions,
   className = ""
 }: {
   title?: string;
-  /** Replaces the title, for a control that belongs in the header. */
-  lead?: ReactNode;
+  /** `PanelTab`s, for a panel that shares its slot. Replaces `title`. */
+  tabs?: ReactNode;
+  /** Shown after `title`. */
+  count?: number;
   children: ReactNode;
   actions?: ReactNode;
   className?: string;
 }) {
   return (
     <section className={`flex h-full min-h-0 flex-col ${className}`}>
-      <header className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--color-edge)] bg-[var(--color-ink-800)] px-3 py-2">
-        <div className="flex min-w-0 items-center gap-1.5">
-          {lead ?? (
-            <h2 className="truncate text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
-              {title}
-            </h2>
-          )}
+      <header className="flex h-9 shrink-0 items-stretch justify-between gap-2 border-b border-[var(--color-edge)] bg-[var(--color-ink-800)] px-3">
+        <div role={tabs ? "tablist" : undefined} className="flex min-w-0 items-stretch gap-4">
+          {tabs ?? <PanelTab count={count}>{title}</PanelTab>}
         </div>
 
-        <div className="flex items-center gap-1">
-          {actions}
-        </div>
+        <div className="flex min-w-0 items-center gap-1">{actions}</div>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">{children}</div>
     </section>

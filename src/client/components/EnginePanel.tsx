@@ -324,7 +324,7 @@ export function EnginePanel() {
   const slots = allSlots.filter((slot) => slot.kind !== "record_field");
 
   return (
-    <Panel title="Godot" lead={<LeftTabs />}>
+    <Panel tabs={<LeftTabs />}>
       {project ? (
         <p className="mb-2 font-mono text-[10px] break-all text-slate-500">
           project {project.id}

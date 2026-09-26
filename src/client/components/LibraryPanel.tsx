@@ -346,7 +346,8 @@ export function LibraryPanel() {
 
   return (
     <Panel
-      title={`Library (${items.length})`}
+      title="Library"
+      count={items.length}
       actions={
         <>
           {failedJobs.length > 0 ? (
