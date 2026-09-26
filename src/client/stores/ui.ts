@@ -227,7 +227,7 @@ export function sectionCollapsed(
   return stored[id] ?? defaults[id] ?? false;
 }
 
-export type Pane = "left" | "right" | "library";
+export type Pane = "left" | "right" | "library" | "prompt";
 export type LeftTab = "prompt" | "godot";
 export type SettingsTab = "project" | "account";
 
@@ -235,12 +235,15 @@ export interface Layout {
   left: number;
   right: number;
   library: number;
+  /** Height of the pinned prompt section at the bottom of the prompt panel. */
+  prompt: number;
 }
 
 export const DEFAULT_LAYOUT: Layout = {
   left: 320,
   right: 330,
-  library: 380
+  library: 380,
+  prompt: 300
 };
 
 export const MIN_INSPECTOR_PREVIEW = 80;
@@ -255,7 +258,8 @@ function clampInspectorPreview(value: unknown): number {
 const PANE_LIMITS: Record<Pane, { min: number; max: number }> = {
   left: { min: 200, max: 900 },
   right: { min: 200, max: 900 },
-  library: { min: 60, max: 1600 }
+  library: { min: 60, max: 1600 },
+  prompt: { min: 160, max: 1600 }
 };
 
 const KEY = "spritebench.ui";
@@ -584,7 +588,8 @@ function read(): Stored {
       layout: {
         left: stored.layout?.left ?? DEFAULT_LAYOUT.left,
         right: stored.layout?.right ?? DEFAULT_LAYOUT.right,
-        library: stored.layout?.library ?? DEFAULT_LAYOUT.library
+        library: stored.layout?.library ?? DEFAULT_LAYOUT.library,
+        prompt: stored.layout?.prompt ?? DEFAULT_LAYOUT.prompt
       },
       inspectorPreview: clampInspectorPreview(stored.inspectorPreview),
       processWorkers: clampProcessWorkers(stored.processWorkers),

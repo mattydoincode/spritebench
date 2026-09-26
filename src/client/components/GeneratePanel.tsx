@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useDoc } from "@/client/stores/doc";
 import { useServer } from "@/client/stores/server";
-import { useUi } from "@/client/stores/ui";
+import { DEFAULT_LAYOUT, useUi } from "@/client/stores/ui";
 import {
   applySizeSelection,
   defaultModelForProvider,
@@ -963,6 +963,7 @@ export function GeneratePanel() {
   const batches = useUi((state) => state.batches);
   const folder = useUi((state) => state.folder);
   const busy = useUi((state) => state.busy);
+  const promptHeight = useUi((state) => state.layout.prompt);
   const store = useServer.getState;
   const ui = useUi.getState;
 
@@ -1031,12 +1032,12 @@ export function GeneratePanel() {
         </TextButton>
         <SnippetLibrary value={promptBody} onLoad={(value) => ui().setPromptBody(value)} />
       </div>
+      {/* Grows with the section; drag the section's top edge to resize. */}
       <textarea
-        rows={6}
         value={promptBody}
         placeholder="a rusty steel footlocker, closed lid, worn paint"
         onChange={(event) => ui().setPromptBody(event.target.value)}
-        className="mb-2"
+        className="mb-2 min-h-16 flex-1 resize-none"
       />
 
       <VariablesEditor />
@@ -1089,7 +1090,15 @@ export function GeneratePanel() {
   );
 
   return (
-    <Panel tabs={<LeftTabs />} footer={prompt}>
+    <Panel
+      tabs={<LeftTabs />}
+      footer={prompt}
+      footerSize={{
+        height: promptHeight,
+        onDrag: (delta) => ui().setPaneSize("prompt", promptHeight - delta),
+        onReset: () => ui().setPaneSize("prompt", DEFAULT_LAYOUT.prompt)
+      }}
+    >
       {!canGenerate ? (
         <p className="mb-3 rounded border border-amber-700 bg-amber-950/40 p-2 text-[11px] text-amber-200">
           You can edit this project but not generate in it. Generation bills the owner&apos;s image

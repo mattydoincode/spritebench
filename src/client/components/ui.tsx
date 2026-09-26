@@ -10,6 +10,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { sectionCollapsed, useUi } from "@/client/stores/ui";
+import { ResizeHandle } from "./ResizeHandle";
 
 /** Open dialogs, oldest first. Only the top one answers Escape. */
 const modalStack: object[] = [];
@@ -381,14 +382,18 @@ export function Panel({
   children,
   actions,
   footer,
+  footerSize,
   className = ""
 }: {
   title?: string;
   /**
    * Pinned under the scrolling body, for the thing the panel exists to do
-   * (the prompt and Create). Scrolls on its own if it outgrows the panel.
+   * (the prompt and Create). A flex column, so one child can take `flex-1`
+   * and absorb the height. Scrolls on its own if its content outgrows it.
    */
   footer?: ReactNode;
+  /** Makes the footer a fixed height with a drag handle along its top edge. */
+  footerSize?: { height: number; onDrag: (delta: number) => void; onReset: () => void };
   /** `PanelTab`s, for a panel that shares its slot. Replaces `title`. */
   tabs?: ReactNode;
   /** Shown after `title`. */
@@ -408,9 +413,24 @@ export function Panel({
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">{children}</div>
       {footer ? (
-        <div className="max-h-[70%] shrink-0 overflow-y-auto border-t border-[var(--color-edge)] bg-[var(--color-ink-800)] p-3">
-          {footer}
-        </div>
+        <>
+          {footerSize ? (
+            <ResizeHandle
+              orientation="horizontal"
+              onDrag={(delta) => footerSize.onDrag(delta)}
+              onReset={footerSize.onReset}
+            />
+          ) : null}
+          <div
+            className={`flex shrink-0 flex-col overflow-y-auto bg-[var(--color-ink-800)] p-3 ${
+              footerSize ? "" : "max-h-[70%] border-t border-[var(--color-edge)]"
+            }`}
+            // Leaves a strip of the body showing however far the handle goes.
+            style={footerSize ? { height: footerSize.height, maxHeight: "calc(100% - 80px)" } : undefined}
+          >
+            {footer}
+          </div>
+        </>
       ) : null}
     </section>
   );
