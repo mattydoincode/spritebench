@@ -111,7 +111,7 @@ export function Modal({
         <header
           className={`flex shrink-0 justify-between gap-2 border-b border-[var(--color-edge)] ${
             tabs
-              ? "h-9 items-stretch px-3"
+              ? "h-10 items-stretch px-3"
               : plain
                 ? "items-center px-5 py-3.5"
                 : "items-center px-3 py-2"
@@ -336,9 +336,16 @@ export function PanelTab({
   selected = true,
   count,
   onClick,
+  size = "panel",
   children
 }: {
   selected?: boolean;
+  /**
+   * `panel` heads a whole panel: switching one swaps everything under it.
+   * `section` switches part of a panel, and is styled like the small section
+   * labels so the two levels are not mistaken for each other.
+   */
+  size?: "panel" | "section";
   /** Muted number after the label, like a library's asset count. */
   count?: number;
   onClick?: () => void;
@@ -349,19 +356,23 @@ export function PanelTab({
   // the button itself.
   const className = `group relative flex shrink-0 items-center ${
     selected
-      ? "after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-[var(--color-accent)]"
+      ? `after:absolute after:inset-x-0 after:-bottom-px after:bg-[var(--color-accent)] ${
+          size === "panel" ? "after:h-0.5" : "after:h-px"
+        }`
       : ""
   }`;
 
   const content = (
     <span
-      className={`flex items-center gap-1.5 text-[11px] font-semibold tracking-wider uppercase transition ${
-        selected ? "text-slate-100" : "text-slate-500 group-hover:text-slate-300"
-      }`}
+      className={`flex items-center gap-1.5 transition ${
+        size === "panel"
+          ? "text-[13px] font-semibold"
+          : "text-[10px] tracking-widest uppercase"
+      } ${selected ? "text-slate-100" : "text-slate-500 group-hover:text-slate-300"}`}
     >
       {children}
       {count !== undefined ? (
-        <span className="font-normal text-slate-500 tabular-nums">{count}</span>
+        <span className="text-[11px] font-normal text-slate-500 tabular-nums">{count}</span>
       ) : null}
     </span>
   );
@@ -404,8 +415,8 @@ export function Panel({
 }) {
   return (
     <section className={`flex h-full min-h-0 flex-col ${className}`}>
-      <header className="flex h-9 shrink-0 items-stretch justify-between gap-2 border-b border-[var(--color-edge)] bg-[var(--color-ink-800)] px-3">
-        <div role={tabs ? "tablist" : undefined} className="flex min-w-0 items-stretch gap-4">
+      <header className="flex h-10 shrink-0 items-stretch justify-between gap-2 border-b border-[var(--color-edge)] bg-[var(--color-ink-800)] px-3">
+        <div role={tabs ? "tablist" : undefined} className="flex min-w-0 items-stretch gap-5">
           {tabs ?? <PanelTab count={count}>{title}</PanelTab>}
         </div>
 
