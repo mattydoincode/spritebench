@@ -21,43 +21,6 @@ import { useServer } from "@/client/stores/server";
 import { DEFAULT_LAYOUT, type Pane, useUi } from "@/client/stores/ui";
 
 /**
- * A collapsed pane, reduced to a strip you can click to get it back.
- *
- * Never collapses to nothing: a pane with no handle is a pane you cannot
- * recover without knowing it was ever there, and the point of collapsing is
- * to give the scene the screen for a minute, not to remove a tool.
- */
-function PaneRail({
-  label,
-  side,
-  onExpand
-}: {
-  label: string;
-  side: "left" | "right" | "bottom";
-  onExpand: () => void;
-}) {
-  // Same glyph family as the collapse chevron in the panel's own header, just
-  // pointing back the way it came.
-  const arrow = side === "left" ? "\u00bb" : side === "right" ? "\u00ab" : "\u02c4";
-
-  return (
-    <button
-      type="button"
-      onClick={onExpand}
-      title={`Show ${label.toLowerCase()}`}
-      className={`flex shrink-0 items-center justify-center gap-2 border-[var(--color-edge)] bg-[var(--color-ink-800)] text-[10px] tracking-wider text-slate-500 uppercase transition hover:bg-[var(--color-ink-700)] hover:text-slate-200 ${
-        side === "bottom"
-          ? "h-6 w-full border-t"
-          : `w-6 flex-col ${side === "left" ? "border-r" : "border-l"}`
-      }`}
-    >
-      <span className="text-[13px] leading-none">{arrow}</span>
-      <span className={side === "bottom" ? "" : "[writing-mode:vertical-rl]"}>{label}</span>
-    </button>
-  );
-}
-
-/**
  * The editor for one project.
  *
  * Which project is decided by the URL, not by a remembered id. That is the
@@ -86,7 +49,6 @@ export function Studio({ projectId }: { projectId: string }) {
   }, []);
 
   const resize = (pane: Pane, size: number) => useUi.getState().setPaneSize(pane, size);
-  const collapse = (pane: Pane) => useUi.getState().togglePane(pane);
 
   // The project list has to load first: `openProject` reads the membership row
   // out of it to know whether this user may edit, which decides whether the
@@ -183,67 +145,45 @@ export function Studio({ projectId }: { projectId: string }) {
   return (
     <main className="studio-root relative flex h-screen flex-col">
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {layout.collapsed.left ? (
-          <PaneRail
-            label={leftTab === "godot" ? "Godot" : "Prompt"}
-            side="left"
-            onExpand={() => collapse("left")}
-          />
-        ) : (
-          <>
-            <div className="flex min-h-0 shrink-0 flex-col overflow-hidden" style={{ width: layout.left }}>
-              <ProjectBar />
-              <div className="min-h-0 flex-1">
-                {leftTab === "godot" ? <EnginePanel /> : <GeneratePanel />}
-              </div>
-            </div>
+        <div className="flex min-h-0 shrink-0 flex-col overflow-hidden" style={{ width: layout.left }}>
+          <ProjectBar />
+          <div className="min-h-0 flex-1">
+            {leftTab === "godot" ? <EnginePanel /> : <GeneratePanel />}
+          </div>
+        </div>
 
-            <ResizeHandle
-              orientation="vertical"
-              onDrag={(delta) => resize("left", layout.left + delta)}
-              onReset={() => resize("left", DEFAULT_LAYOUT.left)}
-            />
-          </>
-        )}
+        <ResizeHandle
+          orientation="vertical"
+          onDrag={(delta) => resize("left", layout.left + delta)}
+          onReset={() => resize("left", DEFAULT_LAYOUT.left)}
+        />
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <Scene />
 
-          {layout.collapsed.library ? (
-            <PaneRail label="Library" side="bottom" onExpand={() => collapse("library")} />
-          ) : (
-            <>
-              <ResizeHandle
-                orientation="horizontal"
-                onDrag={(delta) => resize("library", layout.library - delta)}
-                onReset={() => resize("library", DEFAULT_LAYOUT.library)}
-              />
+          <ResizeHandle
+            orientation="horizontal"
+            onDrag={(delta) => resize("library", layout.library - delta)}
+            onReset={() => resize("library", DEFAULT_LAYOUT.library)}
+          />
 
-              <div
-                className="min-h-0 shrink-0 overflow-hidden"
-                style={{ height: layout.library, maxHeight: "100%" }}
-              >
-                <LibraryPanel />
-              </div>
-            </>
-          )}
+          <div
+            className="min-h-0 shrink-0 overflow-hidden"
+            style={{ height: layout.library, maxHeight: "100%" }}
+          >
+            <LibraryPanel />
+          </div>
         </div>
 
-        {layout.collapsed.right ? (
-          <PaneRail label="Inspector" side="right" onExpand={() => collapse("right")} />
-        ) : (
-          <>
-            <ResizeHandle
-              orientation="vertical"
-              onDrag={(delta) => resize("right", layout.right - delta)}
-              onReset={() => resize("right", DEFAULT_LAYOUT.right)}
-            />
+        <ResizeHandle
+          orientation="vertical"
+          onDrag={(delta) => resize("right", layout.right - delta)}
+          onReset={() => resize("right", DEFAULT_LAYOUT.right)}
+        />
 
-            <div className="flex min-h-0 shrink-0 flex-col overflow-hidden" style={{ width: layout.right }}>
-              <InspectorPanel />
-            </div>
-          </>
-        )}
+        <div className="flex min-h-0 shrink-0 flex-col overflow-hidden" style={{ width: layout.right }}>
+          <InspectorPanel />
+        </div>
       </div>
 
       <ProcessDock />

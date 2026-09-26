@@ -9,7 +9,7 @@ import {
   type ReactNode
 } from "react";
 import { createPortal } from "react-dom";
-import { sectionCollapsed, type Pane, useUi } from "@/client/stores/ui";
+import { sectionCollapsed, useUi } from "@/client/stores/ui";
 
 /** Open dialogs, oldest first. Only the top one answers Escape. */
 const modalStack: object[] = [];
@@ -282,34 +282,6 @@ export function Bubble({
   );
 }
 
-/**
- * Which way a docked panel folds away, so its chevron points at the exit.
- *
- * Deliberately double angle quotes rather than the solid triangles the
- * scene bubbles use. The two collapse in different directions -- a panel
- * slides out of the layout, a bubble rolls up in place -- and telling them
- * apart at a glance is worth two glyph families.
- */
-const COLLAPSE_ARROW: Record<Pane, string> = {
-  left: "\u00ab",
-  right: "\u00bb",
-  library: "\u02c5"
-};
-
-function CollapseChevron({ pane }: { pane: Pane }) {
-  return (
-    <button
-      type="button"
-      title="Collapse this panel"
-      aria-label="Collapse this panel"
-      onClick={() => useUi.getState().togglePane(pane)}
-      className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-[var(--color-edge)] bg-[var(--color-ink-700)] text-[13px] leading-none text-slate-400 transition hover:border-slate-500 hover:bg-[var(--color-ink-500)] hover:text-white"
-    >
-      {COLLAPSE_ARROW[pane]}
-    </button>
-  );
-}
-
 export function Tabs({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div
@@ -353,7 +325,6 @@ export function Panel({
   lead,
   children,
   actions,
-  pane,
   className = ""
 }: {
   title?: string;
@@ -361,21 +332,12 @@ export function Panel({
   lead?: ReactNode;
   children: ReactNode;
   actions?: ReactNode;
-  /** Set to give this panel a collapse chevron in its header. */
-  pane?: Pane;
   className?: string;
 }) {
   return (
     <section className={`flex h-full min-h-0 flex-col ${className}`}>
       <header className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--color-edge)] bg-[var(--color-ink-800)] px-3 py-2">
-        {/*
-          The chevron sits on whichever side the panel folds towards, which is
-          the side the scene is on. For the inspector that is the inner
-          edge, so it leads the title rather than trailing the actions.
-        */}
         <div className="flex min-w-0 items-center gap-1.5">
-          {pane === "right" ? <CollapseChevron pane={pane} /> : null}
-
           {lead ?? (
             <h2 className="truncate text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
               {title}
@@ -385,7 +347,6 @@ export function Panel({
 
         <div className="flex items-center gap-1">
           {actions}
-          {pane && pane !== "right" ? <CollapseChevron pane={pane} /> : null}
         </div>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">{children}</div>

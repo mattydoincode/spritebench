@@ -32,7 +32,7 @@ export function JobInspector({ job }: { job: JobRecord }) {
     : null;
 
   return (
-    <Panel title="Inspector" pane="right">
+    <Panel title="Inspector">
       <Row className="mb-2 justify-between">
         <span className={`text-[11px] ${STATUS_STYLES[job.status]}`}>
           {job.status}

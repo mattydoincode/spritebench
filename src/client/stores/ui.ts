@@ -182,11 +182,7 @@ interface Stored extends ProjectDraft {
    */
   collapsedSections: Record<string, boolean>;
   /**
-   * Docked panel sizes and which are collapsed.
-   *
-   * In this store rather than in the studio's own state so that a panel can
-   * collapse itself from its own header without the layout being threaded
-   * through every component that might want a chevron.
+   * Docked panel sizes.
    */
   layout: Layout;
   /**
@@ -240,14 +236,12 @@ export interface Layout {
   left: number;
   right: number;
   library: number;
-  collapsed: Record<Pane, boolean>;
 }
 
 export const DEFAULT_LAYOUT: Layout = {
   left: 320,
   right: 330,
-  library: 380,
-  collapsed: { left: false, right: false, library: false }
+  library: 380
 };
 
 export const MIN_INSPECTOR_PREVIEW = 80;
@@ -589,9 +583,9 @@ function read(): Stored {
       collapsedFolders: readCollapsedFolders(stored.collapsedFolders),
       collapsedSections: readCollapsedSections(stored.collapsedSections),
       layout: {
-        ...DEFAULT_LAYOUT,
-        ...stored.layout,
-        collapsed: { ...DEFAULT_LAYOUT.collapsed, ...stored.layout?.collapsed }
+        left: stored.layout?.left ?? DEFAULT_LAYOUT.left,
+        right: stored.layout?.right ?? DEFAULT_LAYOUT.right,
+        library: stored.layout?.library ?? DEFAULT_LAYOUT.library
       },
       inspectorPreview: clampInspectorPreview(stored.inspectorPreview),
       processWorkers: clampProcessWorkers(stored.processWorkers),
@@ -704,7 +698,6 @@ interface UiState extends Stored {
   toggleFolder: (folder: string) => void;
   toggleSection: (id: string) => void;
   setPaneSize: (pane: Pane, size: number) => void;
-  togglePane: (pane: Pane) => void;
   setLeftTab: (tab: LeftTab) => void;
   setInspectorPreview: (size: number) => void;
   setProcessWorkers: (count: number) => void;
@@ -1004,17 +997,6 @@ export const useUi = create<UiState>((set, get) => {
 
     setLeftTab(tab) {
       set({ leftTab: tab });
-    },
-
-    togglePane(pane) {
-      const layout = get().layout;
-      set({
-        layout: {
-          ...layout,
-          collapsed: { ...layout.collapsed, [pane]: !layout.collapsed[pane] }
-        }
-      });
-      save();
     },
 
     setProviderKey(projectId, providerKeyId) {

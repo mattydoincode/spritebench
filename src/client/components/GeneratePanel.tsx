@@ -1033,7 +1033,7 @@ export function GeneratePanel() {
   });
 
   return (
-    <Panel pane="left" lead={<LeftTabs />} actions={<ProviderHeader />}>
+    <Panel lead={<LeftTabs />} actions={<ProviderHeader />}>
       {!canGenerate ? (
         <p className="mb-3 rounded border border-amber-700 bg-amber-950/40 p-2 text-[11px] text-amber-200">
           You can edit this project but not generate in it. Generation bills the owner&apos;s image

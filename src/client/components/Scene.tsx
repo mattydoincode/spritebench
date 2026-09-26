@@ -2939,7 +2939,6 @@ function StagedItemControls({ item, asset }: { item: StagedItem; asset: Resolved
             const ui = useUi.getState();
             ui.select(asset.id, false);
             if (item.sequenceId) ui.setActiveSequence(item.sequenceId);
-            if (ui.layout.collapsed.right) ui.togglePane("right");
           }}
         >
           inspect

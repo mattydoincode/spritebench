@@ -120,7 +120,7 @@ export function InspectorPanel() {
 
   if (!asset) {
     return (
-      <Panel title="Inspector" pane="right">
+      <Panel title="Inspector">
         <p className="text-[11px] text-slate-500">
           Select an asset in the library to tune its size, cutout, and palette. Every asset keeps
           its own snapshot, so editing one never touches the others.
@@ -152,7 +152,6 @@ export function InspectorPanel() {
   return (
     <Panel
       title="Inspector"
-      pane="right"
       actions={
         <Button
           variant="danger"
