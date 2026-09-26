@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useServer } from "@/client/stores/server";
 import { useUi } from "@/client/stores/ui";
-import { Button } from "./ui";
 
 /**
  * Which project you are in, a way out, and settings.
@@ -21,14 +20,15 @@ export function ProjectBar() {
 
   return (
     <header className="flow-root shrink-0 border-b border-[var(--color-edge)] bg-[var(--color-ink-700)] px-3 py-1.5 text-[11px] leading-6">
-      <Button
-        variant="ghost"
-        className="float-right ml-2"
+      {/* Same h-6 box as the logo and breadcrumb, so all three centre on one line. */}
+      <button
+        type="button"
         title="Project defaults, plus your account and keys"
         onClick={() => useUi.getState().openSettings()}
+        className="float-right ml-2 inline-flex h-6 items-center rounded px-2 text-xs text-slate-300 transition hover:bg-[var(--color-ink-600)] hover:text-white"
       >
         settings
-      </Button>
+      </button>
 
       <Link
         href="/projects"
