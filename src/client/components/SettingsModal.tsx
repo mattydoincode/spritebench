@@ -17,9 +17,8 @@ import {
   Modal,
   Row,
   Select,
+  PanelTab,
   Slider,
-  Tab,
-  Tabs,
   TextButton,
   Toggle
 } from "./ui";
@@ -56,15 +55,16 @@ export function SettingsModal() {
     <Modal
       title="Settings"
       width={720}
-      actions={
-        <Tabs label="Settings">
-          <Tab selected={tab === "project"} onClick={() => setTab("project")}>
+      pinTop
+      tabs={
+        <>
+          <PanelTab selected={tab === "project"} onClick={() => setTab("project")}>
             Project
-          </Tab>
-          <Tab selected={tab === "account"} onClick={() => setTab("account")}>
+          </PanelTab>
+          <PanelTab selected={tab === "account"} onClick={() => setTab("account")}>
             Account &amp; keys
-          </Tab>
-        </Tabs>
+          </PanelTab>
+        </>
       }
       onClose={() => useUi.getState().closeSettings()}
     >

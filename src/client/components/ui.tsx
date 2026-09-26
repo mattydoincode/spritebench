@@ -51,7 +51,9 @@ export function Modal({
   actions,
   footer,
   width = 760,
-  variant = "dense"
+  variant = "dense",
+  tabs,
+  pinTop = false
 }: {
   title: string;
   onClose: () => void;
@@ -65,6 +67,14 @@ export function Modal({
    * you read rather than a panel you work in.
    */
   variant?: "dense" | "plain";
+  /** `PanelTab`s, shown in place of the title, as in a docked panel. */
+  tabs?: ReactNode;
+  /**
+   * Hang from a fixed point near the top instead of centring. For a dialog
+   * whose height changes while it is open (switching tabs), so it grows
+   * downward rather than jumping.
+   */
+  pinTop?: boolean;
 }) {
   const plain = variant === "plain";
 
@@ -85,7 +95,9 @@ export function Modal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
+      className={`fixed inset-0 z-50 flex justify-center bg-black/70 p-6 ${
+        pinTop ? "items-start pt-[15vh]" : "items-center"
+      }`}
       onPointerDown={onClose}
     >
       <div
@@ -96,19 +108,29 @@ export function Modal({
         }`}
       >
         <header
-          className={`flex shrink-0 items-center justify-between gap-2 border-b border-[var(--color-edge)] ${
-            plain ? "px-5 py-3.5" : "px-3 py-2"
+          className={`flex shrink-0 justify-between gap-2 border-b border-[var(--color-edge)] ${
+            tabs
+              ? "h-9 items-stretch px-3"
+              : plain
+                ? "items-center px-5 py-3.5"
+                : "items-center px-3 py-2"
           }`}
         >
-          <h2
-            className={
-              plain
-                ? "text-lg font-semibold text-white"
-                : "text-[11px] font-semibold tracking-wider text-slate-300 uppercase"
-            }
-          >
-            {title}
-          </h2>
+          {tabs ? (
+            <div role="tablist" aria-label={title} className="flex min-w-0 items-stretch gap-4">
+              {tabs}
+            </div>
+          ) : (
+            <h2
+              className={
+                plain
+                  ? "text-lg font-semibold text-white"
+                  : "text-[11px] font-semibold tracking-wider text-slate-300 uppercase"
+              }
+            >
+              {title}
+            </h2>
+          )}
 
           <div className="flex items-center gap-1">
             {actions}
