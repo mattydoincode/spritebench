@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useDoc } from "@/client/stores/doc";
 import { useServer } from "@/client/stores/server";
-import { DEFAULT_LAYOUT, useUi } from "@/client/stores/ui";
+import { defaultPaneSize, useUi } from "@/client/stores/ui";
 import {
   applySizeSelection,
   defaultModelForProvider,
@@ -834,7 +834,7 @@ export function GeneratePanel() {
       footerSize={{
         height: promptHeight,
         onDrag: (delta) => ui().setPaneSize("prompt", promptHeight - delta),
-        onReset: () => ui().setPaneSize("prompt", DEFAULT_LAYOUT.prompt)
+        onReset: () => ui().setPaneSize("prompt", defaultPaneSize("prompt"))
       }}
     >
       {!canGenerate ? (

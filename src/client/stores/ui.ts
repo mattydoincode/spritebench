@@ -239,12 +239,53 @@ export interface Layout {
   prompt: number;
 }
 
-export const DEFAULT_LAYOUT: Layout = {
-  left: 320,
-  right: 330,
-  library: 380,
-  prompt: 300
+const PANE_LIMITS: Record<Pane, { min: number; max: number }> = {
+  left: { min: 200, max: 900 },
+  right: { min: 200, max: 900 },
+  library: { min: 60, max: 1600 },
+  prompt: { min: 160, max: 1600 }
 };
+
+function clampPane(pane: Pane, size: number): number {
+  const { min, max } = PANE_LIMITS[pane];
+  return Math.min(max, Math.max(min, Math.round(size)));
+}
+
+/**
+ * Default sizes as shares of the window, so a first open or a double-click
+ * reset fits the screen it is on: side panels a fifth of the width each, the
+ * library about a third of the height, the prompt 40% of the left panel.
+ * Stored sizes stay in pixels -- dragging is in pixels.
+ */
+const LAYOUT_SHARES: Record<Pane, number> = {
+  left: 0.2,
+  right: 0.2,
+  library: 0.35,
+  prompt: 0.4
+};
+
+/** Project bar plus panel header, above the left panel's body. */
+const LEFT_CHROME = 80;
+
+/** Stands in for the window where there is none, so server and first client render agree. */
+const FALLBACK_VIEWPORT = { width: 1600, height: 900 };
+
+export function defaultLayout(
+  viewport = typeof window === "undefined"
+    ? FALLBACK_VIEWPORT
+    : { width: window.innerWidth, height: window.innerHeight }
+): Layout {
+  return {
+    left: clampPane("left", viewport.width * LAYOUT_SHARES.left),
+    right: clampPane("right", viewport.width * LAYOUT_SHARES.right),
+    library: clampPane("library", viewport.height * LAYOUT_SHARES.library),
+    prompt: clampPane("prompt", (viewport.height - LEFT_CHROME) * LAYOUT_SHARES.prompt)
+  };
+}
+
+export function defaultPaneSize(pane: Pane): number {
+  return defaultLayout()[pane];
+}
 
 export const MIN_INSPECTOR_PREVIEW = 80;
 export const MAX_INSPECTOR_PREVIEW = 480;
@@ -254,13 +295,6 @@ function clampInspectorPreview(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_INSPECTOR_PREVIEW;
   return Math.min(MAX_INSPECTOR_PREVIEW, Math.max(MIN_INSPECTOR_PREVIEW, Math.round(value)));
 }
-
-const PANE_LIMITS: Record<Pane, { min: number; max: number }> = {
-  left: { min: 200, max: 900 },
-  right: { min: 200, max: 900 },
-  library: { min: 60, max: 1600 },
-  prompt: { min: 160, max: 1600 }
-};
 
 const KEY = "spritebench.ui";
 
@@ -560,7 +594,8 @@ const DEFAULTS: Stored = {
   collapsedBubbles: { view: true, elements: true, scenes: true, tree: true },
   collapsedFolders: {},
   collapsedSections: {},
-  layout: DEFAULT_LAYOUT,
+  // Real window shares are applied in `hydrate`, before first paint.
+  layout: defaultLayout(FALLBACK_VIEWPORT),
   inspectorPreview: DEFAULT_INSPECTOR_PREVIEW,
   processWorkers: DEFAULT_PROCESS_WORKERS
 };
@@ -586,10 +621,10 @@ function read(): Stored {
       collapsedFolders: readCollapsedFolders(stored.collapsedFolders),
       collapsedSections: readCollapsedSections(stored.collapsedSections),
       layout: {
-        left: stored.layout?.left ?? DEFAULT_LAYOUT.left,
-        right: stored.layout?.right ?? DEFAULT_LAYOUT.right,
-        library: stored.layout?.library ?? DEFAULT_LAYOUT.library,
-        prompt: stored.layout?.prompt ?? DEFAULT_LAYOUT.prompt
+        left: stored.layout?.left ?? defaultPaneSize("left"),
+        right: stored.layout?.right ?? defaultPaneSize("right"),
+        library: stored.layout?.library ?? defaultPaneSize("library"),
+        prompt: stored.layout?.prompt ?? defaultPaneSize("prompt")
       },
       inspectorPreview: clampInspectorPreview(stored.inspectorPreview),
       processWorkers: clampProcessWorkers(stored.processWorkers),
@@ -994,10 +1029,7 @@ export const useUi = create<UiState>((set, get) => {
     },
 
     setPaneSize(pane, size) {
-      const { min, max } = PANE_LIMITS[pane];
-      set({
-        layout: { ...get().layout, [pane]: Math.min(max, Math.max(min, Math.round(size))) }
-      });
+      set({ layout: { ...get().layout, [pane]: clampPane(pane, size) } });
       save();
     },
 

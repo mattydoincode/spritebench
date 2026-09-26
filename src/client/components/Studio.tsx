@@ -17,7 +17,7 @@ import { anyModalOpen } from "@/client/components/ui";
 import { usePrefetchNewAssets } from "@/client/prefetch";
 import { useDoc } from "@/client/stores/doc";
 import { useProjectLoaded, useServer } from "@/client/stores/server";
-import { DEFAULT_LAYOUT, type Pane, useUi } from "@/client/stores/ui";
+import { defaultPaneSize, type Pane, useUi } from "@/client/stores/ui";
 import type { StudioBootstrap } from "@/shared/studioBootstrap";
 
 /** Holds the scene's space while the project and its document load. */
@@ -142,7 +142,7 @@ export function Studio({ bootstrap }: { bootstrap: StudioBootstrap }) {
         <ResizeHandle
           orientation="vertical"
           onDrag={(delta) => resize("left", layout.left + delta)}
-          onReset={() => resize("left", DEFAULT_LAYOUT.left)}
+          onReset={() => resize("left", defaultPaneSize("left"))}
         />
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -151,7 +151,7 @@ export function Studio({ bootstrap }: { bootstrap: StudioBootstrap }) {
           <ResizeHandle
             orientation="horizontal"
             onDrag={(delta) => resize("library", layout.library - delta)}
-            onReset={() => resize("library", DEFAULT_LAYOUT.library)}
+            onReset={() => resize("library", defaultPaneSize("library"))}
           />
 
           <div
@@ -165,7 +165,7 @@ export function Studio({ bootstrap }: { bootstrap: StudioBootstrap }) {
         <ResizeHandle
           orientation="vertical"
           onDrag={(delta) => resize("right", layout.right - delta)}
-          onReset={() => resize("right", DEFAULT_LAYOUT.right)}
+          onReset={() => resize("right", defaultPaneSize("right"))}
         />
 
         <div className="flex min-h-0 shrink-0 flex-col overflow-hidden" style={{ width: layout.right }}>
