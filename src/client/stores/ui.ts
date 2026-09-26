@@ -177,8 +177,8 @@ interface Stored extends ProjectDraft {
   /**
    * Inspector / generate sections rolled up to their divider.
    *
-   * Missing keys use DEFAULT_COLLAPSED_SECTIONS (model and cleanup start
-   * closed; everything else starts open).
+   * Missing keys use DEFAULT_COLLAPSED_SECTIONS (cleanup starts closed;
+   * everything else starts open).
    */
   collapsedSections: Record<string, boolean>;
   /**
@@ -206,7 +206,6 @@ export type BubbleId = "view" | "elements" | "scenes" | "tree";
 
 /** Sections that start closed — matches the disclosures they replaced. */
 export const DEFAULT_COLLAPSED_SECTIONS: Record<string, boolean> = {
-  "generate.model": true,
   "inspector.cleanup": true
 };
 

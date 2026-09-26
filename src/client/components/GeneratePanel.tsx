@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useDoc } from "@/client/stores/doc";
 import { useServer } from "@/client/stores/server";
-import { sectionCollapsed, useUi } from "@/client/stores/ui";
+import { useUi } from "@/client/stores/ui";
 import {
   applySizeSelection,
   defaultModelForProvider,
@@ -61,15 +61,10 @@ function keyCaption(key: { provider: string; label: string; keySuffix: string })
 }
 
 /**
- * The generate header: which key is about to be billed, and a toggle for the
- * model/size block that used to live at the bottom of the panel.
- *
- * Always shown, even with one key, so switching providers is a dropdown rather
- * than a trip to settings. The chevron is the model/size disclosure -- putting
- * those fields behind it keeps the prompt at the top of the working area.
+ * Which key is about to be billed. Always a dropdown, even with one key, so
+ * switching providers is a choice here rather than a trip to settings.
  */
-function ProviderHeader() {
-  const expanded = !useUi((state) => sectionCollapsed("generate.model", state.collapsedSections));
+function KeyField() {
   const project = useServer((state) => state.project);
   const keys = useServer((state) => state.projectKeys);
   const remembered = useUi((state) => (project ? state.providerKeyId[project.id] : undefined));
@@ -78,31 +73,30 @@ function ProviderHeader() {
 
   if (keys.length === 0) {
     return (
-      <div className="flex min-w-0 items-center gap-1">
+      <Field label="Key">
         {project.isOwner ? (
           <button
             type="button"
             onClick={() => useUi.getState().openSettings("account")}
-            className="truncate text-[11px] text-amber-300 hover:underline"
+            className="text-[11px] text-amber-300 hover:underline"
           >
             add a key
           </button>
         ) : (
-          <span className="truncate text-[11px] text-amber-300">no key</span>
+          <span className="text-[11px] text-amber-300">no key</span>
         )}
-      </div>
+      </Field>
     );
   }
 
   const selected = keys.some((key) => key.id === remembered) ? remembered : keys[0].id;
 
   return (
-    <div className="flex min-w-0 items-center gap-1">
+    <Field label="Key">
       <select
         value={selected ?? keys[0].id}
         title={project.isOwner ? "Which of your keys pays" : `${project.name} owner's key`}
         onChange={(event) => useUi.getState().setProviderKey(project.id, event.target.value)}
-        className="min-w-0 max-w-[11rem] truncate"
       >
         {keys.map((key) => (
           <option key={key.id} value={key.id}>
@@ -111,17 +105,7 @@ function ProviderHeader() {
           </option>
         ))}
       </select>
-
-      <button
-        type="button"
-        title={expanded ? "Hide model and size" : "Show model and size"}
-        aria-expanded={expanded}
-        onClick={() => useUi.getState().toggleSection("generate.model")}
-        className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-[var(--color-edge)] bg-[var(--color-ink-700)] text-[11px] leading-none text-slate-400 hover:border-slate-500 hover:text-white"
-      >
-        {expanded ? "\u25b4" : "\u25be"}
-      </button>
-    </div>
+    </Field>
   );
 }
 
@@ -169,7 +153,9 @@ function ModelAndSize() {
     sheet && sheetOwnsCanvas ? snapRequestSize(sheet.size, generation.model) : null;
 
   return (
-    <div className="mb-3 rounded border border-[var(--color-edge)] bg-[var(--color-ink-800)]/60 p-2">
+    <>
+      <KeyField />
+
       <Field label="Model">
         <Select
           value={offeredIds.includes(generation.model) ? generation.model : (offeredIds[0] ?? generation.model)}
@@ -180,15 +166,7 @@ function ModelAndSize() {
               return [id, info ? `${info.label}` : id];
             })
           )}
-          onChange={(value) => {
-            const next = findModel(value);
-            store().setGeneration({
-              model: value,
-              imageCount: next
-                ? Math.min(generation.imageCount, next.maxImagesPerRequest)
-                : generation.imageCount
-            });
-          }}
+          onChange={(value) => store().setGeneration({ model: value })}
         />
       </Field>
 
@@ -273,7 +251,7 @@ function ModelAndSize() {
       ) : null}
 
       {sizeHint ? <p className="text-[10px] text-slate-500">{sizeHint}</p> : null}
-    </div>
+    </>
   );
 }
 
@@ -991,8 +969,6 @@ export function GeneratePanel() {
   const canGenerate = project !== null && (project.isOwner || project.canGenerate);
   const projectHasKey = project === null || projectKeys.length > 0;
 
-  const showModel = !useUi((state) => sectionCollapsed("generate.model", state.collapsedSections));
-
   const generation = settings.generation;
   const processing = settings.processing;
   const projectCutout = useDoc((state) => state.settings.cutout);
@@ -1003,12 +979,8 @@ export function GeneratePanel() {
     const current = findModel(generation.model);
     if (current && current.provider === billingKey.provider) return;
 
-    const next = findModel(defaultModelForProvider(billingKey.provider));
-    store().setGeneration({
-      model: next?.id ?? defaultModelForProvider(billingKey.provider),
-      imageCount: next ? Math.min(generation.imageCount, next.maxImagesPerRequest) : 1
-    });
-  }, [billingKey, generation.imageCount, generation.model, store]);
+    store().setGeneration({ model: defaultModelForProvider(billingKey.provider) });
+  }, [billingKey, generation.model, store]);
 
   const sheetOn = animation.enabled || itemGrid.enabled;
   const promptSpec = { prefix: "", body: promptBody, suffix: "" };
@@ -1018,7 +990,7 @@ export function GeneratePanel() {
     prompt: promptSpec,
     variables,
     batches,
-    imageCount: generation.imageCount,
+    imageCount: 1,
     sheet: animation.enabled || itemGrid.enabled,
     loopSteps: loop.enabled ? loop.steps : 0,
     chunkCells: chunk.enabled ? chunk.columns * chunk.rows : 0,
@@ -1045,8 +1017,79 @@ export function GeneratePanel() {
     many: create.images > 1 && !loop.enabled && !chunk.enabled
   });
 
+  const prompt = (
+    <>
+      <div className="mb-1 flex items-center gap-2">
+        <span className="text-[10px] tracking-widest text-slate-500 uppercase">prompt</span>
+        <span className="flex-1" />
+        <span className="text-[10px] text-slate-500">{promptBody.length} chars</span>
+        <TextButton
+          title="Reset prompt, modes, templates, and batches. Keeps the current model."
+          onClick={() => store().resetGenerateDefaults()}
+        >
+          reset
+        </TextButton>
+        <SnippetLibrary value={promptBody} onLoad={(value) => ui().setPromptBody(value)} />
+      </div>
+      <textarea
+        rows={6}
+        value={promptBody}
+        placeholder="a rusty steel footlocker, closed lid, worn paint"
+        onChange={(event) => ui().setPromptBody(event.target.value)}
+        className="mb-2"
+      />
+
+      <VariablesEditor />
+
+      <details className="mb-2">
+        <summary className="cursor-pointer text-[11px] text-slate-400">
+          Preview composed prompt
+          {expansions.length > 1 ? ` · first of ${expansions.length}` : ""}
+        </summary>
+        <pre className="mt-1 max-h-40 overflow-auto rounded bg-[var(--color-ink-900)] p-2 text-[10px] whitespace-pre-wrap text-slate-400">
+          {(expansions[0] ? composePrompt(expansions[0].prompt) : composed) || "(empty)"}
+          {expansions.length > 1 ? `\n\n+${expansions.length - 1} more` : ""}
+        </pre>
+      </details>
+
+      <div className="flex items-center gap-2">
+        <Button
+          variant="primary"
+          className="flex-1 py-1.5 text-sm"
+          disabled={busy !== null || !canGenerate || create.blocked !== null}
+          title={create.blocked ?? undefined}
+          onClick={() => void store().generate()}
+        >
+          {busy === "queueing"
+            ? "queueing..."
+            : create.images > 1
+              ? `Create ×${create.images}`
+              : "Create"}
+        </Button>
+        <label
+          className="flex shrink-0 items-center gap-1.5 text-[10px] tracking-wider text-slate-500 uppercase"
+          title="Batches: how many jobs to run in parallel"
+        >
+          batches
+          <NumberInput
+            integer
+            value={batches}
+            min={1}
+            width={44}
+            onChange={(value) => ui().setBatches(value)}
+          />
+        </label>
+      </div>
+      {create.blocked ? (
+        <p className="mt-1 text-[10px] leading-snug text-amber-300">{create.blocked}</p>
+      ) : create.breakdown ? (
+        <p className="mt-1 text-[10px] leading-snug text-slate-500">{create.breakdown}</p>
+      ) : null}
+    </>
+  );
+
   return (
-    <Panel tabs={<LeftTabs />} actions={<ProviderHeader />}>
+    <Panel tabs={<LeftTabs />} footer={prompt}>
       {!canGenerate ? (
         <p className="mb-3 rounded border border-amber-700 bg-amber-950/40 p-2 text-[11px] text-amber-200">
           You can edit this project but not generate in it. Generation bills the owner&apos;s image
@@ -1072,87 +1115,9 @@ export function GeneratePanel() {
         </p>
       ) : null}
 
-      {showModel ? <ModelAndSize /> : null}
-
-      <Section id="generate.prompt" label="prompt">
-        <div className="mb-2">
-          <div className="mb-1 flex items-center gap-2">
-            <span className="text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
-              Prompt
-            </span>
-            <span className="flex-1" />
-            <span className="text-[10px] text-slate-500">{promptBody.length} chars</span>
-            <TextButton
-              title="Reset prompt, modes, templates, and job settings. Keeps the current model."
-              onClick={() => store().resetGenerateDefaults()}
-            >
-              reset
-            </TextButton>
-            <SnippetLibrary value={promptBody} onLoad={(value) => ui().setPromptBody(value)} />
-          </div>
-          <textarea
-            rows={8}
-            value={promptBody}
-            placeholder="a rusty steel footlocker, closed lid, worn paint"
-            onChange={(event) => ui().setPromptBody(event.target.value)}
-          />
-        </div>
-
-        <VariablesEditor />
-
-        <details className="mb-2">
-          <summary className="cursor-pointer text-[11px] text-slate-400">
-            Preview composed prompt
-            {expansions.length > 1 ? ` · first of ${expansions.length}` : ""}
-          </summary>
-          <pre className="mt-1 max-h-40 overflow-auto rounded bg-[var(--color-ink-800)] p-2 text-[10px] whitespace-pre-wrap text-slate-400">
-            {(expansions[0] ? composePrompt(expansions[0].prompt) : composed) || "(empty)"}
-            {expansions.length > 1 ? `\n\n+${expansions.length - 1} more` : ""}
-          </pre>
-        </details>
+      <Section id="generate.model" label="model">
+        <ModelAndSize />
       </Section>
-
-      <Field
-        label="Folder"
-        hint={folderHint ? `defaults to ${folderHint}` : "optional"}
-      >
-        <input
-          type="text"
-          value={folder}
-          placeholder={folderHint || "library folder"}
-          maxLength={255}
-          onChange={(event) => ui().setFolder(event.target.value)}
-        />
-      </Field>
-
-      {canAnimate ? (
-        <Toggle
-          label="Collect into an animation"
-          checked={animateExpansions}
-          onChange={(value) => ui().setAnimateExpansions(value)}
-        />
-      ) : null}
-
-      <Button
-        variant="primary"
-        className="mb-1 w-full py-1.5 text-sm"
-        disabled={busy !== null || !canGenerate || create.blocked !== null}
-        title={create.blocked ?? undefined}
-        onClick={() => void store().generate()}
-      >
-        {busy === "queueing"
-          ? "queueing..."
-          : create.images > 1
-            ? `Create ×${create.images}`
-            : "Create"}
-      </Button>
-      {create.blocked ? (
-        <p className="mb-3 text-[10px] leading-snug text-amber-300">{create.blocked}</p>
-      ) : create.breakdown ? (
-        <p className="mb-3 text-[10px] leading-snug text-slate-500">{create.breakdown}</p>
-      ) : (
-        <div className="mb-3" />
-      )}
 
       <Section id="generate.modes" label="modes">
         <LoopMode canEdit={modelOrDefault(generation.model).supportsEdit} />
@@ -1162,43 +1127,24 @@ export function GeneratePanel() {
         <ItemGridMode />
       </Section>
 
-      <Section id="generate.job" label="job">
-        <Row className="mb-2">
-          <div className="flex-1">
-            <Field label="Batches" hint="parallel jobs">
-              <NumberInput value={batches} min={1} onChange={(value) => ui().setBatches(value)} />
-            </Field>
-          </div>
-          <div className="flex-1">
-            <Field label="Images per job">
-              <NumberInput
-                value={
-                  loop.enabled || chunk.enabled || each.enabled || animation.enabled || itemGrid.enabled || (canAnimate && animateExpansions)
-                    ? 1
-                    : generation.imageCount
-                }
-                min={1}
-                max={modelOrDefault(generation.model).maxImagesPerRequest}
-                disabled={
-                  loop.enabled ||
-                  chunk.enabled ||
-                  each.enabled ||
-                  animation.enabled ||
-                  itemGrid.enabled ||
-                  (canAnimate && animateExpansions)
-                }
-                onChange={(value) =>
-                  store().setGeneration({
-                    imageCount: Math.min(
-                      modelOrDefault(generation.model).maxImagesPerRequest,
-                      Math.max(1, value)
-                    )
-                  })
-                }
-              />
-            </Field>
-          </div>
-        </Row>
+      <Section id="generate.output" label="output">
+        <Field label="Folder" hint={folderHint ? `defaults to ${folderHint}` : "optional"}>
+          <input
+            type="text"
+            value={folder}
+            placeholder={folderHint || "library folder"}
+            maxLength={255}
+            onChange={(event) => ui().setFolder(event.target.value)}
+          />
+        </Field>
+
+        {canAnimate ? (
+          <Toggle
+            label="Collect into an animation"
+            checked={animateExpansions}
+            onChange={(value) => ui().setAnimateExpansions(value)}
+          />
+        ) : null}
       </Section>
 
       <Section id="generate.size" label="size">

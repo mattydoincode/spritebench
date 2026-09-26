@@ -598,6 +598,8 @@ export const useServer = create<ServerState>((set, get) => {
           body: JSON.stringify({
             promptBody: ui.promptBody,
             providerKeyId: get().billingKeyId(),
+            // One image per job: more images come from batches. A stored
+            // imageCount from before that has no control left to change it.
             generation: sheet
               ? {
                   ...settings.generation,
@@ -605,9 +607,7 @@ export const useServer = create<ServerState>((set, get) => {
                   size: requestSize,
                   imageCount: 1
                 }
-              : loop || chunk || each || animate
-                ? { ...settings.generation, imageCount: 1 }
-                : settings.generation,
+              : { ...settings.generation, imageCount: 1 },
             processing:
               sheet && settings.processing.downsample
                 ? {
@@ -626,7 +626,6 @@ export const useServer = create<ServerState>((set, get) => {
                   !loop &&
                   !chunk &&
                   (ui.batches > 1 ||
-                    settings.generation.imageCount > 1 ||
                     expansions.length > 1 ||
                     exampleBases.length > 1)
               })

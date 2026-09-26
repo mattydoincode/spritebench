@@ -380,9 +380,15 @@ export function Panel({
   count,
   children,
   actions,
+  footer,
   className = ""
 }: {
   title?: string;
+  /**
+   * Pinned under the scrolling body, for the thing the panel exists to do
+   * (the prompt and Create). Scrolls on its own if it outgrows the panel.
+   */
+  footer?: ReactNode;
   /** `PanelTab`s, for a panel that shares its slot. Replaces `title`. */
   tabs?: ReactNode;
   /** Shown after `title`. */
@@ -401,6 +407,11 @@ export function Panel({
         <div className="flex min-w-0 items-center gap-1">{actions}</div>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">{children}</div>
+      {footer ? (
+        <div className="max-h-[70%] shrink-0 overflow-y-auto border-t border-[var(--color-edge)] bg-[var(--color-ink-800)] p-3">
+          {footer}
+        </div>
+      ) : null}
     </section>
   );
 }
