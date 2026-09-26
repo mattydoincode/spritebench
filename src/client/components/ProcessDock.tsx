@@ -87,7 +87,6 @@ export function ProcessDock() {
 
   const select = (assetId: string) => {
     useUi.getState().select(assetId, false);
-    useUi.getState().setRightTab("inspector");
   };
 
   const tone =

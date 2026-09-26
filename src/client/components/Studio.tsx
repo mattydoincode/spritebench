@@ -78,7 +78,7 @@ export function Studio({ projectId }: { projectId: string }) {
   const templateBuilderOpen = useUi((state) => state.templateBuilderOpen);
 
   const layout = useUi((state) => state.layout);
-  const rightTab = useUi((state) => state.rightTab);
+  const leftTab = useUi((state) => state.leftTab);
   const [missing, setMissing] = useState(false);
 
   useEffect(() => {
@@ -186,11 +186,15 @@ export function Studio({ projectId }: { projectId: string }) {
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {layout.collapsed.left ? (
-          <PaneRail label="Generate" side="left" onExpand={() => collapse("left")} />
+          <PaneRail
+            label={leftTab === "godot" ? "Godot" : "Prompt"}
+            side="left"
+            onExpand={() => collapse("left")}
+          />
         ) : (
           <>
             <div className="flex min-h-0 shrink-0 flex-col overflow-hidden" style={{ width: layout.left }}>
-              <GeneratePanel />
+              {leftTab === "godot" ? <EnginePanel /> : <GeneratePanel />}
             </div>
 
             <ResizeHandle
@@ -225,11 +229,7 @@ export function Studio({ projectId }: { projectId: string }) {
         </div>
 
         {layout.collapsed.right ? (
-          <PaneRail
-            label={rightTab === "godot" ? "Godot" : "Inspector"}
-            side="right"
-            onExpand={() => collapse("right")}
-          />
+          <PaneRail label="Inspector" side="right" onExpand={() => collapse("right")} />
         ) : (
           <>
             <ResizeHandle
@@ -239,7 +239,7 @@ export function Studio({ projectId }: { projectId: string }) {
             />
 
             <div className="flex min-h-0 shrink-0 flex-col overflow-hidden" style={{ width: layout.right }}>
-              {rightTab === "godot" ? <EnginePanel /> : <InspectorPanel />}
+              <InspectorPanel />
             </div>
           </>
         )}

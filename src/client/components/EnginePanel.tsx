@@ -17,7 +17,7 @@ import type { ResolvedAsset } from "@/shared/model";
 import type { SlotEdit } from "@/shared/slotEdits";
 import { AssetThumb } from "./AssetBitmap";
 import { EngineCollections } from "./EngineCollections";
-import { RightTabs } from "./RightTabs";
+import { LeftTabs } from "./LeftTabs";
 import { Panel, TextButton } from "./ui";
 
 const STATUS_LABEL: Record<EngineSlotStatus, string> = {
@@ -324,7 +324,7 @@ export function EnginePanel() {
   const slots = allSlots.filter((slot) => slot.kind !== "record_field");
 
   return (
-    <Panel title="Godot" pane="right" lead={<RightTabs />}>
+    <Panel title="Godot" pane="left" lead={<LeftTabs />}>
       {project ? (
         <p className="mb-2 font-mono text-[10px] break-all text-slate-500">
           project {project.id}

@@ -21,7 +21,6 @@ import { ExportDialog } from "./ExportDialog";
 import { GenerationHistory } from "./GenerationHistory";
 import { JobInspector } from "./JobInspector";
 import { ResizeHandle } from "./ResizeHandle";
-import { RightTabs } from "./RightTabs";
 import {
   Button,
   ColorInput,
@@ -121,7 +120,7 @@ export function InspectorPanel() {
 
   if (!asset) {
     return (
-      <Panel title="Inspector" pane="right" lead={<RightTabs />}>
+      <Panel title="Inspector" pane="right">
         <p className="text-[11px] text-slate-500">
           Select an asset in the library to tune its size, cutout, and palette. Every asset keeps
           its own snapshot, so editing one never touches the others.
@@ -154,7 +153,6 @@ export function InspectorPanel() {
     <Panel
       title="Inspector"
       pane="right"
-      lead={<RightTabs />}
       actions={
         <Button
           variant="danger"

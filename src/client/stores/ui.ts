@@ -233,7 +233,7 @@ export function sectionCollapsed(
 }
 
 export type Pane = "left" | "right" | "library";
-export type RightTab = "inspector" | "godot";
+export type LeftTab = "prompt" | "godot";
 
 export interface Layout {
   left: number;
@@ -642,7 +642,7 @@ function persist(state: Stored): void {
 interface UiState extends Stored {
   /** Transient: never persisted, never shared. */
   selectedIds: string[];
-  rightTab: RightTab;
+  leftTab: LeftTab;
   activeItemId: string | null;
   /** Staged sprites in the scene selection. Last id is `activeItemId`. */
   selectedItemIds: string[];
@@ -703,7 +703,7 @@ interface UiState extends Stored {
   toggleSection: (id: string) => void;
   setPaneSize: (pane: Pane, size: number) => void;
   togglePane: (pane: Pane) => void;
-  setRightTab: (tab: RightTab) => void;
+  setLeftTab: (tab: LeftTab) => void;
   setInspectorPreview: (size: number) => void;
   setProcessWorkers: (count: number) => void;
 
@@ -763,7 +763,7 @@ export const useUi = create<UiState>((set, get) => {
     ...DEFAULTS,
 
     selectedIds: [],
-    rightTab: "inspector",
+    leftTab: "prompt",
     activeItemId: null,
     selectedItemIds: [],
     selectedGroupIds: [],
@@ -1000,8 +1000,8 @@ export const useUi = create<UiState>((set, get) => {
       save();
     },
 
-    setRightTab(tab) {
-      set({ rightTab: tab });
+    setLeftTab(tab) {
+      set({ leftTab: tab });
     },
 
     togglePane(pane) {

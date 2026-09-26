@@ -7,7 +7,6 @@ import { isFailedJob } from "@/shared/libraryItems";
 import { formatElapsed, jobElapsedSeconds } from "@/shared/jobTime";
 import type { JobRecord, JobStatus } from "@/shared/model";
 import { RequestAudit } from "./RequestAudit";
-import { RightTabs } from "./RightTabs";
 import { Button, Panel, Row } from "./ui";
 
 const STATUS_STYLES: Record<JobStatus, string> = {
@@ -33,7 +32,7 @@ export function JobInspector({ job }: { job: JobRecord }) {
     : null;
 
   return (
-    <Panel title="Inspector" pane="right" lead={<RightTabs />}>
+    <Panel title="Inspector" pane="right">
       <Row className="mb-2 justify-between">
         <span className={`text-[11px] ${STATUS_STYLES[job.status]}`}>
           {job.status}

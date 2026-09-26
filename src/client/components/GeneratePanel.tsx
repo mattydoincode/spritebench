@@ -44,6 +44,7 @@ import type { BaseSpec, ImageSource } from "@/shared/model";
 import { DownsampleControls } from "./DownsampleControls";
 import { Button, Field, NumberInput, Panel, Row, Section, Select, TextButton, Toggle } from "./ui";
 import { DropZone, TemplatePanel } from "./TemplatePanel";
+import { LeftTabs } from "./LeftTabs";
 
 function keyCaption(key: { provider: string; label: string; keySuffix: string }): string {
   const suffix = key.keySuffix.replace(/^\.\.\./, "");
@@ -1032,10 +1033,7 @@ export function GeneratePanel() {
   });
 
   return (
-    <Panel
-      pane="left"
-      lead={<ProviderHeader />}
-    >
+    <Panel pane="left" lead={<LeftTabs />} actions={<ProviderHeader />}>
       {!canGenerate ? (
         <p className="mb-3 rounded border border-amber-700 bg-amber-950/40 p-2 text-[11px] text-amber-200">
           You can edit this project but not generate in it. Generation bills the owner&apos;s image
