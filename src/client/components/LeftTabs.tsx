@@ -12,8 +12,8 @@ export function LeftTabs() {
 
   return (
     <>
-      <PanelTab selected={tab === "prompt"} onClick={() => setTab("prompt")}>
-        Prompt
+      <PanelTab selected={tab === "generate"} onClick={() => setTab("generate")}>
+        Generate
       </PanelTab>
       <PanelTab
         selected={tab === "godot"}

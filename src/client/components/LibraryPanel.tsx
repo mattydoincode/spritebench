@@ -474,7 +474,7 @@ export function LibraryPanel() {
         </div>
       ) : items.length === 0 ? (
         <p className="text-[11px] leading-snug text-slate-500">
-          Nothing here yet. Write a prompt and hit Create.
+          Nothing here yet. Write a prompt and hit Generate.
         </p>
       ) : (
         <div className="flex flex-wrap items-start gap-2">

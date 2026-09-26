@@ -75,3 +75,34 @@ export function insertAt(text: string, at: number, token: string): { text: strin
   const inserted = `${lead}${token}${trail}`;
   return { text: `${before}${inserted}${after}`, caret: before.length + lead.length + token.length };
 }
+
+/**
+ * The `@partial` the caret is at the end of, if any: where its `@` is and the
+ * letters typed after it. Same boundary rule as `SNIPPET_PATTERN`.
+ */
+export function snippetQueryAt(text: string, caret: number): { start: number; query: string } | null {
+  const match = /(?<![A-Za-z0-9_.])@([A-Za-z0-9_]*)$/.exec(text.slice(0, caret));
+  return match ? { start: match.index, query: match[1] } : null;
+}
+
+/** Names matching `query`: prefix matches first, then any that contain it. */
+export function matchSnippetNames(names: readonly string[], query: string, limit = 8): string[] {
+  const q = query.toLowerCase();
+  const starts = names.filter((name) => name.toLowerCase().startsWith(q));
+  const contains = names.filter(
+    (name) => !name.toLowerCase().startsWith(q) && name.toLowerCase().includes(q)
+  );
+  return [...starts, ...contains].slice(0, limit);
+}
+
+/** Swaps the `@partial` at `start..caret` for `@name`, with a space after it. */
+export function completeSnippet(
+  text: string,
+  start: number,
+  caret: number,
+  name: string
+): { text: string; caret: number } {
+  const after = text.slice(caret);
+  const token = `@${name}${/^\s/.test(after) ? "" : " "}`;
+  return { text: `${text.slice(0, start)}${token}${after}`, caret: start + token.length };
+}

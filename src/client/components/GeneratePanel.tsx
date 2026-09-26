@@ -492,7 +492,7 @@ function EachMode({ canEdit }: { canEdit: boolean }) {
           <EachImages />
           <p className="mb-2 text-[10px] leading-snug text-slate-500">
             Same prompt on every image. {bases.length > 0 ? `${bases.length} edit${bases.length === 1 ? "" : "s"}` : "Add images first"}
-            , then Create. Lands in a batch folder like variables.
+            , then Generate. Lands in a batch folder like variables.
           </p>
         </>
       ) : !canEdit ? (
@@ -802,8 +802,8 @@ export function GeneratePanel() {
           {busy === "queueing"
             ? "queueing..."
             : create.images > 1
-              ? `Create ×${create.images}`
-              : "Create"}
+              ? `Generate ×${create.images}`
+              : "Generate"}
         </Button>
         <label
           className="flex shrink-0 items-center gap-1.5 text-[10px] tracking-wider text-slate-500 uppercase"

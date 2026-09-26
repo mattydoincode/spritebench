@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useDoc } from "@/client/stores/doc";
 import { useServer } from "@/client/stores/server";
 import { useUi } from "@/client/stores/ui";
@@ -19,8 +20,11 @@ import {
 } from "@/shared/promptVars";
 import {
   cleanSnippetName,
+  completeSnippet,
   expandSnippets,
   insertAt,
+  matchSnippetNames,
+  snippetQueryAt,
   snippetRefs,
   snippetSegments
 } from "@/shared/snippets";
@@ -41,11 +45,11 @@ export function PromptEditor({
   summary,
   children
 }: {
-  /** One per prompt Create will send, for the preview to page through. */
+  /** One per prompt Generate will send, for the preview to page through. */
   bindings: PromptBinding[];
   /** What else goes with the prompt: modes, masks, attached images. */
   summary: string[];
-  /** The Create row, under everything else. */
+  /** The Generate row, under everything else. */
   children: ReactNode;
 }) {
   const promptBody = useUi((state) => state.promptBody);
@@ -61,6 +65,43 @@ export function PromptEditor({
   const orphan = useRef<string | null>(null);
 
   const resolved = (body: string) => expandSnippets(body, snippets);
+
+  const canEdit = useServer((state) => state.project?.role !== "viewer");
+  const [suggest, setSuggest] = useState<Suggest | null>(null);
+  const options = suggest ? suggestionsFor(suggest.query, snippets.map((entry) => entry.name), canEdit) : [];
+
+  /** Opens, moves or closes the `@` list to match the caret. */
+  const track = (el: HTMLTextAreaElement) => {
+    const caret = el.selectionStart;
+    const found = el.selectionEnd === caret ? snippetQueryAt(el.value, caret) : null;
+    if (!found) {
+      setSuggest(null);
+      return;
+    }
+
+    const same = suggest && suggest.start === found.start && suggest.query === found.query;
+    setSuggest({
+      ...found,
+      caret,
+      active: same ? suggest.active : 0,
+      anchor: same ? suggest.anchor : anchorAt(el, found.start)
+    });
+  };
+
+  const accept = (option: Suggestion) => {
+    if (!suggest) return;
+    if (option.create) useDoc.getState().createSnippet(option.name, "");
+
+    const done = completeSnippet(promptBody, suggest.start, suggest.caret, option.name);
+    edit(done.text);
+    setSuggest(null);
+    selection.current = { start: done.caret, end: done.caret };
+
+    requestAnimationFrame(() => {
+      textarea.current?.focus();
+      textarea.current?.setSelectionRange(done.caret, done.caret);
+    });
+  };
 
   const edit = (next: string) => {
     const carried = carryVariables(
@@ -96,7 +137,7 @@ export function PromptEditor({
       <div className="mb-2 flex h-7 shrink-0 items-stretch gap-4 border-b border-[var(--color-edge)]">
         <div role="tablist" aria-label="Prompt" className="flex items-stretch gap-4">
           <PanelTab selected={tab === "edit"} onClick={() => setTab("edit")}>
-            Edit
+            Edit Prompt
           </PanelTab>
           <PanelTab selected={tab === "preview"} onClick={() => setTab("preview")}>
             Preview
@@ -124,6 +165,27 @@ export function PromptEditor({
               start: event.currentTarget.selectionStart,
               end: event.currentTarget.selectionEnd
             };
+            track(event.currentTarget);
+          }}
+          onBlur={() => setSuggest(null)}
+          onKeyDown={(event) => {
+            if (!suggest || options.length === 0) return;
+
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault();
+              const step = event.key === "ArrowDown" ? 1 : -1;
+              setSuggest({
+                ...suggest,
+                active: (suggest.active + step + options.length) % options.length
+              });
+            } else if (event.key === "Enter" || event.key === "Tab") {
+              event.preventDefault();
+              accept(options[Math.min(suggest.active, options.length - 1)]);
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              setSuggest(null);
+            }
           }}
           className="mb-2 min-h-16 flex-1 resize-none"
         />
@@ -131,11 +193,161 @@ export function PromptEditor({
         <PromptPreview bindings={bindings} summary={summary} />
       )}
 
+      {suggest && options.length > 0 && tab === "edit" ? (
+        <SnippetSuggestions
+          anchor={suggest.anchor}
+          options={options}
+          active={Math.min(suggest.active, options.length - 1)}
+          onPick={accept}
+        />
+      ) : null}
+
       <VariablesBlock onInsert={insert} />
       <SnippetsBlock onInsert={insert} selectedText={selectedText} />
 
       {children}
     </>
+  );
+}
+
+interface Suggest {
+  /** Index of the `@`. */
+  start: number;
+  query: string;
+  caret: number;
+  active: number;
+  anchor: Anchor;
+}
+
+interface Suggestion {
+  name: string;
+  /** Makes an empty snippet by this name, then inserts it. */
+  create?: boolean;
+}
+
+/** Where the list goes, in viewport pixels: under the caret, or above it near the bottom. */
+interface Anchor {
+  left: number;
+  top?: number;
+  bottom?: number;
+}
+
+const SUGGEST_ROOM = 200;
+
+function suggestionsFor(query: string, names: string[], canCreate: boolean): Suggestion[] {
+  const found: Suggestion[] = matchSnippetNames(names, query).map((name) => ({ name }));
+  if (canCreate && query && cleanSnippetName(query) === query && !names.includes(query)) {
+    found.push({ name: query, create: true });
+  }
+  return found;
+}
+
+const MIRRORED = [
+  "boxSizing",
+  "width",
+  "paddingTop",
+  "paddingRight",
+  "paddingBottom",
+  "paddingLeft",
+  "borderTopWidth",
+  "borderRightWidth",
+  "borderBottomWidth",
+  "borderLeftWidth",
+  "fontFamily",
+  "fontSize",
+  "fontWeight",
+  "fontStyle",
+  "letterSpacing",
+  "lineHeight",
+  "textTransform",
+  "wordSpacing",
+  "tabSize"
+] as const;
+
+/**
+ * Viewport position of character `index` in a textarea. A textarea cannot
+ * report that itself, so the text up to it is laid out in a hidden copy with
+ * the same box and type, and a marker at the end is measured instead.
+ */
+function anchorAt(el: HTMLTextAreaElement, index: number): Anchor {
+  const style = getComputedStyle(el);
+  const mirror = document.createElement("div");
+  for (const key of MIRRORED) mirror.style[key] = style[key];
+  Object.assign(mirror.style, {
+    position: "absolute",
+    visibility: "hidden",
+    top: "0",
+    left: "-9999px",
+    whiteSpace: "pre-wrap",
+    overflowWrap: "break-word"
+  });
+  mirror.textContent = el.value.slice(0, index);
+  const marker = document.createElement("span");
+  marker.textContent = "\u200b";
+  mirror.appendChild(marker);
+  document.body.appendChild(mirror);
+
+  const rect = el.getBoundingClientRect();
+  const lineHeight = Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.3;
+  const top = rect.top + marker.offsetTop - el.scrollTop;
+  const left = Math.min(rect.left + marker.offsetLeft - el.scrollLeft, window.innerWidth - 240);
+  mirror.remove();
+
+  // The prompt sits at the bottom of the screen, so the list usually opens upward.
+  return window.innerHeight - (top + lineHeight) < SUGGEST_ROOM
+    ? { left, bottom: window.innerHeight - top }
+    : { left, top: top + lineHeight };
+}
+
+function SnippetSuggestions({
+  anchor,
+  options,
+  active,
+  onPick
+}: {
+  anchor: Anchor;
+  options: Suggestion[];
+  active: number;
+  onPick: (option: Suggestion) => void;
+}) {
+  const snippets = useDoc((state) => state.snippets);
+
+  return createPortal(
+    <div
+      role="listbox"
+      style={anchor}
+      className="fixed z-50 w-56 overflow-hidden rounded border border-[var(--color-edge)] bg-[var(--color-ink-800)] py-0.5 text-[11px] shadow-xl"
+    >
+      {options.map((option, index) => (
+        <div
+          key={`${option.create ? "+" : ""}${option.name}`}
+          role="option"
+          aria-selected={index === active}
+          // Keeps focus in the textarea, which would otherwise blur and close this.
+          onMouseDown={(event) => {
+            event.preventDefault();
+            onPick(option);
+          }}
+          className={`flex cursor-pointer items-baseline gap-2 px-2 py-1 ${
+            index === active ? "bg-[var(--color-ink-600)]" : "hover:bg-[var(--color-ink-700)]"
+          }`}
+        >
+          {option.create ? (
+            <span className="text-slate-400">
+              create <span className="font-mono text-slate-200">@{option.name}</span>
+            </span>
+          ) : (
+            <>
+              <span className="shrink-0 font-mono text-slate-200">@{option.name}</span>
+              <span className="truncate text-[10px] text-slate-500">
+                {snippets.find((entry) => entry.name === option.name)?.text}
+              </span>
+            </>
+          )}
+        </div>
+      ))}
+    </div>,
+    document.body
   );
 }
 
@@ -167,7 +379,7 @@ function FilledText({ text, bindings }: { text: string; bindings: PromptBinding 
   return <>{parts}</>;
 }
 
-/** Exactly what Create sends, one prompt at a time, with snippet and variable text marked. */
+/** Exactly what Generate sends, one prompt at a time, with snippet and variable text marked. */
 function PromptPreview({ bindings, summary }: { bindings: PromptBinding[]; summary: string[] }) {
   const promptBody = useUi((state) => state.promptBody);
   const snippets = useDoc((state) => state.snippets);

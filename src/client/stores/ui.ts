@@ -228,7 +228,7 @@ export function sectionCollapsed(
 }
 
 export type Pane = "left" | "right" | "library" | "prompt";
-export type LeftTab = "prompt" | "godot";
+export type LeftTab = "generate" | "godot";
 export type SettingsTab = "project" | "account";
 
 export interface Layout {
@@ -762,7 +762,7 @@ export const useUi = create<UiState>((set, get) => {
     ...DEFAULTS,
 
     selectedIds: [],
-    leftTab: "prompt",
+    leftTab: "generate",
     activeItemId: null,
     selectedItemIds: [],
     selectedGroupIds: [],

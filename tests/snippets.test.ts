@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   cleanSnippetName,
+  completeSnippet,
   expandSnippets,
   insertAt,
+  matchSnippetNames,
+  snippetQueryAt,
   snippetRefs,
   snippetSegments
 } from "@/shared/snippets";
@@ -76,5 +79,30 @@ describe("carrying variables through prompt edits", () => {
   it("leaves values alone when an edit does not touch slots", () => {
     const result = carryVariables("a {color} cat", "a {color} dog", colors, "old");
     expect(result).toEqual({ variables: colors, orphan: "old" });
+  });
+});
+
+describe("snippet autocomplete", () => {
+  it("finds the @partial the caret ends", () => {
+    expect(snippetQueryAt("a knight @sty", 13)).toEqual({ start: 9, query: "sty" });
+    expect(snippetQueryAt("a knight @", 10)).toEqual({ start: 9, query: "" });
+    expect(snippetQueryAt("me@exa", 6)).toBeNull();
+    expect(snippetQueryAt("@style done", 11)).toBeNull();
+  });
+
+  it("ranks prefix matches before contained ones", () => {
+    expect(matchSnippetNames(["hero_style", "style", "stone"], "st")).toEqual([
+      "style",
+      "stone",
+      "hero_style"
+    ]);
+  });
+
+  it("completes with a trailing space unless one follows", () => {
+    expect(completeSnippet("a @sty", 2, 6, "style")).toEqual({ text: "a @style ", caret: 9 });
+    expect(completeSnippet("a @sty knight", 2, 6, "style")).toEqual({
+      text: "a @style knight",
+      caret: 8
+    });
   });
 });
