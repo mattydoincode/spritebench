@@ -159,3 +159,26 @@ export async function nextAssetSeq(
   // owns is one below it.
   return row.seq - 1;
 }
+
+/** Provider id → key id this project bills. Missing providers use the owner's default. */
+export async function getProjectKeyDefaults(projectId: string): Promise<Record<string, string>> {
+  const [row] = await db()
+    .select({ keyDefaults: projects.keyDefaults })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  return row?.keyDefaults ?? {};
+}
+
+/** Sets or clears (`null`) this project's key for one provider. */
+export async function setProjectKeyDefault(
+  projectId: string,
+  provider: string,
+  keyId: string | null
+): Promise<Record<string, string>> {
+  const next = { ...(await getProjectKeyDefaults(projectId)) };
+  if (keyId) next[provider] = keyId;
+  else delete next[provider];
+
+  await db().update(projects).set({ keyDefaults: next }).where(eq(projects.id, projectId));
+  return next;
+}

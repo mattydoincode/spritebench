@@ -1,16 +1,15 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { useDoc } from "@/client/stores/doc";
 import { useServer } from "@/client/stores/server";
 import { defaultPaneSize, useUi } from "@/client/stores/ui";
 import {
   applySizeSelection,
-  defaultModelForProvider,
   describeRequestSize,
-  findModel,
   modelOrDefault,
   modelsForProvider,
+  providerIds,
   providerLabel,
   qualitiesFor,
   sizePickerOptions,
@@ -47,6 +46,7 @@ import {
   Row,
   Section,
   Select,
+  TextButton,
   Toggle
 } from "./ui";
 import { DropZone, TemplatePanel } from "./TemplatePanel";
@@ -66,60 +66,86 @@ function keyCaption(key: { provider: string; label: string; keySuffix: string })
 }
 
 /**
- * Which key is about to be billed. Always a dropdown, even with one key, so
- * switching providers is a choice here rather than a trip to settings.
+ * Every model from every provider in one list. The key is not chosen here:
+ * the project's default for the model's provider bills it (see
+ * `chooseBillingKey`), and the line underneath says which, with a way to
+ * change it in settings. Models whose provider has no key are listed but
+ * disabled, so you can see what adding one would unlock.
  */
-function KeyField() {
-  const project = useServer((state) => state.project);
-  const keys = useServer((state) => state.projectKeys);
-  const remembered = useUi((state) => (project ? state.providerKeyId[project.id] : undefined));
-
-  if (!project) return null;
-
-  if (keys.length === 0) {
-    return (
-      <Field label="Key">
-        {project.isOwner ? (
-          <button
-            type="button"
-            onClick={() => useUi.getState().openSettings("account")}
-            className="text-[11px] text-amber-300 hover:underline"
-          >
-            add a key
-          </button>
-        ) : (
-          <span className="text-[11px] text-amber-300">no key</span>
-        )}
-      </Field>
-    );
-  }
-
-  const selected = keys.some((key) => key.id === remembered) ? remembered : keys[0].id;
+function ModelField() {
+  const generation = useServer((state) => state.settings.generation);
+  useServer((state) => state.projectKeys);
+  useServer((state) => state.keyDefaults);
+  const store = useServer.getState;
 
   return (
-    <Field label="Key">
+    <Field label="Model">
       <select
-        value={selected ?? keys[0].id}
-        title={project.isOwner ? "Which of your keys pays" : `${project.name} owner's key`}
-        onChange={(event) => useUi.getState().setProviderKey(project.id, event.target.value)}
+        value={generation.model}
+        onChange={(event) => store().setGeneration({ model: event.target.value })}
       >
-        {keys.map((key) => (
-          <option key={key.id} value={key.id}>
-            {keyCaption(key)}
-            {key.valid === false ? " (rejected)" : ""}
-          </option>
-        ))}
+        {providerIds().map((provider) => {
+          const choice = store().billingFor(provider);
+          const keyless = !choice.ok && choice.reason === "no-key";
+
+          return (
+            <optgroup key={provider} label={providerLabel(provider)}>
+              {modelsForProvider(provider).map((model) => (
+                <option key={model.id} value={model.id} disabled={keyless}>
+                  {model.label}
+                  {keyless ? " (no key)" : ""}
+                </option>
+              ))}
+            </optgroup>
+          );
+        })}
       </select>
     </Field>
   );
 }
 
-function useSelectedProjectKey() {
+/** Which key the chosen model bills, or why none can, with the way to fix it. */
+function BillingLine({ provider }: { provider: string }) {
   const project = useServer((state) => state.project);
   const keys = useServer((state) => state.projectKeys);
-  const remembered = useUi((state) => (project ? state.providerKeyId[project.id] : undefined));
-  const selected = keys.some((key) => key.id === remembered) ? remembered : keys[0]?.id;
-  return keys.find((key) => key.id === selected) ?? null;
+  useServer((state) => state.keyDefaults);
+  const choice = useServer.getState().billingFor(provider);
+  const name = providerLabel(provider);
+
+  if (!project) return null;
+
+  const link = (label: string, tab: "project" | "account") => (
+    <TextButton onClick={() => useUi.getState().openSettings(tab)}>{label}</TextButton>
+  );
+
+  if (!choice.ok) {
+    return (
+      <p className="-mt-1 mb-2 flex flex-wrap items-center gap-1 text-[10px] text-amber-300">
+        {choice.reason === "no-key" ? (
+          <>
+            no {name} key
+            {project.isOwner ? link("add one", "account") : null}
+          </>
+        ) : (
+          <>
+            several {name} keys and no default
+            {project.isOwner ? link("pick one", "project") : null}
+          </>
+        )}
+      </p>
+    );
+  }
+
+  const key = keys.find((entry) => entry.id === choice.keyId);
+  const source =
+    choice.via === "project" ? "project default" : choice.via === "account" ? "account default" : "only key";
+
+  return (
+    <p className="-mt-1 mb-2 flex flex-wrap items-center gap-1 text-[10px] text-slate-500">
+      billed to {key ? keyCaption(key) : name} · {source}
+      {project.isOwner ? link("change", "project") : null}
+    </p>
+  );
 }
 
 function ModelAndSize() {
@@ -127,13 +153,10 @@ function ModelAndSize() {
   const animation = useUi((state) => state.animation);
   const itemGrid = useUi((state) => state.itemGrid);
   const mask = useUi((state) => state.mask);
-  const billingKey = useSelectedProjectKey();
   const store = useServer.getState;
 
   const generation = settings.generation;
   const model = modelOrDefault(generation.model);
-  const offered = billingKey ? modelsForProvider(billingKey.provider) : [model];
-  const offeredIds = offered.map((entry) => entry.id);
   const picker = sizePickerOptions(model);
   const selectedSize = sizeSelection(generation, model);
   const sizeHint = describeRequestSize(model, generation.size, generation.useAutoSize);
@@ -159,21 +182,8 @@ function ModelAndSize() {
 
   return (
     <>
-      <KeyField />
-
-      <Field label="Model">
-        <Select
-          value={offeredIds.includes(generation.model) ? generation.model : (offeredIds[0] ?? generation.model)}
-          options={offeredIds}
-          labels={Object.fromEntries(
-            offeredIds.map((id) => {
-              const info = findModel(id);
-              return [id, info ? `${info.label}` : id];
-            })
-          )}
-          onChange={(value) => store().setGeneration({ model: value })}
-        />
-      </Field>
+      <ModelField />
+      <BillingLine provider={model.provider} />
 
       <Row>
         <div className="flex-1">
@@ -716,15 +726,9 @@ export function GeneratePanel() {
   const generation = settings.generation;
   const processing = settings.processing;
   const projectCutout = useDoc((state) => state.settings.cutout);
-  const billingKey = useSelectedProjectKey();
-
-  useEffect(() => {
-    if (!billingKey) return;
-    const current = findModel(generation.model);
-    if (current && current.provider === billingKey.provider) return;
-
-    store().setGeneration({ model: defaultModelForProvider(billingKey.provider) });
-  }, [billingKey, generation.model, store]);
+  const provider = modelOrDefault(generation.model).provider;
+  useServer((state) => state.keyDefaults);
+  const billing = store().billingFor(provider);
 
   const sheetOn = animation.enabled || itemGrid.enabled;
   // Everything below plans against the prompt as it will be sent: snippets
@@ -753,6 +757,12 @@ export function GeneratePanel() {
     reserved,
     animate: animateExpansions && !loop.enabled && !chunk.enabled && !each.enabled && !sheetOn
   });
+  if (!create.blocked && projectHasKey && !billing.ok) {
+    create.blocked =
+      billing.reason === "no-key"
+        ? `no ${providerLabel(provider)} key for this model`
+        : `pick a default ${providerLabel(provider)} key in settings`;
+  }
   if (!create.blocked && missingSnippets.length > 0) {
     create.blocked = `no snippet named ${missingSnippets.map((name) => `@${name}`).join(", ")}`;
   }
@@ -781,7 +791,7 @@ export function GeneratePanel() {
         ? `image: ${templateName(bases[0].source)}`
         : `${bases.length} images`
       : null,
-    each.enabled && billingKey?.provider === "gemini" ? "Gemini revise guide" : null
+    each.enabled && provider === "gemini" ? "Gemini revise guide" : null
   ].filter((entry): entry is string => entry !== null);
   const folderHint = suggestedFolder({
     animation: animation.enabled,

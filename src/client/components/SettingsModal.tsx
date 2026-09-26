@@ -1,6 +1,7 @@
 "use client";
 
 import { MAX_CHROMA_KEYS } from "@/core/settings";
+import { providerLabel } from "@/providers/models";
 import { CUTOUT_LABELS, CUTOUT_MODES } from "@/core/types";
 import { useDoc } from "@/client/stores/doc";
 import { useServer } from "@/client/stores/server";
@@ -79,6 +80,74 @@ export function SettingsModal() {
   );
 }
 
+/**
+ * Which of the owner's keys this project bills, per provider. Only providers
+ * with a key are listed; "account default" follows whatever the owner marks
+ * as default in their account. Owner only -- everyone else sees it read-only.
+ */
+function BillingDefaults() {
+  const project = useServer((state) => state.project);
+  const keys = useServer((state) => state.projectKeys);
+  const keyDefaults = useServer((state) => state.keyDefaults);
+
+  const providers = [...new Set(keys.map((key) => key.provider))];
+  const caption = (key: (typeof keys)[number]) =>
+    `${key.label || "unlabelled"} …${key.keySuffix.replace(/^\.\.\./, "")}`;
+
+  return (
+    <>
+      <MethodHeading active={false}>billing</MethodHeading>
+      {providers.length === 0 ? (
+        <p className="mb-3 text-[11px] text-slate-500">
+          No keys yet.{" "}
+          {project?.isOwner ? (
+            <button
+              type="button"
+              onClick={() => useUi.getState().openSettings("account")}
+              className="underline"
+            >
+              Add one
+            </button>
+          ) : null}
+        </p>
+      ) : (
+        providers.map((provider) => {
+          const options = keys.filter((key) => key.provider === provider);
+          const fallback = options.find((key) => key.isDefault);
+
+          return (
+            <Field key={provider} label={providerLabel(provider)}>
+              <select
+                value={keyDefaults[provider] ?? ""}
+                disabled={!project?.isOwner}
+                title={project?.isOwner ? undefined : "Only the owner can change which key pays"}
+                onChange={(event) =>
+                  void useServer
+                    .getState()
+                    .setProjectKeyDefault(provider, event.target.value || null)
+                }
+              >
+                <option value="">
+                  {fallback
+                    ? `Account default (${caption(fallback)})`
+                    : options.length === 1
+                      ? `Only key (${caption(options[0])})`
+                      : "Account default (none set)"}
+                </option>
+                {options.map((key) => (
+                  <option key={key.id} value={key.id}>
+                    {caption(key)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          );
+        })
+      )}
+    </>
+  );
+}
+
 function ProjectSettings() {
   const settings = useDoc((state) => state.settings);
   const role = useServer((state) => state.project?.role);
@@ -90,6 +159,9 @@ function ProjectSettings() {
 
   return (
     <fieldset disabled={readOnly} className="min-w-0 disabled:opacity-60">
+      <BillingDefaults />
+
+      <MethodHeading active={false}>defaults</MethodHeading>
       <p className="mb-3 text-[11px] leading-snug text-slate-400">
         Cutout applies to new generations. Iso pitch and lighting are the
         defaults for the template builder; pitch also seeds iso repeaters.

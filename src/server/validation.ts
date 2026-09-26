@@ -220,8 +220,6 @@ export const generateBodySchema = z.object({
   promptSuffix: z.string().max(8000).optional(),
   promptGuide: z.string().max(8000).optional(),
   promptExtra: z.string().max(8000).optional(),
-  /** Which of the owner's keys to bill. Validated against the project. */
-  providerKeyId: z.string().uuid().nullish(),
   generation: generationSchema.optional(),
   processing: processingSchema.optional(),
   folder: z.string().max(255).optional(),
@@ -248,11 +246,16 @@ export const generateBodySchema = z.object({
   remember: z.boolean().optional()
 });
 
+export const keyDefaultBodySchema = z.object({
+  provider: z.string().min(1).max(40),
+  /** Null goes back to the owner's account default. */
+  keyId: z.string().uuid().nullable()
+});
+
 export const rerunBodySchema = z.object({
   assetIds: z.array(z.string().uuid()).min(1).max(100),
   promptPrefix: z.string().max(8000).optional(),
   promptSuffix: z.string().max(8000).optional(),
-  providerKeyId: z.string().uuid().nullish(),
   useStoredGeneration: z.boolean().optional(),
   useStoredProcessing: z.boolean().optional(),
   folder: z.string().max(255).optional()

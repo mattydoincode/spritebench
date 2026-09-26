@@ -1,4 +1,4 @@
-import { getProjectSummary } from "@/db/repo/projects";
+import { getProjectKeyDefaults, getProjectSummary } from "@/db/repo/projects";
 import { listProjectKeyOptions, listProviderKeys } from "@/db/repo/providerKeys";
 import { readSettings } from "@/db/repo/users";
 import type { StudioBootstrap } from "@/shared/studioBootstrap";
@@ -25,11 +25,12 @@ export async function loadStudioBootstrap(projectId: string): Promise<StudioBoot
 
   const mayBill = project.isOwner || project.canGenerate;
 
-  const [projectKeys, settings, providerKeys] = await Promise.all([
+  const [projectKeys, keyDefaults, settings, providerKeys] = await Promise.all([
     mayBill ? listProjectKeyOptions(projectId) : Promise.resolve([]),
+    getProjectKeyDefaults(projectId),
     readSettings(userId),
     listProviderKeys(userId)
   ]);
 
-  return { project, projectKeys, settings, providerKeys };
+  return { project, projectKeys, keyDefaults, settings, providerKeys };
 }

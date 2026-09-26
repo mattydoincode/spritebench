@@ -152,15 +152,6 @@ interface Stored extends ProjectDraft {
   /** Per scene: 2D grid vs the full-canvas terrain viewer. */
   sceneView: Record<string, SceneView>;
   /**
-   * Which of the owner's keys to bill, per project.
-   *
-   * Local rather than shared: it is a choice about money, and pushing it into
-   * the document would let one collaborator silently redirect everyone else's
-   * generations onto a different key. The server re-checks it on every
-   * request, so a stale id here is a refusal rather than a wrong bill.
-   */
-  providerKeyId: Record<string, string>;
-  /**
    * Which floating scene bubbles are rolled up to their title bar.
    *
    * All of them, to start. Four expanded panels over an empty canvas reads as
@@ -587,7 +578,6 @@ const DEFAULTS: Stored = {
   activeSceneId: {},
   camera: {},
   sceneView: {},
-  providerKeyId: {},
   collapsedBubbles: { view: true, elements: true, scenes: true, tree: true },
   collapsedFolders: {},
   collapsedSections: {},
@@ -655,7 +645,6 @@ function persist(state: Stored): void {
           activeSceneId: state.activeSceneId,
           camera: state.camera,
           sceneView: state.sceneView,
-          providerKeyId: state.providerKeyId,
           collapsedBubbles: state.collapsedBubbles,
           collapsedFolders: state.collapsedFolders,
           collapsedSections: state.collapsedSections,
@@ -738,7 +727,6 @@ interface UiState extends Stored {
   setInspectorPreview: (size: number) => void;
   setProcessWorkers: (count: number) => void;
 
-  setProviderKey: (projectId: string, providerKeyId: string) => void;
 
   cameraFor: (sceneId: string) => Camera;
   setCamera: (sceneId: string, patch: Partial<Camera>) => void;
@@ -1037,11 +1025,6 @@ export const useUi = create<UiState>((set, get) => {
 
     setLeftTab(tab) {
       set({ leftTab: tab });
-    },
-
-    setProviderKey(projectId, providerKeyId) {
-      set({ providerKeyId: { ...get().providerKeyId, [projectId]: providerKeyId } });
-      save();
     },
 
     cameraFor(sceneId) {

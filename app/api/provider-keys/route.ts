@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
-import { addProviderKey, deleteProviderKey, listProviderKeys } from "@/db/repo/providerKeys";
+import {
+  addProviderKey,
+  deleteProviderKey,
+  KeyNotUsableError,
+  listProviderKeys,
+  setDefaultProviderKey
+} from "@/db/repo/providerKeys";
 import { hasEncryptionKey } from "@/server/config";
 import { requireUser } from "@/server/session";
 import { parseBody, providerKeyBodySchema, withValidation } from "@/server/validation";
@@ -41,6 +47,27 @@ export async function POST(request: Request) {
     );
 
     return NextResponse.json({ providerKey });
+  });
+}
+
+/** `?id=` becomes the default for its provider. */
+export async function PATCH(request: Request) {
+  return withValidation(async () => {
+    const userId = await requireUser();
+    const id = new URL(request.url).searchParams.get("id");
+
+    if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+
+    try {
+      await setDefaultProviderKey(userId, id);
+    } catch (error) {
+      if (error instanceof KeyNotUsableError) {
+        return NextResponse.json({ error: error.message }, { status: 404 });
+      }
+      throw error;
+    }
+
+    return NextResponse.json({ providerKeys: await listProviderKeys(userId) });
   });
 }
 

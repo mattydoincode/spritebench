@@ -182,12 +182,15 @@ function RemoveKeyModal({
   );
 }
 
-function KeyRow({ id, provider, label, keySuffix, valid }: {
+function KeyRow({ id, provider, label, keySuffix, valid, isDefault, siblings }: {
   id: string;
   provider: string;
   label: string;
   keySuffix: string;
   valid: boolean | null;
+  isDefault: boolean;
+  /** Other keys for the same provider: a default only means something with several. */
+  siblings: number;
 }) {
   const [removing, setRemoving] = useState(false);
 
@@ -207,6 +210,26 @@ function KeyRow({ id, provider, label, keySuffix, valid }: {
       </span>
       <span title={status.hint} className={`w-24 text-right text-sm ${status.tone}`}>
         {status.text}
+      </span>
+
+      {/* Fixed width so rows line up whether or not they are the default. */}
+      <span className="flex w-28 justify-end">
+        {isDefault ? (
+          <span
+            title={`Bills ${providerName(provider)} generations unless a project picks another key`}
+            className="rounded bg-[var(--color-accent-dim)]/50 px-2 py-0.5 text-xs text-emerald-100"
+          >
+            default
+          </span>
+        ) : siblings > 0 ? (
+          <button
+            type="button"
+            onClick={() => void useServer.getState().setAccountDefaultKey(id)}
+            className="rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-[var(--color-ink-700)] hover:text-slate-200"
+          >
+            make default
+          </button>
+        ) : null}
       </span>
 
       <button
@@ -411,7 +434,11 @@ export function AccountSettingsSections({ loading = false }: { loading?: boolean
         ) : (
           <ul className="flex flex-col gap-2">
             {keys.map((key) => (
-              <KeyRow key={key.id} {...key} />
+              <KeyRow
+                key={key.id}
+                {...key}
+                siblings={keys.filter((other) => other.provider === key.provider).length - 1}
+              />
             ))}
           </ul>
         )}

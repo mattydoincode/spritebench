@@ -1,6 +1,7 @@
 import { and, asc, eq } from "drizzle-orm";
 import { allowEnvProviderKey, hasEncryptionKey } from "@/server/config";
 import { decryptSecret, encryptSecret, maskSecret } from "@/server/crypto";
+import { chooseBillingKey } from "@/shared/billing";
 import { db } from "../index";
 import { projects, providerKeys } from "../schema";
 
@@ -11,6 +12,8 @@ export interface ProviderKeyStatus {
   label: string;
   /** Last four characters only. The key itself never leaves the server. */
   keySuffix: string;
+  /** The owner's default for its provider. */
+  isDefault: boolean;
   valid: boolean | null;
   validatedAt: string | null;
 }
@@ -105,39 +108,26 @@ export async function listProjectKeyOptions(
 }
 
 /**
- * Resolves what the caller picked into the key id to record on the job.
+ * The key a generation in this project bills for `provider`: the project's
+ * pick, else the owner's default, else the only key. See `chooseBillingKey`.
  *
- * This is the authorization boundary for spending: the id arrives from a
- * dropdown in the browser, and the only thing that makes it legitimate is
- * belonging to this project's current owner and this provider. Checked here so
- * every enqueue path goes through it.
- *
- * An unusable selection is an error rather than a silent fallback -- billing
- * the wrong key is worse than refusing.
+ * This is the authorization boundary for spending. The browser no longer
+ * names a key at all; everything here comes from the project and its owner.
+ * Several keys and no default is an error rather than a guess.
  */
-export async function resolveKeySelection(
-  projectId: string,
-  provider: string,
-  providerKeyId: string | null | undefined
-): Promise<string | null> {
-  const options = await listProjectKeyOptions(projectId, provider);
+export async function resolveBillingKey(projectId: string, provider: string): Promise<string | null> {
+  const [options, [project]] = await Promise.all([
+    listProjectKeyOptions(projectId, provider),
+    db().select({ keyDefaults: projects.keyDefaults }).from(projects).where(eq(projects.id, projectId))
+  ]);
 
-  if (providerKeyId) {
-    if (!options.some((option) => option.id === providerKeyId)) {
-      throw new KeyNotUsableError(
-        `that ${provider} key is not one this project can bill. Pick another.`
-      );
-    }
+  const choice = chooseBillingKey(provider, options, project?.keyDefaults ?? {});
+  if (choice.ok) return choice.keyId;
 
-    return providerKeyId;
-  }
-
-  // No explicit pick. One available key is unambiguous, so use it rather than
-  // making a single-choice dropdown mandatory.
-  if (options.length === 1) return options[0].id;
-
-  if (options.length > 1) {
-    throw new KeyNotUsableError(`choose which ${provider} key to bill`);
+  if (choice.reason === "no-default") {
+    throw new KeyNotUsableError(
+      `this project has several ${provider} keys and no default. Pick one in settings.`
+    );
   }
 
   if (fromEnvironment(provider) !== null) return null;
@@ -153,6 +143,7 @@ function toStatus(row: typeof providerKeys.$inferSelect): ProviderKeyStatus {
     provider: row.provider,
     label: row.label,
     keySuffix: row.keySuffix,
+    isDefault: row.isDefault,
     valid: row.valid,
     validatedAt: row.validatedAt?.toISOString() ?? null
   };
@@ -184,6 +175,14 @@ export async function addProviderKey(
   const trimmed = plaintext.trim();
   if (trimmed.length === 0) throw new Error("key is empty");
 
+  // The first key for a provider becomes its default, so a second one added
+  // later does not leave the account with none.
+  const [existing] = await db()
+    .select({ id: providerKeys.id })
+    .from(providerKeys)
+    .where(and(eq(providerKeys.userId, userId), eq(providerKeys.provider, provider)))
+    .limit(1);
+
   const [row] = await db()
     .insert(providerKeys)
     .values({
@@ -192,12 +191,30 @@ export async function addProviderKey(
       label: label.trim(),
       encryptedKey: encryptSecret(trimmed),
       keySuffix: maskSecret(trimmed),
+      isDefault: !existing,
       valid: null,
       validatedAt: null
     })
     .returning();
 
   return toStatus(row);
+}
+
+/** Makes `id` the default for its provider, and every other key of that provider not. */
+export async function setDefaultProviderKey(userId: string, id: string): Promise<void> {
+  await db().transaction(async (tx) => {
+    const [key] = await tx
+      .select({ provider: providerKeys.provider })
+      .from(providerKeys)
+      .where(and(eq(providerKeys.id, id), eq(providerKeys.userId, userId)));
+    if (!key) throw new KeyNotUsableError("that key does not exist");
+
+    await tx
+      .update(providerKeys)
+      .set({ isDefault: false })
+      .where(and(eq(providerKeys.userId, userId), eq(providerKeys.provider, key.provider)));
+    await tx.update(providerKeys).set({ isDefault: true }).where(eq(providerKeys.id, id));
+  });
 }
 
 export async function recordKeyValidation(id: string, valid: boolean): Promise<void> {

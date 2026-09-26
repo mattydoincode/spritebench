@@ -3,7 +3,7 @@ import {
   isPixelConstraintTemplate,
   pixelConstraintWindow
 } from "@/core/pixelMask";
-import { KeyNotUsableError, resolveKeySelection } from "@/db/repo/providerKeys";
+import { KeyNotUsableError, resolveBillingKey } from "@/db/repo/providerKeys";
 import { readSettings, writeSettings } from "@/db/repo/users";
 import { providerForModel } from "@/providers";
 import { clampGeneration, findModel } from "@/providers/models";
@@ -95,11 +95,7 @@ export async function POST(request: Request, { params }: Params) {
     }
 
     try {
-      const providerKeyId = await resolveKeySelection(
-        projectId,
-        providerForModel(generation.model).id,
-        body.providerKeyId
-      );
+      const providerKeyId = await resolveBillingKey(projectId, providerForModel(generation.model).id);
 
       const jobs = await enqueueGeneration({
         projectId,

@@ -126,6 +126,8 @@ export const projects = pgTable("projects", {
    * handing the number to a different image.
    */
   nextAssetSeq: integer("next_asset_seq").notNull().default(1),
+  /** Provider id → which of the owner's keys this project bills. Missing means the owner's default. */
+  keyDefaults: jsonb("key_defaults").$type<Record<string, string>>().notNull().default({}),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp("deleted_at", { withTimezone: true })
 }, (table) => [index("projects_owner_idx").on(table.ownerUserId)]);
@@ -260,6 +262,8 @@ export const providerKeys = pgTable("provider_keys", {
   label: text("label").notNull().default(""),
   encryptedKey: text("encrypted_key").notNull(),
   keySuffix: text("key_suffix").notNull(),
+  /** The owner's default for this provider, when a project has not picked one. At most one per provider. */
+  isDefault: boolean("is_default").notNull().default(false),
   valid: boolean("valid"),
   validatedAt: timestamp("validated_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

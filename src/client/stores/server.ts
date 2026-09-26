@@ -8,7 +8,7 @@ import { ApiError, api, projectApi, rejectIfNotOk, sourceUrl } from "@/client/ap
 import { processor } from "@/client/processor";
 import type { PaletteInfo } from "@/db/repo/palettes";
 import type { TemplateInfo } from "@/db/repo/templates";
-import { clampGeneration, findModel, snapRequestSize } from "@/providers/models";
+import { clampGeneration, findModel, providerLabel, snapRequestSize } from "@/providers/models";
 import { attachSheetFramePlate, isSheetFramesTemplate } from "@/core/frameMask";
 import { attachSheetPixelPlate, isPixelConstraintTemplate, pixelConstraintWindow } from "@/core/pixelMask";
 import {
@@ -27,6 +27,7 @@ import { remapSelection } from "@/shared/libraryItems";
 import { shouldRememberGeneration } from "@/shared/multistep";
 import { expandPrompt } from "@/shared/promptVars";
 import { expandSnippets } from "@/shared/snippets";
+import { chooseBillingKey, type BillingChoice, type KeyDefaults } from "@/shared/billing";
 import { defaultGenerateSetup, restoreGeneration } from "@/shared/restoreGeneration";
 import {
   applyAssignStreamEvent,
@@ -95,6 +96,7 @@ export interface ProviderKeyStatus {
   provider: string;
   label: string;
   keySuffix: string;
+  isDefault: boolean;
   valid: boolean | null;
   validatedAt: string | null;
 }
@@ -117,6 +119,8 @@ interface ServerState {
    * on a project you own, and someone else's list on one shared with you.
    */
   projectKeys: ProviderKeyStatus[];
+  /** Provider id → key id this project bills instead of the owner's default. */
+  keyDefaults: KeyDefaults;
 
   assets: AssetRecord[];
   jobs: JobRecord[];
@@ -197,7 +201,11 @@ interface ServerState {
   renameRecord: (collectionId: string, recordId: string, key: string) => Promise<void>;
   deleteRecord: (collectionId: string, recordId: string) => Promise<void>;
   /** The key the next generation will bill, or null to let the server decide. */
-  billingKeyId: () => string | null;
+  /** Which key a generation with `provider`'s models would bill, or why none. */
+  billingFor: (provider: string) => BillingChoice;
+  setAccountDefaultKey: (id: string) => Promise<void>;
+  /** Null goes back to the owner's account default. */
+  setProjectKeyDefault: (provider: string, keyId: string | null) => Promise<void>;
 }
 
 async function* iterateBody(body: ReadableStream<Uint8Array>): AsyncGenerator<Uint8Array> {
@@ -266,6 +274,15 @@ export const useServer = create<ServerState>((set, get) => {
     useUi.getState().setAssignQueued(slotId, queued)
   );
 
+  // Your own keys changed. On a project you own they are also the keys it
+  // bills, so the model picker and billing line follow without a reload.
+  const adoptOwnKeys = (providerKeys: ProviderKeyStatus[]): void => {
+    set({
+      providerKeys,
+      projectKeys: get().project?.isOwner ? providerKeys : get().projectKeys
+    });
+  };
+
   const adoptCreated = (created: JobRecord[]): void => {
     if (created.length === 0) return;
     const seen = new Set(created.map((job) => job.id));
@@ -281,6 +298,7 @@ export const useServer = create<ServerState>((set, get) => {
     settings: FALLBACK_SETTINGS,
     providerKeys: [],
     projectKeys: [],
+    keyDefaults: {},
 
     assets: [],
     jobs: [],
@@ -312,12 +330,13 @@ export const useServer = create<ServerState>((set, get) => {
       }
     },
 
-    beginProject({ project, projectKeys, settings, providerKeys }) {
+    beginProject({ project, projectKeys, keyDefaults, settings, providerKeys }) {
       const same = get().project?.id === project.id && get().loadedProjectId === project.id;
 
       set({
         project,
         projectKeys,
+        keyDefaults,
         settings,
         providerKeys,
         // Reopening the project already in memory keeps its rows on screen
@@ -602,7 +621,6 @@ export const useServer = create<ServerState>((set, get) => {
           method: "POST",
           body: JSON.stringify({
             promptBody,
-            providerKeyId: get().billingKeyId(),
             // One image per job: more images come from batches. A stored
             // imageCount from before that has no control left to change it.
             generation: sheet
@@ -698,12 +716,11 @@ export const useServer = create<ServerState>((set, get) => {
       get().setDefaultProcessing(restored.processing);
 
       const model = findModel(restored.generation.model);
-      const key = get().projectKeys.find((entry) => entry.id === get().billingKeyId()) ?? null;
-      if (model && key && model.provider !== key.provider) {
+      if (model && !get().billingFor(model.provider).ok) {
         useUi
           .getState()
           .setNotice(
-            `loaded setup from ${asset.label} — switch to a ${model.provider} key to keep ${model.label}`
+            `loaded setup from ${asset.label} — ${model.label} needs a ${providerLabel(model.provider)} key to generate`
           );
         return;
       }
@@ -735,7 +752,6 @@ export const useServer = create<ServerState>((set, get) => {
           method: "POST",
           body: JSON.stringify({
             assetIds,
-            providerKeyId: get().billingKeyId(),
             folder: folders.size === 1 ? [...folders][0] : undefined
           })
         });
@@ -768,7 +784,6 @@ export const useServer = create<ServerState>((set, get) => {
             promptSuffix: job.prompt.suffix,
             promptGuide: job.prompt.guide,
             promptExtra: job.prompt.extra,
-            providerKeyId: get().billingKeyId(),
             generation: job.generation,
             processing: job.processing,
             folder: job.folder,
@@ -1055,7 +1070,7 @@ export const useServer = create<ServerState>((set, get) => {
         const { providerKeys } = await api<{ providerKeys: ProviderKeyStatus[] }>(
           "/api/provider-keys"
         );
-        set({ providerKeys });
+        adoptOwnKeys(providerKeys);
       } catch (error) {
         if (error instanceof ApiError && error.status === 503) {
           useUi.getState().setError(error.message);
@@ -1071,30 +1086,46 @@ export const useServer = create<ServerState>((set, get) => {
           `/api/provider-keys?id=${encodeURIComponent(id)}`,
           { method: "DELETE" }
         );
-        set({ providerKeys });
+        adoptOwnKeys(providerKeys);
       } catch (error) {
         fail(error);
       }
     },
 
-    /**
-     * Resolves the remembered choice against what the project can actually
-     * bill. A key the owner has since deleted is dropped rather than sent, so
-     * the request falls through to the server's own single-key default
-     * instead of being refused for naming a key that no longer exists.
-     */
-    billingKeyId() {
-      const project = get().project;
-      if (!project) return null;
+    billingFor(provider) {
+      return chooseBillingKey(provider, get().projectKeys, get().keyDefaults);
+    },
 
-      const remembered = useUi.getState().providerKeyId[project.id];
-      const options = get().projectKeys;
-
-      if (remembered && options.some((option) => option.id === remembered)) {
-        return remembered;
+    async setAccountDefaultKey(id) {
+      try {
+        const { providerKeys } = await api<{ providerKeys: ProviderKeyStatus[] }>(
+          `/api/provider-keys?id=${encodeURIComponent(id)}`,
+          { method: "PATCH" }
+        );
+        adoptOwnKeys(providerKeys);
+      } catch (error) {
+        fail(error);
       }
+    },
 
-      return options.length === 1 ? options[0].id : null;
+    async setProjectKeyDefault(provider, keyId) {
+      const previous = get().keyDefaults;
+      const next = { ...previous };
+      if (keyId) next[provider] = keyId;
+      else delete next[provider];
+      set({ keyDefaults: next });
+
+      try {
+        const { keyDefaults } = await projectApi<{ keyDefaults: Record<string, string> }>(
+          projectId(),
+          "/key-defaults",
+          { method: "PUT", body: JSON.stringify({ provider, keyId }) }
+        );
+        set({ keyDefaults });
+      } catch (error) {
+        set({ keyDefaults: previous });
+        fail(error);
+      }
     },
 
     async loadApiTokens() {

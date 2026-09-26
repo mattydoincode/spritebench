@@ -13,6 +13,8 @@ export interface StudioBootstrap {
   project: ProjectSummary;
   /** The keys this project can bill. Empty when you may not generate in it. */
   projectKeys: ProviderKeyStatus[];
+  /** Provider id → key id this project bills, when it overrides the owner's default. */
+  keyDefaults: Record<string, string>;
   /** Your own settings and keys, as `/api/settings` returns them. */
   settings: StudioSettings;
   providerKeys: ProviderKeyStatus[];
