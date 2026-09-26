@@ -343,6 +343,27 @@ export function Tab({
 }
 
 /**
+ * Stands in for something still loading, at roughly its size. Every panel
+ * uses this rather than its own spinner or "loading..." text, so loading
+ * looks the same everywhere and the layout does not shift when data lands.
+ */
+export function Skeleton({
+  className = "",
+  style
+}: {
+  className?: string;
+  style?: CSSProperties;
+}) {
+  return (
+    <span
+      aria-hidden
+      style={style}
+      className={`block animate-pulse rounded bg-[var(--color-ink-600)] ${className}`}
+    />
+  );
+}
+
+/**
  * A main panel's title. Every docked panel's header is a row of these: a
  * panel on its own has one, always selected; panels that share a slot (prompt
  * and Godot) have one each and switch on click. Same type, same underline,

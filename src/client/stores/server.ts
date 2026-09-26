@@ -97,7 +97,12 @@ export interface ProviderKeyStatus {
 }
 
 interface ServerState {
-  ready: boolean;
+  /**
+   * Which project the rows below (assets, jobs, slots, …) belong to. Null
+   * while a project is loading, so a panel can tell "still loading" from
+   * "empty" and never shows the last project's rows under this one's name.
+   */
+  loadedProjectId: string | null;
   projects: ProjectSummary[];
   project: ProjectSummary | null;
 
@@ -107,8 +112,9 @@ interface ServerState {
   /**
    * The keys this project can bill: the owner's. Identical to `providerKeys`
    * on a project you own, and someone else's list on one shared with you.
+   * Null until known, so "no keys" is only ever said when it is true.
    */
-  projectKeys: ProviderKeyStatus[];
+  projectKeys: ProviderKeyStatus[] | null;
 
   assets: AssetRecord[];
   jobs: JobRecord[];
@@ -123,6 +129,12 @@ interface ServerState {
   collections: EngineCollectionView[];
 
   loadProjects: () => Promise<ProjectSummary[]>;
+  /**
+   * Switches to a project synchronously, before anything is fetched: drops
+   * the last project's rows and shows this one's name if the list already has
+   * it. Call before paint so the old project never flashes.
+   */
+  beginProject: (projectId: string) => void;
   openProject: (projectId: string) => Promise<void>;
   createProject: (name: string) => Promise<string | null>;
   renameProject: (projectId: string, name: string) => Promise<void>;
@@ -260,13 +272,13 @@ export const useServer = create<ServerState>((set, get) => {
   };
 
   return {
-    ready: false,
+    loadedProjectId: null,
     projects: [],
     project: null,
 
     settings: FALLBACK_SETTINGS,
     providerKeys: [],
-    projectKeys: [],
+    projectKeys: null,
 
     assets: [],
     jobs: [],
@@ -298,13 +310,13 @@ export const useServer = create<ServerState>((set, get) => {
       }
     },
 
-    async openProject(id) {
-      const project = get().projects.find((entry) => entry.id === id);
-      if (!project) return;
+    beginProject(id) {
+      if (get().project?.id === id && get().loadedProjectId === id) return;
 
       set({
-        ready: false,
-        project,
+        loadedProjectId: null,
+        project: get().projects.find((entry) => entry.id === id) ?? null,
+        projectKeys: null,
         assets: [],
         jobs: [],
         palettes: [],
@@ -312,11 +324,40 @@ export const useServer = create<ServerState>((set, get) => {
         slots: [],
         collections: []
       });
+    },
+
+    async openProject(id) {
+      const project = get().projects.find((entry) => entry.id === id);
+      if (!project) return;
+
+      get().beginProject(id);
+      set({ project });
+
+      // Every request below outlives the screen that made it. Anything that
+      // lands after you have switched away is dropped, not merged into the
+      // next project.
+      const current = () => get().project?.id === id;
 
       // The document opens alongside the row data rather than after it: a
       // scene with no asset rows yet renders empty, which is correct,
       // whereas waiting for both makes a cold load feel twice as slow.
       useDoc.getState().open(id, project.role !== "viewer");
+
+      // Keys load beside the rows, not after them, and on their own: a slow
+      // or failing key list should not hold up the library.
+      if (project.canGenerate || project.isOwner) {
+        projectApi<{ keys: ProviderKeyStatus[] }>(id, "/keys")
+          .then(({ keys }) => {
+            if (current()) set({ projectKeys: keys });
+          })
+          .catch((error: unknown) => {
+            if (!current()) return;
+            set({ projectKeys: [] });
+            fail(error);
+          });
+      } else {
+        set({ projectKeys: [] });
+      }
 
       try {
         const [assetsRes, jobsRes, palettesRes, templatesRes, slotsRes] = await Promise.all([
@@ -332,8 +373,10 @@ export const useServer = create<ServerState>((set, get) => {
           }))
         ]);
 
+        if (!current()) return;
+
         set({
-          ready: true,
+          loadedProjectId: id,
           assets: assetsRes.assets,
           jobs: jobsRes.jobs,
           palettes: palettesRes.palettes,
@@ -346,18 +389,13 @@ export const useServer = create<ServerState>((set, get) => {
           folders: foldersByJobId(jobsRes.jobs),
           jobs: jobsRes.jobs
         });
-
-        if (project.canGenerate || project.isOwner) {
-          const { keys } = await projectApi<{ keys: ProviderKeyStatus[] }>(id, "/keys");
-          set({ projectKeys: keys });
-        }
       } catch (error) {
-        set({ ready: true });
-
-        // Dropped if you have already left. These requests outlive the screen
-        // that made them, and an error about a project you closed shows up as
-        // a banner on the dashboard, where it is neither true nor actionable.
-        if (get().project?.id === id) fail(error);
+        // Dropped if you have already left: an error about a project you
+        // closed shows up as a banner on the dashboard, where it is neither
+        // true nor actionable.
+        if (!current()) return;
+        set({ loadedProjectId: id });
+        fail(error);
       }
     },
 
@@ -665,7 +703,7 @@ export const useServer = create<ServerState>((set, get) => {
       get().setDefaultProcessing(restored.processing);
 
       const model = findModel(restored.generation.model);
-      const key = get().projectKeys.find((entry) => entry.id === get().billingKeyId()) ?? null;
+      const key = (get().projectKeys ?? []).find((entry) => entry.id === get().billingKeyId()) ?? null;
       if (model && key && model.provider !== key.provider) {
         useUi
           .getState()
@@ -1055,7 +1093,7 @@ export const useServer = create<ServerState>((set, get) => {
       if (!project) return null;
 
       const remembered = useUi.getState().providerKeyId[project.id];
-      const options = get().projectKeys;
+      const options = get().projectKeys ?? [];
 
       if (remembered && options.some((option) => option.id === remembered)) {
         return remembered;
@@ -1192,3 +1230,8 @@ export const useServer = create<ServerState>((set, get) => {
     }
   };
 });
+
+/** True once the open project's rows have arrived (or failed to). */
+export function useProjectLoaded(): boolean {
+  return useServer((state) => state.project !== null && state.loadedProjectId === state.project.id);
+}

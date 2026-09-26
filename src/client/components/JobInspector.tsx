@@ -28,7 +28,7 @@ export function JobInspector({ job }: { job: JobRecord }) {
   const failed = isFailedJob(job.status);
   const cancellable = job.status === "queued" || job.status === "blocked";
   const key = job.providerKeyId
-    ? (keys.find((entry) => entry.id === job.providerKeyId) ?? null)
+    ? (keys?.find((entry) => entry.id === job.providerKeyId) ?? null)
     : null;
 
   return (

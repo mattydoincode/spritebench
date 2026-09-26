@@ -3,7 +3,7 @@
 import { useMemo, useState, type DragEvent } from "react";
 import { isAssetDrag, readAssetDrag } from "@/client/dragAssets";
 import { useActiveScene, useAssets } from "@/client/stores/assets";
-import { useServer } from "@/client/stores/server";
+import { useProjectLoaded, useServer } from "@/client/stores/server";
 import { ENGINE_THUMB_MAX, ENGINE_THUMB_MIN, useUi } from "@/client/stores/ui";
 import { describeSlotActivity } from "@/shared/assignStream";
 import { faceId, setBadge } from "@/shared/assetSet";
@@ -18,7 +18,7 @@ import type { SlotEdit } from "@/shared/slotEdits";
 import { AssetThumb } from "./AssetBitmap";
 import { EngineCollections } from "./EngineCollections";
 import { LeftTabs } from "./LeftTabs";
-import { Panel, TextButton } from "./ui";
+import { Panel, Skeleton, TextButton } from "./ui";
 
 const STATUS_LABEL: Record<EngineSlotStatus, string> = {
   empty: "empty",
@@ -317,6 +317,7 @@ export function EnginePanel() {
   const allSlots = useServer((state) => state.slots);
   const collections = useServer((state) => state.collections);
   const project = useServer((state) => state.project);
+  const loaded = useProjectLoaded();
   const assets = useAssets();
   const thumbSize = useUi((state) => state.engineThumbSize);
   const highlight = useHighlightedAssets();
@@ -360,7 +361,13 @@ export function EnginePanel() {
         </div>
       ) : null}
 
-      {slots.length === 0 && collections.length === 0 ? (
+      {!loaded ? (
+        <div className="flex flex-col gap-2">
+          {Array.from({ length: 4 }, (_, index) => (
+            <Skeleton key={index} className="h-12 w-full" />
+          ))}
+        </div>
+      ) : slots.length === 0 && collections.length === 0 ? (
         <p className="text-[11px] leading-snug text-slate-500">
           No Godot slots yet. Enable the SpriteBench addon, paste a personal access
           token, and sync. Slots you opt into over there show up here.

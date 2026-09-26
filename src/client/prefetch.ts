@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { isProcessCancelled, PROCESS_PRIORITY, processor } from "@/client/processor";
 import { useAssets } from "@/client/stores/assets";
-import { EMPTY_PALETTE, useServer } from "@/client/stores/server";
+import { EMPTY_PALETTE, useProjectLoaded, useServer } from "@/client/stores/server";
 import type { ResolvedAsset } from "@/shared/model";
 import { takeNewArrivals } from "@/shared/prefetch";
 
@@ -33,7 +33,7 @@ async function warm(projectId: string, asset: ResolvedAsset): Promise<void> {
  */
 export function usePrefetchNewAssets(): void {
   const projectId = useServer((state) => state.project?.id ?? null);
-  const ready = useServer((state) => state.ready);
+  const ready = useProjectLoaded();
   const assets = useAssets();
   const seen = useRef<{ projectId: string | null; ids: Set<string> } | null>(null);
 

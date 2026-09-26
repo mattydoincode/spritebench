@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import Link from "next/link";
 import { GeneratePanel } from "@/client/components/GeneratePanel";
 import { ImageEditModal } from "@/client/components/ImageEditModal";
@@ -17,8 +17,19 @@ import { ResizeHandle } from "@/client/components/ResizeHandle";
 import { anyModalOpen } from "@/client/components/ui";
 import { usePrefetchNewAssets } from "@/client/prefetch";
 import { useDoc } from "@/client/stores/doc";
-import { useServer } from "@/client/stores/server";
+import { useProjectLoaded, useServer } from "@/client/stores/server";
 import { DEFAULT_LAYOUT, type Pane, useUi } from "@/client/stores/ui";
+
+/** Holds the scene's space while the project and its document load. */
+function ScenePlaceholder() {
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center">
+      <span className="animate-pulse text-[11px] tracking-wider text-slate-500 uppercase">
+        loading scene
+      </span>
+    </div>
+  );
+}
 
 /**
  * The editor for one project.
@@ -30,7 +41,7 @@ import { DEFAULT_LAYOUT, type Pane, useUi } from "@/client/stores/ui";
  * they last had open.
  */
 export function Studio({ projectId }: { projectId: string }) {
-  const ready = useServer((state) => state.ready);
+  const loaded = useProjectLoaded();
   const project = useServer((state) => state.project);
   const jobs = useServer((state) => state.jobs);
   const docReady = useDoc((state) => state.ready);
@@ -44,9 +55,16 @@ export function Studio({ projectId }: { projectId: string }) {
   const leftTab = useUi((state) => state.leftTab);
   const [missing, setMissing] = useState(false);
 
-  useEffect(() => {
+  // Before paint: the studio draws its full layout straight away now, so the
+  // stored pane sizes have to be in place before the first frame, and the
+  // last project's rows have to be gone before this one's name is shown.
+  useLayoutEffect(() => {
     useUi.getState().hydrate();
   }, []);
+
+  useLayoutEffect(() => {
+    useServer.getState().beginProject(projectId);
+  }, [projectId]);
 
   const resize = (pane: Pane, size: number) => useUi.getState().setPaneSize(pane, size);
 
@@ -134,14 +152,6 @@ export function Studio({ projectId }: { projectId: string }) {
     );
   }
 
-  if (!ready) {
-    return (
-      <main className="flex h-screen items-center justify-center text-sm text-slate-500">
-        loading studio...
-      </main>
-    );
-  }
-
   return (
     <main className="studio-root relative flex h-screen flex-col">
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -159,7 +169,7 @@ export function Studio({ projectId }: { projectId: string }) {
         />
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          <Scene />
+          {loaded && docReady ? <Scene /> : <ScenePlaceholder />}
 
           <ResizeHandle
             orientation="horizontal"

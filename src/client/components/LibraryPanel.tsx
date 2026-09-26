@@ -5,7 +5,7 @@ import { requestPartUrl } from "@/client/api";
 import { startAssetDrag } from "@/client/dragAssets";
 import { resolveAssetsNow, useActiveScene, useAssets } from "@/client/stores/assets";
 import { useDoc } from "@/client/stores/doc";
-import { useServer } from "@/client/stores/server";
+import { useProjectLoaded, useServer } from "@/client/stores/server";
 import { useUi } from "@/client/stores/ui";
 import { useNow } from "@/client/useNow";
 import { isoProjectionFromSource } from "@/core/isoMask";
@@ -27,7 +27,7 @@ import { providerAttachmentPlan } from "@/shared/providerPrompt";
 import { isSetAsset } from "@/shared/repeaterMix";
 import { AssetThumb } from "./AssetBitmap";
 import { ExportDialog } from "./ExportDialog";
-import { Button, Panel, Row } from "./ui";
+import { Button, Panel, Row, Skeleton } from "./ui";
 
 const TITLE_PAD = "pt-4";
 
@@ -243,6 +243,7 @@ function stageMany(sceneId: string, assetIds: string[], startIndex: number): voi
 
 export function LibraryPanel() {
   const projectId = useServer((state) => state.project?.id ?? null);
+  const loaded = useProjectLoaded();
   const assets = useAssets();
   const jobs = useServer((state) => state.jobs);
   const selectedIds = useUi((state) => state.selectedIds);
@@ -347,7 +348,7 @@ export function LibraryPanel() {
   return (
     <Panel
       title="Library"
-      count={items.length}
+      count={loaded ? items.length : undefined}
       actions={
         <>
           {failedJobs.length > 0 ? (
@@ -461,7 +462,17 @@ export function LibraryPanel() {
         <ExportDialog assets={selectedAssets} onClose={() => setExporting(false)} />
       ) : null}
 
-      {items.length === 0 ? (
+      {!loaded ? (
+        <div className="flex flex-wrap items-start gap-2">
+          {Array.from({ length: 12 }, (_, index) => (
+            <Skeleton
+              key={index}
+              className="shrink-0"
+              style={{ width: thumbSize, height: thumbSize }}
+            />
+          ))}
+        </div>
+      ) : items.length === 0 ? (
         <p className="text-[11px] leading-snug text-slate-500">
           Nothing here yet. Write a prompt and hit Create.
         </p>
