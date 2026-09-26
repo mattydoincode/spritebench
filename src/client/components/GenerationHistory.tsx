@@ -21,7 +21,7 @@ export function GenerationHistory({ asset }: { asset: ResolvedAsset }) {
   };
   const job = asset.jobId ? jobs.find((entry) => entry.id === asset.jobId) : undefined;
   const key = job?.providerKeyId
-    ? (keys?.find((entry) => entry.id === job.providerKeyId) ?? null)
+    ? (keys.find((entry) => entry.id === job.providerKeyId) ?? null)
     : null;
 
   return (

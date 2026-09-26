@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useServer } from "@/client/stores/server";
 import { useUi } from "@/client/stores/ui";
-import { Skeleton } from "./ui";
 
 /**
  * Which project you are in, a way out, and settings.
@@ -16,6 +15,8 @@ import { Skeleton } from "./ui";
  */
 export function ProjectBar() {
   const project = useServer((state) => state.project);
+
+  if (!project) return null;
 
   return (
     <header className="flow-root shrink-0 border-b border-[var(--color-edge)] bg-[var(--color-ink-700)] px-3 py-1.5 text-[11px] leading-6">
@@ -50,15 +51,11 @@ export function ProjectBar() {
           Projects
         </Link>
         <span className="text-slate-600">/</span>
-        {project ? (
-          <span className="truncate text-[12px] font-medium text-slate-100" title={project.name}>
-            {project.name}
-          </span>
-        ) : (
-          <Skeleton className="h-3 w-24" />
-        )}
+        <span className="truncate text-[12px] font-medium text-slate-100" title={project.name}>
+          {project.name}
+        </span>
 
-        {project?.role === "viewer" ? (
+        {project.role === "viewer" ? (
           <span
             className="ml-1 shrink-0 text-amber-300"
             title="You can look, but changes will not be saved"

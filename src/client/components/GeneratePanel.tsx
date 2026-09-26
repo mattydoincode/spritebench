@@ -49,7 +49,6 @@ import {
   Row,
   Section,
   Select,
-  Skeleton,
   TextButton,
   Toggle
 } from "./ui";
@@ -75,7 +74,7 @@ function ProviderHeader() {
   const keys = useServer((state) => state.projectKeys);
   const remembered = useUi((state) => (project ? state.providerKeyId[project.id] : undefined));
 
-  if (!project || keys === null) return <Skeleton className="h-6 w-32" />;
+  if (!project) return null;
 
   if (keys.length === 0) {
     return (
@@ -130,9 +129,8 @@ function useSelectedProjectKey() {
   const project = useServer((state) => state.project);
   const keys = useServer((state) => state.projectKeys);
   const remembered = useUi((state) => (project ? state.providerKeyId[project.id] : undefined));
-  const list = keys ?? [];
-  const selected = list.some((key) => key.id === remembered) ? remembered : list[0]?.id;
-  return list.find((key) => key.id === selected) ?? null;
+  const selected = keys.some((key) => key.id === remembered) ? remembered : keys[0]?.id;
+  return keys.find((key) => key.id === selected) ?? null;
 }
 
 function ModelAndSize() {
@@ -991,8 +989,7 @@ export function GeneratePanel() {
   const ui = useUi.getState;
 
   const canGenerate = project !== null && (project.isOwner || project.canGenerate);
-  // Unknown counts as yes: the warning waits until the list says otherwise.
-  const projectHasKey = project === null || projectKeys === null || projectKeys.length > 0;
+  const projectHasKey = project === null || projectKeys.length > 0;
 
   const showModel = !useUi((state) => sectionCollapsed("generate.model", state.collapsedSections));
 
@@ -1050,7 +1047,7 @@ export function GeneratePanel() {
 
   return (
     <Panel tabs={<LeftTabs />} actions={<ProviderHeader />}>
-      {project !== null && !canGenerate ? (
+      {!canGenerate ? (
         <p className="mb-3 rounded border border-amber-700 bg-amber-950/40 p-2 text-[11px] text-amber-200">
           You can edit this project but not generate in it. Generation bills the owner&apos;s image
           model key, so they have to grant it separately.
@@ -1139,9 +1136,7 @@ export function GeneratePanel() {
       <Button
         variant="primary"
         className="mb-1 w-full py-1.5 text-sm"
-        disabled={
-          busy !== null || !canGenerate || projectKeys === null || create.blocked !== null
-        }
+        disabled={busy !== null || !canGenerate || create.blocked !== null}
         title={create.blocked ?? undefined}
         onClick={() => void store().generate()}
       >

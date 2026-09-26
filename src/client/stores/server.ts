@@ -113,9 +113,8 @@ interface ServerState {
   /**
    * The keys this project can bill: the owner's. Identical to `providerKeys`
    * on a project you own, and someone else's list on one shared with you.
-   * Null until known, so "no keys" is only ever said when it is true.
    */
-  projectKeys: ProviderKeyStatus[] | null;
+  projectKeys: ProviderKeyStatus[];
 
   assets: AssetRecord[];
   jobs: JobRecord[];
@@ -180,7 +179,6 @@ interface ServerState {
 
   addProviderKey: (provider: string, label: string, key: string) => Promise<void>;
   removeProviderKey: (id: string) => Promise<void>;
-  refreshProjectKeys: () => Promise<void>;
   loadApiTokens: () => Promise<void>;
   createApiToken: (name: string) => Promise<string | null>;
   revokeApiToken: (id: string) => Promise<void>;
@@ -280,7 +278,7 @@ export const useServer = create<ServerState>((set, get) => {
 
     settings: FALLBACK_SETTINGS,
     providerKeys: [],
-    projectKeys: null,
+    projectKeys: [],
 
     assets: [],
     jobs: [],
@@ -314,16 +312,12 @@ export const useServer = create<ServerState>((set, get) => {
 
     beginProject({ project, projectKeys, settings, providerKeys }) {
       const same = get().project?.id === project.id && get().loadedProjectId === project.id;
-      const known = get().projects.some((entry) => entry.id === project.id);
 
       set({
         project,
         projectKeys,
         settings,
         providerKeys,
-        projects: known
-          ? get().projects.map((entry) => (entry.id === project.id ? project : entry))
-          : [...get().projects, project],
         // Reopening the project already in memory keeps its rows on screen
         // while fresh ones load; any other project starts empty.
         ...(same
@@ -698,7 +692,7 @@ export const useServer = create<ServerState>((set, get) => {
       get().setDefaultProcessing(restored.processing);
 
       const model = findModel(restored.generation.model);
-      const key = (get().projectKeys ?? []).find((entry) => entry.id === get().billingKeyId()) ?? null;
+      const key = get().projectKeys.find((entry) => entry.id === get().billingKeyId()) ?? null;
       if (model && key && model.provider !== key.provider) {
         useUi
           .getState()
@@ -1088,25 +1082,13 @@ export const useServer = create<ServerState>((set, get) => {
       if (!project) return null;
 
       const remembered = useUi.getState().providerKeyId[project.id];
-      const options = get().projectKeys ?? [];
+      const options = get().projectKeys;
 
       if (remembered && options.some((option) => option.id === remembered)) {
         return remembered;
       }
 
       return options.length === 1 ? options[0].id : null;
-    },
-
-    async refreshProjectKeys() {
-      try {
-        const { keys } = await projectApi<{ keys: ProviderKeyStatus[] }>(
-          projectId(),
-          "/keys"
-        );
-        set({ projectKeys: keys });
-      } catch (error) {
-        fail(error);
-      }
     },
 
     async loadApiTokens() {

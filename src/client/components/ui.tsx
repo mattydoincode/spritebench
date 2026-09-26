@@ -304,44 +304,6 @@ export function Bubble({
   );
 }
 
-export function Tabs({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div
-      role="tablist"
-      aria-label={label}
-      className="flex rounded border border-[var(--color-edge)] bg-[var(--color-ink-900)] p-0.5"
-    >
-      {children}
-    </div>
-  );
-}
-
-export function Tab({
-  selected,
-  onClick,
-  children
-}: {
-  selected: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={selected}
-      onClick={onClick}
-      className={`rounded px-2 py-0.5 text-[11px] font-semibold tracking-wider uppercase ${
-        selected
-          ? "bg-[var(--color-ink-600)] text-slate-200"
-          : "text-slate-500 hover:bg-[var(--color-ink-800)] hover:text-slate-300"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
 /**
  * Stands in for something still loading, at roughly its size. Every panel
  * uses this rather than its own spinner or "loading..." text, so loading
