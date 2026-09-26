@@ -501,6 +501,59 @@ export function Button({
  * A title-row action: 10px, no chrome at rest, a real hover so it reads as
  * clickable. `danger` is for remove / delete.
  */
+/**
+ * A text button that asks in place: the first click turns it into a red
+ * confirm label in the same spot, the second acts. Moving off it, or three
+ * seconds, puts it back. For small destructive actions, where the browser's
+ * `confirm()` would send the pointer across the screen and back.
+ */
+export function ConfirmTextButton({
+  children,
+  confirmLabel = "delete?",
+  title,
+  onConfirm
+}: {
+  children: ReactNode;
+  confirmLabel?: string;
+  title?: string;
+  onConfirm: () => void;
+}) {
+  const [armed, setArmed] = useState(false);
+
+  useEffect(() => {
+    if (!armed) return;
+    const timer = setTimeout(() => setArmed(false), 3000);
+    return () => clearTimeout(timer);
+  }, [armed]);
+
+  return (
+    <button
+      type="button"
+      title={armed ? "Click again to confirm" : title}
+      onMouseLeave={() => setArmed(false)}
+      onBlur={() => setArmed(false)}
+      onClick={() => {
+        if (!armed) {
+          setArmed(true);
+          return;
+        }
+        setArmed(false);
+        onConfirm();
+      }}
+      className={`shrink-0 rounded px-1 py-0.5 transition ${
+        armed ? "bg-rose-800" : "hover:bg-[#5a2130]"
+      }`}
+    >
+      {/* Type and colour on the span: the global button rule beats them on the button. */}
+      <span
+        className={`text-[10px] leading-none ${armed ? "text-white" : "text-slate-400 hover:text-rose-200"}`}
+      >
+        {armed ? confirmLabel : children}
+      </span>
+    </button>
+  );
+}
+
 export function TextButton({
   children,
   onClick,

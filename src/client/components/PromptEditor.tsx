@@ -28,7 +28,7 @@ import {
   snippetRefs,
   snippetSegments
 } from "@/shared/snippets";
-import { PanelTab, TextButton } from "./ui";
+import { ConfirmTextButton, PanelTab, TextButton } from "./ui";
 
 const LABEL = "text-[10px] tracking-widest text-slate-500 uppercase";
 
@@ -723,17 +723,12 @@ function SnippetMenu({
                 <span className="truncate text-[10px] text-slate-500">{entry.text}</span>
               </button>
               {canEdit ? (
-                <TextButton
-                  danger
+                <ConfirmTextButton
                   title="Delete this snippet for everyone in the project"
-                  onClick={() => {
-                    if (confirm(`Delete @${entry.name} for everyone in this project?`)) {
-                      useDoc.getState().deleteSnippet(entry.id);
-                    }
-                  }}
+                  onConfirm={() => useDoc.getState().deleteSnippet(entry.id)}
                 >
                   &times;
-                </TextButton>
+                </ConfirmTextButton>
               ) : null}
             </div>
           ))}
