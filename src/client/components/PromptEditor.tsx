@@ -137,7 +137,7 @@ export function PromptEditor({
       <div className="mb-2 flex h-7 shrink-0 items-stretch gap-4 border-b border-[var(--color-edge)]">
         <div role="tablist" aria-label="Prompt" className="flex items-stretch gap-4">
           <PanelTab size="section" selected={tab === "edit"} onClick={() => setTab("edit")}>
-            Edit Prompt
+            Edit prompt
           </PanelTab>
           <PanelTab size="section" selected={tab === "preview"} onClick={() => setTab("preview")}>
             Preview

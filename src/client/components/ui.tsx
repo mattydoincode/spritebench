@@ -366,8 +366,8 @@ export function PanelTab({
     <span
       className={`flex items-center gap-1.5 transition ${
         size === "panel"
-          ? "text-[13px] font-semibold"
-          : "text-[10px] tracking-widest uppercase"
+          ? "text-[13px] font-semibold tracking-wider uppercase"
+          : "text-[11px]"
       } ${selected ? "text-slate-100" : "text-slate-500 group-hover:text-slate-300"}`}
     >
       {children}
