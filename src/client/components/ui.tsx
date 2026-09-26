@@ -338,16 +338,21 @@ export function PanelTab({
   onClick?: () => void;
   children: ReactNode;
 }) {
-  // Type lives on the inner span: the global `button { font: inherit }` rule
-  // is unlayered, so it beats text utilities put on the button itself.
-  const className = `relative flex shrink-0 items-center transition ${
+  // Type and colour live on the inner span: the global `button { font:
+  // inherit; color: inherit }` rule is unlayered, so it beats utilities put on
+  // the button itself.
+  const className = `group relative flex shrink-0 items-center ${
     selected
-      ? "text-slate-100 after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-[var(--color-accent)]"
-      : "text-slate-500 hover:text-slate-300"
+      ? "after:absolute after:inset-x-0 after:-bottom-px after:h-0.5 after:bg-[var(--color-accent)]"
+      : ""
   }`;
 
   const content = (
-    <span className="flex items-center gap-1.5 text-[11px] font-semibold tracking-wider uppercase">
+    <span
+      className={`flex items-center gap-1.5 text-[11px] font-semibold tracking-wider uppercase transition ${
+        selected ? "text-slate-100" : "text-slate-500 group-hover:text-slate-300"
+      }`}
+    >
       {children}
       {count !== undefined ? (
         <span className="font-normal text-slate-500 tabular-nums">{count}</span>
