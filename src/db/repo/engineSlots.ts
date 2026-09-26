@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, notInArray } from "drizzle-orm";
+import { and, asc, eq, isNull, ne, notInArray } from "drizzle-orm";
 import {
   deriveSlotStatus,
   type EngineSlotIntent,
@@ -7,6 +7,7 @@ import {
 } from "@/shared/engineSlot";
 import { db } from "../index";
 import { engineSlots, type EngineSlotRow } from "../schema";
+import { syncCatalogCollections, type CatalogCollection } from "./engineCollections";
 
 export interface CatalogSlot {
   id: string;
@@ -35,7 +36,9 @@ function toRecord(row: EngineSlotRow): EngineSlotRecord {
     remoteHash: row.remoteHash,
     status: deriveSlotStatus(row),
     lastSeenAt: row.lastSeenAt.toISOString(),
-    tombstonedAt: row.tombstonedAt?.toISOString() ?? null
+    tombstonedAt: row.tombstonedAt?.toISOString() ?? null,
+    recordId: row.recordId ?? null,
+    fieldKey: row.fieldKey ?? null
   };
 }
 
@@ -73,10 +76,15 @@ export async function getEngineSlot(
  * Godot owns the catalog. Rows in the payload are upserted and un-tombstoned.
  * Rows the payload omits are tombstoned, not deleted, so an assignment
  * survives a closed scene.
+ *
+ * Record field slots are left to the collection sync instead: a record
+ * created on the web has slots before Godot has ever listed them. An older
+ * addon that sends no `collections` leaves collections untouched.
  */
 export async function upsertCatalog(
   projectId: string,
-  slots: CatalogSlot[]
+  slots: CatalogSlot[],
+  collections?: CatalogCollection[]
 ): Promise<EngineSlotRecord[]> {
   const now = new Date();
   const ids = slots.map((slot) => slot.id);
@@ -132,14 +140,6 @@ export async function upsertCatalog(
         });
     }
 
-    if (ids.length === 0) {
-      await tx
-        .update(engineSlots)
-        .set({ tombstonedAt: now, updatedAt: now })
-        .where(and(eq(engineSlots.projectId, projectId), isNull(engineSlots.tombstonedAt)));
-      return;
-    }
-
     await tx
       .update(engineSlots)
       .set({ tombstonedAt: now, updatedAt: now })
@@ -147,9 +147,14 @@ export async function upsertCatalog(
         and(
           eq(engineSlots.projectId, projectId),
           isNull(engineSlots.tombstonedAt),
-          notInArray(engineSlots.id, ids)
+          ne(engineSlots.kind, "record_field"),
+          ids.length > 0 ? notInArray(engineSlots.id, ids) : undefined
         )
       );
+
+    if (collections) {
+      await syncCatalogCollections(tx, projectId, collections, now);
+    }
   });
 
   return listEngineSlots(projectId);

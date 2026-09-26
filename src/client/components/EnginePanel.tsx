@@ -1,25 +1,24 @@
 "use client";
 
-import { useState, type DragEvent } from "react";
+import { useMemo, useState, type DragEvent } from "react";
 import { isAssetDrag, readAssetDrag } from "@/client/dragAssets";
-import { useAssets } from "@/client/stores/assets";
+import { useActiveScene, useAssets } from "@/client/stores/assets";
 import { useServer } from "@/client/stores/server";
-import { useUi } from "@/client/stores/ui";
-import { describeAssignProgress } from "@/shared/assignStream";
+import { ENGINE_THUMB_MAX, ENGINE_THUMB_MIN, useUi } from "@/client/stores/ui";
+import { describeSlotActivity } from "@/shared/assignStream";
 import { faceId, setBadge } from "@/shared/assetSet";
 import { describeShipment } from "@/shared/engineBundle";
 import {
-  dropSlotAssignment,
   type EngineSlotIntent,
   type EngineSlotRecord,
   type EngineSlotStatus
 } from "@/shared/engineSlot";
 import type { ResolvedAsset } from "@/shared/model";
+import type { SlotEdit } from "@/shared/slotEdits";
 import { AssetThumb } from "./AssetBitmap";
+import { EngineCollections } from "./EngineCollections";
 import { RightTabs } from "./RightTabs";
-import { Button, Panel, TextButton } from "./ui";
-
-const THUMB = 40;
+import { Panel, TextButton } from "./ui";
 
 const STATUS_LABEL: Record<EngineSlotStatus, string> = {
   empty: "empty",
@@ -52,15 +51,16 @@ function assignedLabel(asset: ResolvedAsset | undefined, fallback: string): stri
 function AssignedList({
   slot,
   assets,
-  canEdit,
-  busy
+  highlight,
+  canEdit
 }: {
   slot: EngineSlotRecord;
   assets: ResolvedAsset[];
+  highlight: ReadonlySet<string>;
   canEdit: boolean;
-  busy: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const thumb = useUi((state) => state.engineThumbSize);
   const ids = slot.assignedAssetIds;
   const array = slot.intent === "textures";
 
@@ -77,8 +77,7 @@ function AssignedList({
         ? `assigned ${assignedLabel(byId.get(ids[0]), ids[0].slice(0, 8))} · ${shipment}`
         : `assigned ${ids.length} assets · ${shipment}`;
 
-  const replace = (assetIds: string[]) =>
-    void useServer.getState().assignSlot(slot.id, assetIds, { replace: true });
+  const edit = (change: SlotEdit) => void useServer.getState().editSlot(slot.id, change);
 
   if (ids.length === 0) {
     return <p className="mt-1 text-[10px] text-slate-600">{summary}</p>;
@@ -106,7 +105,9 @@ function AssignedList({
             return (
               <li
                 key={`${id}-${index}`}
-                className="flex items-center gap-1.5 rounded border border-[var(--color-edge)] bg-[var(--color-ink-900)] px-1 py-1"
+                className={`flex items-center gap-1.5 rounded border bg-[var(--color-ink-900)] px-1 py-1 ${
+                  highlight.has(id) ? "border-[var(--color-accent)]" : "border-[var(--color-edge)]"
+                }`}
               >
                 <button
                   type="button"
@@ -115,11 +116,11 @@ function AssignedList({
                   className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
                 >
                   {asset ? (
-                    <AssetThumb asset={asset} size={THUMB} />
+                    <AssetThumb asset={asset} size={thumb} />
                   ) : (
                     <div
                       className="checkerboard shrink-0 rounded"
-                      style={{ width: THUMB, height: THUMB }}
+                      style={{ width: thumb, height: thumb }}
                     />
                   )}
                   <span className="min-w-0">
@@ -131,12 +132,29 @@ function AssignedList({
                     </span>
                   </span>
                 </button>
+                {canEdit && array && ids.length > 1 ? (
+                  <span className="flex shrink-0 flex-col">
+                    <TextButton
+                      disabled={index === 0}
+                      title="Move earlier in the Godot array"
+                      onClick={() => edit({ type: "move", assetId: id, delta: -1 })}
+                    >
+                      {"\u25b4"}
+                    </TextButton>
+                    <TextButton
+                      disabled={index === ids.length - 1}
+                      title="Move later in the Godot array"
+                      onClick={() => edit({ type: "move", assetId: id, delta: 1 })}
+                    >
+                      {"\u25be"}
+                    </TextButton>
+                  </span>
+                ) : null}
                 {canEdit ? (
                   <TextButton
                     danger
-                    disabled={busy}
                     title={array ? "Remove from this Godot array" : "Unassign from this slot"}
-                    onClick={() => replace(dropSlotAssignment(ids, [id]))}
+                    onClick={() => edit({ type: "drop", assetIds: [id] })}
                   >
                     remove
                   </TextButton>
@@ -148,9 +166,8 @@ function AssignedList({
             <li className="flex justify-end">
               <TextButton
                 danger
-                disabled={busy}
                 title="Remove every assigned image"
-                onClick={() => replace([])}
+                onClick={() => edit({ type: "replace", assetIds: [] })}
               >
                 clear all
               </TextButton>
@@ -164,25 +181,22 @@ function AssignedList({
 
 function SlotRow({
   slot,
-  selectedAssetIds,
+  highlight,
   canEdit,
   assets
 }: {
   slot: EngineSlotRecord;
-  selectedAssetIds: string[];
+  highlight: ReadonlySet<string>;
   canEdit: boolean;
   assets: ResolvedAsset[];
 }) {
-  const busy = useUi((state) => state.busy);
-  const assigning = useUi((state) =>
-    state.assigning?.slotId === slot.id ? state.assigning : null
-  );
+  const assigning = useUi((state) => state.assigning[slot.id] ?? null);
+  const queued = useUi((state) => state.assignQueued[slot.id] ?? 0);
+  const active = Boolean(assigning) || queued > 0;
   const [dragOver, setDragOver] = useState(false);
-  const array = slot.intent === "textures";
-  const canAssign =
-    canEdit && !assigning && (array ? selectedAssetIds.length > 0 : selectedAssetIds.length === 1);
+  const lit = slot.assignedAssetIds.some((id) => highlight.has(id));
 
-  const accept = (event: DragEvent) => canEdit && busy === null && isAssetDrag(event);
+  const accept = (event: DragEvent) => canEdit && isAssetDrag(event);
 
   return (
     <li
@@ -212,22 +226,37 @@ function SlotRow({
           ? "border-sky-500"
           : dragOver
             ? "border-[var(--color-accent)] border-dashed"
-            : "border-[var(--color-edge)]"
+            : lit
+              ? "border-[var(--color-accent)] ring-1 ring-[var(--color-accent)]"
+              : "border-[var(--color-edge)]"
       }`}
     >
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
+        <button
+          type="button"
+          title={
+            slot.assignedAssetIds.length > 0
+              ? "Select this slot's art in the library"
+              : "Drag library assets here to assign them"
+          }
+          onClick={() => {
+            if (slot.assignedAssetIds.length > 0) {
+              useUi.getState().selectMany([...slot.assignedAssetIds]);
+            }
+          }}
+          className="min-w-0 text-left"
+        >
           <p className="truncate text-[12px] text-slate-200">{slot.label}</p>
           <p className="truncate font-mono text-[10px] text-slate-500">
             {INTENT_LABEL[slot.intent ?? "texture"]} · {slot.godotPath || slot.id}
           </p>
-        </div>
+        </button>
         <span
           className={`shrink-0 text-[10px] ${
-            assigning ? "text-sky-400" : `uppercase ${STATUS_TONE[slot.status]}`
+            active ? "text-sky-400" : `uppercase ${STATUS_TONE[slot.status]}`
           }`}
         >
-          {assigning ? describeAssignProgress(assigning) : STATUS_LABEL[slot.status]}
+          {active ? describeSlotActivity(assigning, queued) : STATUS_LABEL[slot.status]}
         </span>
       </div>
 
@@ -245,12 +274,7 @@ function SlotRow({
         </div>
       ) : null}
 
-      <AssignedList
-        slot={slot}
-        assets={assets}
-        canEdit={canEdit}
-        busy={busy !== null}
-      />
+      <AssignedList slot={slot} assets={assets} highlight={highlight} canEdit={canEdit} />
 
       {slot.status === "edited_in_godot" ? (
         <p className="mt-1 text-[10px] text-amber-400">
@@ -264,31 +288,40 @@ function SlotRow({
         </p>
       ) : null}
 
-      {canAssign || assigning ? (
-        <Button
-          className="mt-2"
-          variant="primary"
-          disabled={busy !== null || Boolean(assigning)}
-          onClick={() => void useServer.getState().assignSlot(slot.id, selectedAssetIds)}
-        >
-          {assigning
-            ? describeAssignProgress(assigning)
-            : array
-              ? `add selected (${selectedAssetIds.length})`
-              : "assign selected"}
-        </Button>
-      ) : null}
     </li>
   );
 }
 
+/**
+ * Assets to light up here: whatever is selected in the library, plus the art
+ * behind any objects selected in the scene.
+ */
+function useHighlightedAssets(): ReadonlySet<string> {
+  const selectedIds = useUi((state) => state.selectedIds);
+  const selectedItemIds = useUi((state) => state.selectedItemIds);
+  const activeItemId = useUi((state) => state.activeItemId);
+  const scene = useActiveScene();
+
+  return useMemo(() => {
+    const ids = new Set(selectedIds);
+    const items = new Set(selectedItemIds);
+    if (activeItemId) items.add(activeItemId);
+    for (const item of scene?.items ?? []) {
+      if (items.has(item.id)) ids.add(item.assetId);
+    }
+    return ids;
+  }, [selectedIds, selectedItemIds, activeItemId, scene]);
+}
+
 export function EnginePanel() {
-  const slots = useServer((state) => state.slots);
+  const allSlots = useServer((state) => state.slots);
+  const collections = useServer((state) => state.collections);
   const project = useServer((state) => state.project);
   const assets = useAssets();
-  const selectedIds = useUi((state) => state.selectedIds);
+  const thumbSize = useUi((state) => state.engineThumbSize);
+  const highlight = useHighlightedAssets();
   const canEdit = project?.role !== "viewer";
-  const selectedAssetIds = selectedIds.filter((id) => assets.some((asset) => asset.id === id));
+  const slots = allSlots.filter((slot) => slot.kind !== "record_field");
 
   return (
     <Panel title="Godot" pane="right" lead={<RightTabs />}>
@@ -298,18 +331,47 @@ export function EnginePanel() {
         </p>
       ) : null}
 
-      {slots.length === 0 ? (
+      {allSlots.length > 0 || collections.length > 0 ? (
+        <label className="mb-2 flex items-center gap-2 text-[10px] text-slate-500">
+          image size
+          <input
+            type="range"
+            min={ENGINE_THUMB_MIN}
+            max={ENGINE_THUMB_MAX}
+            step={8}
+            value={thumbSize}
+            onChange={(event) =>
+              useUi.getState().setEngineThumbSize(Number.parseInt(event.target.value, 10))
+            }
+            className="min-w-0 flex-1"
+          />
+        </label>
+      ) : null}
+
+      {collections.length > 0 ? (
+        <div className="mb-3">
+          <EngineCollections
+            collections={collections}
+            slots={allSlots}
+            assets={assets}
+            highlight={highlight}
+            canEdit={Boolean(canEdit)}
+          />
+        </div>
+      ) : null}
+
+      {slots.length === 0 && collections.length === 0 ? (
         <p className="text-[11px] leading-snug text-slate-500">
           No Godot slots yet. Enable the SpriteBench addon, paste a personal access
           token, and sync. Slots you opt into over there show up here.
         </p>
-      ) : (
+      ) : slots.length === 0 ? null : (
         <ul className="flex flex-col gap-2">
           {slots.map((slot) => (
             <SlotRow
               key={slot.id}
               slot={slot}
-              selectedAssetIds={canEdit ? selectedAssetIds : []}
+              highlight={highlight}
               canEdit={Boolean(canEdit)}
               assets={assets}
             />
@@ -319,8 +381,8 @@ export function EnginePanel() {
 
       {slots.length > 0 && canEdit ? (
         <p className="mt-2 text-[10px] text-slate-600">
-          Drag library assets onto a slot. Open an array to remove images
-          {selectedAssetIds.length > 0 ? ", or use the selection to add." : "."}
+          Drag library assets onto a slot to assign them. Click a slot to find its art
+          in the library; open an array to reorder or remove images.
         </p>
       ) : null}
     </Panel>

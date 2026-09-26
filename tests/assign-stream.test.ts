@@ -24,7 +24,9 @@ const slot: EngineSlotRecord = {
   remoteHash: "abc",
   status: "pull_available",
   lastSeenAt: "2026-01-01T00:00:00.000Z",
-  tombstonedAt: null
+  tombstonedAt: null,
+  recordId: null,
+  fieldKey: null
 };
 
 async function* chunks(...parts: string[]): AsyncGenerator<string> {

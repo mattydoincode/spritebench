@@ -143,6 +143,8 @@ interface Stored extends ProjectDraft {
   snapToGrid: boolean;
   showGrid: boolean;
   lockFootprintAspect: boolean;
+  /** Thumbnail size in the Godot panel, in pixels. */
+  engineThumbSize: number;
   /** Per project, so switching projects restores where you were. */
   activeSceneId: Record<string, string>;
   /** Per scene: two scenes are two different places. */
@@ -535,6 +537,16 @@ export function switchProjectDraft(
   };
 }
 
+export const ENGINE_THUMB_MIN = 32;
+export const ENGINE_THUMB_MAX = 192;
+export const ENGINE_THUMB_DEFAULT = 48;
+
+export function clampEngineThumbSize(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) return ENGINE_THUMB_DEFAULT;
+  return Math.min(ENGINE_THUMB_MAX, Math.max(ENGINE_THUMB_MIN, Math.round(parsed)));
+}
+
 const DEFAULTS: Stored = {
   activeProjectId: null,
   ...cloneProjectDraft(DEFAULT_PROJECT_DRAFT),
@@ -542,6 +554,7 @@ const DEFAULTS: Stored = {
   snapToGrid: true,
   showGrid: true,
   lockFootprintAspect: true,
+  engineThumbSize: ENGINE_THUMB_DEFAULT,
   activeSceneId: {},
   camera: {},
   sceneView: {},
@@ -581,6 +594,7 @@ function read(): Stored {
       },
       inspectorPreview: clampInspectorPreview(stored.inspectorPreview),
       processWorkers: clampProcessWorkers(stored.processWorkers),
+      engineThumbSize: clampEngineThumbSize(stored.engineThumbSize),
       sceneView: readSceneView(stored.sceneView)
     };
   } catch {
@@ -606,6 +620,7 @@ function persist(state: Stored): void {
           snapToGrid: state.snapToGrid,
           showGrid: state.showGrid,
           lockFootprintAspect: state.lockFootprintAspect,
+          engineThumbSize: state.engineThumbSize,
           activeSceneId: state.activeSceneId,
           camera: state.camera,
           sceneView: state.sceneView,
@@ -650,7 +665,10 @@ interface UiState extends Stored {
   templateBuilderOpen: boolean;
   batches: number;
   busy: string | null;
-  assigning: SlotAssignProgress | null;
+  /** Slot id → the batch being exported right now. */
+  assigning: Record<string, SlotAssignProgress>;
+  /** Slot id → edits waiting behind that batch. */
+  assignQueued: Record<string, number>;
   error: string | null;
   notice: string | null;
 
@@ -729,9 +747,11 @@ interface UiState extends Stored {
   toggleSnap: () => void;
   toggleGrid: () => void;
   toggleFootprintLock: () => void;
+  setEngineThumbSize: (size: number) => void;
 
   setBusy: (value: string | null) => void;
-  setAssigning: (value: SlotAssignProgress | null) => void;
+  setAssigning: (slotId: string, value: SlotAssignProgress | null) => void;
+  setAssignQueued: (slotId: string, queued: number) => void;
   setError: (message: string | null) => void;
   setNotice: (message: string | null) => void;
 }
@@ -759,7 +779,8 @@ export const useUi = create<UiState>((set, get) => {
     bases: [],
     mask: null,
     busy: null,
-    assigning: null,
+    assigning: {},
+    assignQueued: {},
     error: null,
     notice: null,
 
@@ -1152,12 +1173,23 @@ export const useUi = create<UiState>((set, get) => {
       save();
     },
 
-    setBusy(value) {
-      set({ busy: value, assigning: value === null ? null : get().assigning });
+    setEngineThumbSize(size) {
+      set({ engineThumbSize: clampEngineThumbSize(size) });
+      save();
     },
 
-    setAssigning(value) {
-      set({ assigning: value, busy: value ? "uploading" : get().busy });
+    setBusy(value) {
+      set({ busy: value });
+    },
+
+    setAssigning(slotId, value) {
+      const { [slotId]: _, ...rest } = get().assigning;
+      set({ assigning: value ? { ...rest, [slotId]: value } : rest });
+    },
+
+    setAssignQueued(slotId, queued) {
+      const { [slotId]: _, ...rest } = get().assignQueued;
+      set({ assignQueued: queued > 0 ? { ...rest, [slotId]: queued } : rest });
     },
 
     setError(message) {

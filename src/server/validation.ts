@@ -274,7 +274,7 @@ export const catalogBodySchema = z.object({
     .array(
       z.object({
         id: z.string().uuid(),
-        kind: z.enum(["node", "set_item", "set_bag"]),
+        kind: z.enum(["node", "set_item", "set_bag", "record_field"]),
         intent: z.enum(["texture", "sprite_frames", "textures"]).optional(),
         label: z.string().trim().min(1).max(255),
         path: z.string().max(1024).default(""),
@@ -285,7 +285,41 @@ export const catalogBodySchema = z.object({
           .optional()
       })
     )
-    .max(2000)
+    .max(2000),
+  collections: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        label: z.string().trim().min(1).max(255),
+        path: z.string().max(1024).default(""),
+        fields: z
+          .array(
+            z.object({
+              key: z.string().trim().min(1).max(64),
+              intent: z.enum(["texture", "textures"])
+            })
+          )
+          .max(32),
+        records: z
+          .array(
+            z.object({
+              id: z.string().uuid(),
+              key: z.string().trim().min(1).max(120)
+            })
+          )
+          .max(2000)
+      })
+    )
+    .max(200)
+    .optional()
+});
+
+export const recordCreateBodySchema = z.object({
+  key: z.string().trim().min(1).max(120)
+});
+
+export const recordPatchBodySchema = z.object({
+  key: z.string().trim().min(1).max(120)
 });
 
 export const assignSlotBodySchema = z

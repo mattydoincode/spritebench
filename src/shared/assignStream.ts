@@ -29,6 +29,12 @@ export function describeAssignProgress(progress: SlotAssignProgress): string {
   return `processing ${current} of ${total}`;
 }
 
+/** "processing 1 of 3 · 2 queued", or just "queued" before the first batch starts. */
+export function describeSlotActivity(progress: SlotAssignProgress | null, queued: number): string {
+  const head = progress ? describeAssignProgress(progress) : "queued";
+  return progress && queued > 0 ? `${head} · ${queued} queued` : head;
+}
+
 /** Proxies and gzip often hold tiny NDJSON lines until a few KB arrive. */
 export const ASSIGN_STREAM_FLUSH_PAD = `${" ".repeat(2048)}\n`;
 

@@ -3,6 +3,7 @@ import {
   deriveSlotStatus,
   dropSlotAssignment,
   mergeSlotAssignment,
+  moveSlotAssignment,
   replaceSlotAssignment
 } from "@/shared/engineSlot";
 import { hashApiToken, mintApiToken } from "@/server/apiToken";
@@ -137,5 +138,17 @@ describe("mintApiToken", () => {
     expect(minted.hash).toBe(hashApiToken(minted.token));
     expect(minted.hash).not.toContain(minted.token.slice(4));
     expect(hashApiToken("other")).not.toBe(minted.hash);
+  });
+});
+
+describe("moveSlotAssignment", () => {
+  it("moves an entry up and down", () => {
+    expect(moveSlotAssignment(["a", "b", "c"], 2, -1)).toEqual(["a", "c", "b"]);
+    expect(moveSlotAssignment(["a", "b", "c"], 0, 1)).toEqual(["b", "a", "c"]);
+  });
+
+  it("clamps at the ends and ignores bad indexes", () => {
+    expect(moveSlotAssignment(["a", "b"], 0, -1)).toEqual(["a", "b"]);
+    expect(moveSlotAssignment(["a", "b"], 5, 1)).toEqual(["a", "b"]);
   });
 });

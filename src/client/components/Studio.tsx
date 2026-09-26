@@ -15,6 +15,7 @@ import { Scene } from "@/client/components/Scene";
 import { ProjectBar } from "@/client/components/ProjectBar";
 import { ResizeHandle } from "@/client/components/ResizeHandle";
 import { anyModalOpen } from "@/client/components/ui";
+import { usePrefetchNewAssets } from "@/client/prefetch";
 import { useDoc } from "@/client/stores/doc";
 import { useServer } from "@/client/stores/server";
 import { DEFAULT_LAYOUT, type Pane, useUi } from "@/client/stores/ui";
@@ -119,6 +120,8 @@ export function Studio({ projectId }: { projectId: string }) {
     const id = useDoc.getState().createScene("scene");
     if (id) useUi.getState().setActiveScene(project.id, id);
   }, [project, docReady, scenes.length]);
+
+  usePrefetchNewAssets();
 
   const hasActiveJobs = jobs.some(
     (job) => job.status === "queued" || job.status === "blocked" || job.status === "running"

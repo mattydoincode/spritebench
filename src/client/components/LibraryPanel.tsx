@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { requestPartUrl } from "@/client/api";
 import { startAssetDrag } from "@/client/dragAssets";
 import { resolveAssetsNow, useActiveScene, useAssets } from "@/client/stores/assets";
@@ -48,6 +48,7 @@ function LibraryThumb({
   sceneId,
   stageIndex,
   preferSource,
+  reveal,
   onClick
 }: {
   asset: ResolvedAsset;
@@ -57,10 +58,19 @@ function LibraryThumb({
   sceneId: string | null;
   stageIndex: number;
   preferSource: boolean;
+  /** Scroll into view: selection arrived from another panel. */
+  reveal: boolean;
   onClick: (event: React.MouseEvent, id: string) => void;
 }) {
+  const ref = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (reveal) ref.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [reveal]);
+
   return (
     <button
+      ref={ref}
       type="button"
       draggable
       onDragStart={(event) =>
@@ -329,6 +339,7 @@ export function LibraryPanel() {
         sceneId={scene?.id ?? null}
         stageIndex={scene?.items.length ?? 0}
         preferSource={entry.id === selectedIds[selectedIds.length - 1]}
+        reveal={entry.id === selectedIds[0]}
         onClick={onThumbClick}
       />
     );

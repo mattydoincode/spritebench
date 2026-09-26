@@ -1,4 +1,4 @@
-export const ENGINE_SLOT_KINDS = ["node", "set_item", "set_bag"] as const;
+export const ENGINE_SLOT_KINDS = ["node", "set_item", "set_bag", "record_field"] as const;
 export type EngineSlotKind = (typeof ENGINE_SLOT_KINDS)[number];
 
 export const ENGINE_SLOT_INTENTS = ["texture", "sprite_frames", "textures"] as const;
@@ -26,6 +26,9 @@ export interface EngineSlotRecord {
   status: EngineSlotStatus;
   lastSeenAt: string;
   tombstonedAt: string | null;
+  /** Set for `record_field` slots. */
+  recordId: string | null;
+  fieldKey: string | null;
 }
 
 /** Arrays append unique ids. Stills and clips take the first incoming id. */
@@ -68,6 +71,20 @@ export function dropSlotAssignment(
   if (remove.length === 0) return [...existing];
   const drop = new Set(remove);
   return existing.filter((id) => !drop.has(id));
+}
+
+/** Moves one entry of an array assignment by `delta` places, clamped to the ends. */
+export function moveSlotAssignment(
+  existing: readonly string[],
+  index: number,
+  delta: number
+): string[] {
+  const next = [...existing];
+  if (index < 0 || index >= next.length) return next;
+  const to = Math.max(0, Math.min(next.length - 1, index + delta));
+  const [moved] = next.splice(index, 1);
+  next.splice(to, 0, moved);
+  return next;
 }
 
 /**

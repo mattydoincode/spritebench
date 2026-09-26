@@ -12,11 +12,13 @@ import {
   MIN_PROCESS_WORKERS,
   processJobElapsed,
   processQueueCount,
+  prefetchCapacity,
   PROCESS_PRIORITY,
   startProcessJobs,
   upgradeProcess,
   type ProcessJob
 } from "@/client/processQueue";
+import { takeNewArrivals } from "@/shared/prefetch";
 
 function job(patch: Partial<ProcessJob> & Pick<ProcessJob, "id" | "cacheKey">): ProcessJob {
   return {
@@ -116,5 +118,74 @@ describe("clampProcessWorkers", () => {
     expect(clampProcessWorkers(0)).toBe(MIN_PROCESS_WORKERS);
     expect(clampProcessWorkers(99)).toBe(MAX_PROCESS_WORKERS);
     expect(clampProcessWorkers(4.6)).toBe(5);
+  });
+});
+
+describe("prefetch", () => {
+  const prefetchJob = (id: number): ProcessJob => ({
+    id,
+    cacheKey: `p${id}:source:1:0`,
+    assetId: `p${id}`,
+    variant: "source",
+    wantSource: true,
+    priority: PROCESS_PRIORITY.prefetch,
+    status: "pending",
+    queuedAt: 0
+  });
+
+  it("never takes the last free worker", () => {
+    let state = emptyProcessQueue();
+    for (const id of [1, 2, 3]) state = enqueueProcess(state, prefetchJob(id));
+    const { started } = startProcessJobs(state, 2, 0);
+    expect(started.map((job) => job.id)).toEqual([1]);
+  });
+
+  it("lets an interactive job take the reserved worker", () => {
+    let state = emptyProcessQueue();
+    for (const id of [1, 2, 3]) state = enqueueProcess(state, prefetchJob(id));
+    state = startProcessJobs(state, 2, 0).state;
+    state = enqueueProcess(state, { ...prefetchJob(9), priority: PROCESS_PRIORITY.selected });
+    const { started } = startProcessJobs(state, 2, 1);
+    expect(started.map((job) => job.id)).toEqual([9]);
+  });
+
+  it("runs behind thumbnails and inspector work", () => {
+    let state = emptyProcessQueue();
+    state = enqueueProcess(state, prefetchJob(1));
+    state = enqueueProcess(state, { ...prefetchJob(2), priority: PROCESS_PRIORITY.background });
+    state = enqueueProcess(state, { ...prefetchJob(3), priority: PROCESS_PRIORITY.selected });
+    expect(state.pending.map((job) => job.id)).toEqual([3, 2, 1]);
+  });
+
+  it("jumps ahead once the same image is opened", () => {
+    let state = enqueueProcess(emptyProcessQueue(), prefetchJob(1));
+    state = enqueueProcess(state, prefetchJob(2));
+    state = upgradeProcess(state, "p2:source:1:0", true, PROCESS_PRIORITY.selected);
+    expect(state.pending[0].id).toBe(2);
+  });
+
+  it("still uses a lone worker", () => {
+    const state = enqueueProcess(emptyProcessQueue(), prefetchJob(1));
+    expect(startProcessJobs(state, 1, 0).started).toHaveLength(1);
+    expect(prefetchCapacity(4)).toBe(3);
+  });
+});
+
+describe("takeNewArrivals", () => {
+  it("returns unseen assets with a source, newest first, once", () => {
+    const seen = new Set(["old"]);
+    const assets = [
+      { id: "old", hasSource: true },
+      { id: "a", hasSource: true },
+      { id: "gone", hasSource: false },
+      { id: "b", hasSource: true }
+    ];
+    expect(takeNewArrivals(seen, assets)).toEqual(["b", "a"]);
+    expect(takeNewArrivals(seen, assets)).toEqual([]);
+  });
+
+  it("caps a big batch to the newest", () => {
+    const assets = Array.from({ length: 5 }, (_, i) => ({ id: `a${i}`, hasSource: true }));
+    expect(takeNewArrivals(new Set(), assets, 2)).toEqual(["a4", "a3"]);
   });
 });

@@ -32,11 +32,10 @@ import {
   consumeAssignEvents,
   emptyAssignProgress
 } from "@/shared/assignStream";
-import {
-  mergeSlotAssignment,
-  replaceSlotAssignment,
-  type EngineSlotRecord
-} from "@/shared/engineSlot";
+import type { EngineSlotRecord } from "@/shared/engineSlot";
+import { applySlotEdits, sameAssignment, type SlotEdit } from "@/shared/slotEdits";
+import { createSlotQueue } from "@/client/slotQueue";
+import type { EngineCollectionView } from "@/shared/engineCollection";
 import { useDoc } from "./doc";
 import { useUi } from "./ui";
 
@@ -120,6 +119,8 @@ interface ServerState {
   /** Plaintext PAT, only after mint, only until dismissed. */
   mintedToken: string | null;
   slots: EngineSlotRecord[];
+  /** Godot collections of keyed records; their field slots are in `slots`. */
+  collections: EngineCollectionView[];
 
   loadProjects: () => Promise<ProjectSummary[]>;
   openProject: (projectId: string) => Promise<void>;
@@ -176,6 +177,11 @@ interface ServerState {
     assetIds: string[],
     options?: { replace?: boolean }
   ) => Promise<void>;
+  /** Queues an edit; slots export in parallel, edits to one slot in order. */
+  editSlot: (slotId: string, edit: SlotEdit) => Promise<void>;
+  createRecord: (collectionId: string, key: string, copyFrom?: string) => Promise<void>;
+  renameRecord: (collectionId: string, recordId: string, key: string) => Promise<void>;
+  deleteRecord: (collectionId: string, recordId: string) => Promise<void>;
   /** The key the next generation will bill, or null to let the server decide. */
   billingKeyId: () => string | null;
 }
@@ -205,6 +211,47 @@ export const useServer = create<ServerState>((set, get) => {
     useUi.getState().setError(error instanceof Error ? error.message : String(error));
   };
 
+  const runSlotEdits = async (slotId: string, edits: SlotEdit[]): Promise<void> => {
+    const current = get().slots.find((entry) => entry.id === slotId);
+    if (!current) return;
+    const existing = current.assignedAssetIds ?? [];
+    const assetIds = applySlotEdits(current.intent ?? "texture", existing, edits);
+    if (sameAssignment(assetIds, existing) && current.remoteHash) return;
+
+    const ui = useUi.getState();
+    ui.setError(null);
+    ui.setAssigning(slotId, emptyAssignProgress(slotId, assetIds));
+
+    try {
+      const response = await fetch(`/api/v1/projects/${projectId()}/slots/${slotId}/assign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assetIds, replace: true })
+      });
+      await rejectIfNotOk(response);
+      if (!response.body) throw new Error("assign stream missing body");
+
+      const slot = await consumeAssignEvents(iterateBody(response.body), (event) => {
+        const progress = useUi.getState().assigning[slotId];
+        if (progress) useUi.getState().setAssigning(slotId, applyAssignStreamEvent(progress, event));
+      });
+
+      set({
+        slots: get().slots.map((entry) => (entry.id === slot.id ? slot : entry))
+      });
+      void get().refreshAssets();
+    } catch (error) {
+      fail(error);
+      void get().refreshSlots();
+    } finally {
+      useUi.getState().setAssigning(slotId, null);
+    }
+  };
+
+  const slotQueue = createSlotQueue<SlotEdit>(runSlotEdits, (slotId, queued) =>
+    useUi.getState().setAssignQueued(slotId, queued)
+  );
+
   const adoptCreated = (created: JobRecord[]): void => {
     if (created.length === 0) return;
     const seen = new Set(created.map((job) => job.id));
@@ -229,6 +276,7 @@ export const useServer = create<ServerState>((set, get) => {
     apiTokens: [],
     mintedToken: null,
     slots: [],
+    collections: [],
 
     async loadProjects() {
       try {
@@ -261,7 +309,8 @@ export const useServer = create<ServerState>((set, get) => {
         jobs: [],
         palettes: [],
         templates: [],
-        slots: []
+        slots: [],
+        collections: []
       });
 
       // The document opens alongside the row data rather than after it: a
@@ -275,8 +324,11 @@ export const useServer = create<ServerState>((set, get) => {
           projectApi<{ jobs: JobRecord[] }>(id, "/jobs"),
           projectApi<{ palettes: PaletteInfo[] }>(id, "/palettes"),
           projectApi<{ templates: TemplateInfo[] }>(id, "/templates"),
-          api<{ slots: EngineSlotRecord[] }>(`/api/v1/projects/${id}/slots`).catch(() => ({
-            slots: [] as EngineSlotRecord[]
+          api<{ slots: EngineSlotRecord[]; collections?: EngineCollectionView[] }>(
+            `/api/v1/projects/${id}/slots`
+          ).catch(() => ({
+            slots: [] as EngineSlotRecord[],
+            collections: [] as EngineCollectionView[]
           }))
         ]);
 
@@ -286,7 +338,8 @@ export const useServer = create<ServerState>((set, get) => {
           jobs: jobsRes.jobs,
           palettes: palettesRes.palettes,
           templates: templatesRes.templates,
-          slots: slotsRes.slots
+          slots: slotsRes.slots,
+          collections: slotsRes.collections ?? []
         });
 
         useDoc.getState().backfill(assetsRes.assets, {
@@ -1061,57 +1114,80 @@ export const useServer = create<ServerState>((set, get) => {
 
     async refreshSlots() {
       try {
-        const { slots } = await api<{ slots: EngineSlotRecord[] }>(
-          `/api/v1/projects/${projectId()}/slots`
-        );
-        set({ slots });
+        const { slots, collections } = await api<{
+          slots: EngineSlotRecord[];
+          collections?: EngineCollectionView[];
+        }>(`/api/v1/projects/${projectId()}/slots`);
+        set({ slots, collections: collections ?? [] });
       } catch {
         // Polling is best effort; the next tick recovers.
       }
     },
 
-    async assignSlot(slotId, assetIds, options) {
-      const current = get().slots.find((entry) => entry.id === slotId);
-      const replace = options?.replace === true;
-      const planned = current
-        ? replace
-          ? replaceSlotAssignment(current.intent ?? "texture", assetIds)
-          : mergeSlotAssignment(
-              current.intent ?? "texture",
-              current.assignedAssetIds ?? [],
-              assetIds
-            )
-        : assetIds;
-
-      useUi.setState({
-        busy: "uploading",
-        error: null,
-        assigning: emptyAssignProgress(slotId, planned)
+    assignSlot(slotId, assetIds, options) {
+      return get().editSlot(slotId, {
+        type: options?.replace === true ? "replace" : "add",
+        assetIds
       });
+    },
 
+    editSlot(slotId, edit) {
+      return slotQueue.enqueue(slotId, edit);
+    },
+
+    async createRecord(collectionId, key, copyFrom) {
+      const base = `/api/v1/projects/${projectId()}/collections/${collectionId}/records`;
       try {
-        const response = await fetch(`/api/v1/projects/${projectId()}/slots/${slotId}/assign`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ assetIds, ...(replace ? { replace: true } : {}) })
-        });
-        await rejectIfNotOk(response);
-        if (!response.body) throw new Error("assign stream missing body");
+        const { id, collections } = await api<{
+          id: string;
+          collections: EngineCollectionView[];
+        }>(base, { method: "POST", body: JSON.stringify({ key }) });
+        set({ collections });
+        await get().refreshSlots();
+        if (!copyFrom) return;
 
-        const slot = await consumeAssignEvents(iterateBody(response.body), (event) => {
-          const progress = useUi.getState().assigning;
-          if (!progress) return;
-          useUi.setState({ assigning: applyAssignStreamEvent(progress, event) });
-        });
-
-        set({
-          slots: get().slots.map((entry) => (entry.id === slot.id ? slot : entry))
-        });
-        await get().refreshAssets();
+        // A duplicate is a new record plus the same assignments, field by field.
+        const collection = get().collections.find((entry) => entry.id === collectionId);
+        const source = collection?.records.find((record) => record.id === copyFrom);
+        const target = collection?.records.find((record) => record.id === id);
+        if (!source || !target) return;
+        await Promise.all(
+          Object.entries(source.slots).map(([field, slotId]) => {
+            const assigned = get().slots.find((slot) => slot.id === slotId)?.assignedAssetIds ?? [];
+            const into = target.slots[field];
+            return assigned.length > 0 && into
+              ? get().assignSlot(into, assigned, { replace: true })
+              : Promise.resolve();
+          })
+        );
       } catch (error) {
         fail(error);
-      } finally {
-        useUi.setState({ busy: null, assigning: null });
+      }
+    },
+
+    async renameRecord(collectionId, recordId, key) {
+      try {
+        const { collections } = await api<{ collections: EngineCollectionView[] }>(
+          `/api/v1/projects/${projectId()}/collections/${collectionId}/records/${recordId}`,
+          { method: "PATCH", body: JSON.stringify({ key }) }
+        );
+        set({ collections });
+        await get().refreshSlots();
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    async deleteRecord(collectionId, recordId) {
+      try {
+        const { collections } = await api<{ collections: EngineCollectionView[] }>(
+          `/api/v1/projects/${projectId()}/collections/${collectionId}/records/${recordId}`,
+          { method: "DELETE" }
+        );
+        set({ collections });
+        await get().refreshSlots();
+      } catch (error) {
+        fail(error);
       }
     }
   };

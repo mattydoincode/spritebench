@@ -15,6 +15,11 @@ import {
 } from "drizzle-orm/pg-core";
 import type { ProcessingSettings } from "@/core/settings";
 import type { Size } from "@/core/types";
+import type {
+  EngineCollectionField,
+  EngineRecordOrigin,
+  EngineRecordRemovedBy
+} from "@/shared/engineCollection";
 import type { EngineSlotIntent, EngineSlotKind } from "@/shared/engineSlot";
 import type {
   GenerationParams,
@@ -424,9 +429,51 @@ export const engineSlots = pgTable("engine_slots", {
   remoteHash: text("remote_hash"),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
   tombstonedAt: timestamp("tombstoned_at", { withTimezone: true }),
+  /** Set for `record_field` slots: which record and which of its fields. */
+  recordId: uuid("record_id"),
+  fieldKey: text("field_key"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
-}, (table) => [index("engine_slots_project_idx").on(table.projectId)]);
+}, (table) => [
+  index("engine_slots_project_idx").on(table.projectId),
+  index("engine_slots_record_idx").on(table.recordId)
+]);
+
+/**
+ * A Godot resource holding keyed records with named art fields. Godot owns
+ * the field list; records can be added from either side.
+ */
+export const engineCollections = pgTable("engine_collections", {
+  id: uuid("id").primaryKey(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  label: text("label").notNull(),
+  godotPath: text("godot_path").notNull().default(""),
+  fields: jsonb("fields").$type<EngineCollectionField[]>().notNull().default([]),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  tombstonedAt: timestamp("tombstoned_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+}, (table) => [index("engine_collections_project_idx").on(table.projectId)]);
+
+export const engineRecords = pgTable("engine_records", {
+  id: uuid("id").primaryKey(),
+  collectionId: uuid("collection_id")
+    .notNull()
+    .references(() => engineCollections.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  key: text("key").notNull(),
+  sort: integer("sort").notNull().default(0),
+  origin: text("origin").$type<EngineRecordOrigin>().notNull().default("godot"),
+  acked: boolean("acked").notNull().default(true),
+  pending: boolean("pending").notNull().default(false),
+  removedBy: text("removed_by").$type<EngineRecordRemovedBy>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+}, (table) => [index("engine_records_collection_idx").on(table.collectionId)]);
 
 /** One row per provider call. Written even while everything is free. */
 export const usageEvents = pgTable("usage_events", {
@@ -456,6 +503,8 @@ export type ProjectDocRow = typeof projectDocs.$inferSelect;
 export type ApiTokenRow = typeof apiTokens.$inferSelect;
 export type ProviderKeyRow = typeof providerKeys.$inferSelect;
 export type EngineSlotRow = typeof engineSlots.$inferSelect;
+export type EngineCollectionRow = typeof engineCollections.$inferSelect;
+export type EngineRecordRow = typeof engineRecords.$inferSelect;
 export type AssetRow = typeof assets.$inferSelect;
 export type JobRow = typeof jobs.$inferSelect;
 export type TemplateRow = typeof templates.$inferSelect;

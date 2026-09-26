@@ -14,7 +14,13 @@ export function clampProcessWorkers(value: unknown): number {
   return Math.min(MAX_PROCESS_WORKERS, Math.max(MIN_PROCESS_WORKERS, Math.round(parsed)));
 }
 
+/**
+ * `prefetch` is work nobody is looking at yet, like images that just came
+ * back from a prompt. It runs whenever a worker is free but never takes the
+ * last one, so an inspector tweak does not wait behind a batch of them.
+ */
 export const PROCESS_PRIORITY = {
+  prefetch: -1,
   background: 0,
   visible: 1,
   selected: 2
@@ -109,6 +115,15 @@ export function upgradeProcess(
   return changed ? { ...state, pending: sortPending(pending) } : state;
 }
 
+export function isPrefetch(job: Pick<ProcessJob, "priority">): boolean {
+  return job.priority < PROCESS_PRIORITY.background;
+}
+
+/** How many workers prefetch may hold: all but one, but at least one. */
+export function prefetchCapacity(concurrency: number): number {
+  return Math.max(1, concurrency - 1);
+}
+
 export function startProcessJobs(
   state: ProcessQueueState,
   concurrency = PROCESS_CONCURRENCY,
@@ -117,8 +132,12 @@ export function startProcessJobs(
   const pending = [...state.pending];
   const active = [...state.active];
   const started: ProcessJob[] = [];
+  const prefetchCap = prefetchCapacity(concurrency);
 
   while (active.length < concurrency && pending.length > 0) {
+    // Pending is sorted by priority, so once prefetch is at its cap nothing
+    // behind the head can start either.
+    if (isPrefetch(pending[0]) && active.filter(isPrefetch).length >= prefetchCap) break;
     const job = pending.shift();
     if (!job) break;
     const running: ProcessJob = { ...job, status: "running", startedAt: now };
