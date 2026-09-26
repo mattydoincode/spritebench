@@ -24,6 +24,11 @@ export interface ModelInfo {
   id: string;
   provider: string;
   label: string;
+  /**
+   * A dated snapshot of another model. Kept so old jobs and restored setups
+   * still resolve, but not offered in the model picker.
+   */
+  pinned?: boolean;
   sizing: SizingMode;
   /** Official / recommended sizes for the picker. Custom is always available. */
   sizes: readonly SizeOption[];

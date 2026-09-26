@@ -109,6 +109,7 @@ export const MODEL_REGISTRY: readonly ModelInfo[] = [
     id: "gpt-image-2.5-sunburst-2026-09-08",
     provider: "openai",
     label: "gpt-image-2.5 sunburst (pinned 2026-09-08)",
+    pinned: true,
     sizing: "flexible",
     sizes: GPT_IMAGE_25_SIZES,
     supportsBackground: true,
@@ -122,6 +123,7 @@ export const MODEL_REGISTRY: readonly ModelInfo[] = [
     id: "gpt-image-2.5-flare-2026-09-08",
     provider: "openai",
     label: "gpt-image-2.5 flare (pinned 2026-09-08)",
+    pinned: true,
     sizing: "flexible",
     sizes: GPT_IMAGE_25_SIZES,
     supportsBackground: true,
@@ -148,6 +150,7 @@ export const MODEL_REGISTRY: readonly ModelInfo[] = [
     id: "gpt-image-2-2026-04-21",
     provider: "openai",
     label: "gpt-image-2 (pinned 2026-04-21)",
+    pinned: true,
     sizing: "flexible",
     sizes: GPT_IMAGE_2_SIZES,
     supportsBackground: true,
@@ -261,6 +264,11 @@ export function modelOrDefault(id: string): ModelInfo {
 
 export function modelIds(): string[] {
   return MODEL_REGISTRY.map((model) => model.id);
+}
+
+/** What the model picker offers: everything but pinned snapshots. */
+export function listedModelsForProvider(provider: string): ModelInfo[] {
+  return modelsForProvider(provider).filter((model) => !model.pinned);
 }
 
 export function modelsForProvider(provider: string): ModelInfo[] {

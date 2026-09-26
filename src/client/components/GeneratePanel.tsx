@@ -8,6 +8,7 @@ import {
   applySizeSelection,
   describeRequestSize,
   modelOrDefault,
+  listedModelsForProvider,
   modelsForProvider,
   providerIds,
   providerLabel,
@@ -90,12 +91,19 @@ function ModelField() {
 
           return (
             <optgroup key={provider} label={providerLabel(provider)}>
-              {modelsForProvider(provider).map((model) => (
-                <option key={model.id} value={model.id} disabled={keyless}>
-                  {model.label}
-                  {keyless ? " (no key)" : ""}
-                </option>
-              ))}
+              {listedModelsForProvider(provider)
+                // A restored setup can still carry a pinned model; show it while chosen.
+                .concat(
+                  modelsForProvider(provider).filter(
+                    (model) => model.pinned && model.id === generation.model
+                  )
+                )
+                .map((model) => (
+                  <option key={model.id} value={model.id} disabled={keyless}>
+                    {model.label}
+                    {keyless ? " (no key)" : ""}
+                  </option>
+                ))}
             </optgroup>
           );
         })}
