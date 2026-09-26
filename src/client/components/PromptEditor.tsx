@@ -234,9 +234,11 @@ interface Anchor {
 
 const SUGGEST_ROOM = 200;
 
+/** Nothing once the name is complete: an exact match has nothing left to offer. */
 function suggestionsFor(query: string, names: string[], canCreate: boolean): Suggestion[] {
+  if (names.includes(query)) return [];
   const found: Suggestion[] = matchSnippetNames(names, query).map((name) => ({ name }));
-  if (canCreate && query && cleanSnippetName(query) === query && !names.includes(query)) {
+  if (canCreate && query && cleanSnippetName(query) === query) {
     found.push({ name: query, create: true });
   }
   return found;
