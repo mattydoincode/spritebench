@@ -5,7 +5,6 @@ import { useDoc } from "@/client/stores/doc";
 import { useServer } from "@/client/stores/server";
 import { useUi } from "@/client/stores/ui";
 import {
-  bindPrompt,
   carryVariables,
   collectSlots,
   joinValues,
@@ -13,6 +12,7 @@ import {
   loopReservedSlots,
   nextVariableName,
   parseValues,
+  SLOT_PATTERN,
   variableValues,
   withVariableValues,
   type PromptBinding
@@ -139,7 +139,35 @@ export function PromptEditor({
   );
 }
 
-/** Exactly what Create sends, one prompt at a time, with snippet text marked. */
+/**
+ * `text` with each bound `{name}` replaced by its value, marked so you can see
+ * which words came from a variable. Unbound slots stay as written.
+ */
+function FilledText({ text, bindings }: { text: string; bindings: PromptBinding }) {
+  const parts: ReactNode[] = [];
+  let at = 0;
+
+  for (const match of text.matchAll(new RegExp(SLOT_PATTERN.source, "g"))) {
+    const name = match[1];
+    if (!Object.prototype.hasOwnProperty.call(bindings, name)) continue;
+    if (match.index > at) parts.push(text.slice(at, match.index));
+    parts.push(
+      <span
+        key={match.index}
+        title={`{${name}}`}
+        className="rounded-sm bg-sky-900/50 text-sky-100"
+      >
+        {bindings[name]}
+      </span>
+    );
+    at = match.index + match[0].length;
+  }
+
+  if (at < text.length) parts.push(text.slice(at));
+  return <>{parts}</>;
+}
+
+/** Exactly what Create sends, one prompt at a time, with snippet and variable text marked. */
 function PromptPreview({ bindings, summary }: { bindings: PromptBinding[]; summary: string[] }) {
   const promptBody = useUi((state) => state.promptBody);
   const snippets = useDoc((state) => state.snippets);
@@ -148,7 +176,7 @@ function PromptPreview({ bindings, summary }: { bindings: PromptBinding[]; summa
   const count = bindings.length;
   const at = count > 0 ? Math.min(index, count - 1) : 0;
   const bound = bindings[at] ?? {};
-  const fill = (text: string) => bindPrompt({ prefix: "", body: text, suffix: "" }, bound).body;
+  const fill = (text: string) => <FilledText text={text} bindings={bound} />;
   const segments = snippetSegments(promptBody, snippets);
 
   return (
