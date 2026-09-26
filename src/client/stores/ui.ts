@@ -234,6 +234,7 @@ export function sectionCollapsed(
 
 export type Pane = "left" | "right" | "library";
 export type LeftTab = "prompt" | "godot";
+export type SettingsTab = "project" | "account";
 
 export interface Layout {
   left: number;
@@ -661,7 +662,8 @@ interface UiState extends Stored {
   editingFrame: { sequenceId: string; frameId: string } | null;
   /** Which asset the slice dialog is open over. */
   slicingAssetId: string | null;
-  projectSettingsOpen: boolean;
+  /** Which tab of the settings modal is open, or null when it is closed. */
+  settingsTab: SettingsTab | null;
   templateBuilderOpen: boolean;
   batches: number;
   busy: string | null;
@@ -739,8 +741,8 @@ interface UiState extends Stored {
   setActiveSequence: (sequenceId: string | null) => void;
   openSlicer: (assetId: string) => void;
   closeSlicer: () => void;
-  openProjectSettings: () => void;
-  closeProjectSettings: () => void;
+  openSettings: (tab?: SettingsTab) => void;
+  closeSettings: () => void;
   openTemplateBuilder: () => void;
   closeTemplateBuilder: () => void;
 
@@ -773,7 +775,7 @@ export const useUi = create<UiState>((set, get) => {
     activeSequenceId: null,
     editingFrame: null,
     slicingAssetId: null,
-    projectSettingsOpen: false,
+    settingsTab: null,
     templateBuilderOpen: false,
     batches: 1,
     bases: [],
@@ -1142,12 +1144,12 @@ export const useUi = create<UiState>((set, get) => {
       set({ slicingAssetId: null });
     },
 
-    openProjectSettings() {
-      set({ projectSettingsOpen: true });
+    openSettings(tab = "project") {
+      set({ settingsTab: tab });
     },
 
-    closeProjectSettings() {
-      set({ projectSettingsOpen: false });
+    closeSettings() {
+      set({ settingsTab: null });
     },
 
     openTemplateBuilder() {

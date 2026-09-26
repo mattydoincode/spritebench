@@ -7,11 +7,11 @@ import { useUi } from "@/client/stores/ui";
 import { Button } from "./ui";
 
 /**
- * Which project you are in, plus undo.
+ * Which project you are in, a way out, undo, and settings.
  *
- * Deliberately not a switcher for anything. The project is in the URL and you
- * change it from the dashboard; scenes moved into a bubble on the canvas,
- * next to the thing they describe. What is left is a title and a way out.
+ * Sits over the left pane only, not across the whole window: the scene and
+ * the inspector get their full height, and the chrome that is about the
+ * project lives in one corner instead of a strip that is mostly empty.
  */
 export function ProjectBar() {
   const project = useServer((state) => state.project);
@@ -21,67 +21,67 @@ export function ProjectBar() {
   if (!project) return null;
 
   return (
-    <header className="flex shrink-0 items-center gap-2 border-b border-[var(--color-edge)] bg-[var(--color-ink-700)] px-5 py-1.5 text-[11px]">
-      <Link
-        href="/projects"
-        title="All of your projects"
-        aria-label="SpriteBench — all projects"
-        className="shrink-0"
-      >
-        <img src="/branding/logo-white.png" alt="SpriteBench" className="h-3.5 w-auto" />
-      </Link>
+    <header className="flex shrink-0 flex-col gap-1.5 border-b border-[var(--color-edge)] bg-[var(--color-ink-700)] px-3 py-2 text-[11px]">
+      <div className="flex items-center gap-1">
+        <Link
+          href="/projects"
+          title="All of your projects"
+          aria-label="SpriteBench — all projects"
+          className="mr-auto shrink-0"
+        >
+          <img src="/branding/logo-white.png" alt="SpriteBench" className="h-3.5 w-auto" />
+        </Link>
 
-      <span className="max-w-[18rem] truncate text-[12px] font-medium text-slate-100">
-        {project.name}
-      </span>
+        <Button
+          variant="ghost"
+          disabled={!canUndo}
+          title="Undo your last change (ctrl+z). A collaborator's edits are skipped."
+          aria-label="Undo"
+          onClick={() => useDoc.getState().undo()}
+        >
+          {"↶"}
+        </Button>
+        <Button
+          variant="ghost"
+          disabled={!canRedo}
+          title="Redo (ctrl+shift+z)"
+          aria-label="Redo"
+          onClick={() => useDoc.getState().redo()}
+        >
+          {"↷"}
+        </Button>
 
-      <Link
-        href="/projects"
-        className="rounded px-1 py-0.5 text-slate-500 underline decoration-dotted underline-offset-2 hover:bg-[var(--color-ink-600)] hover:text-slate-100"
-      >
-        back to project list
-      </Link>
+        <Button
+          variant="ghost"
+          title="Project defaults, plus your account and keys"
+          onClick={() => useUi.getState().openSettings()}
+        >
+          settings
+        </Button>
+      </div>
 
-      <span className="flex-1" />
-
-      {project.role === "viewer" ? (
-        <span className="text-amber-300" title="You can look, but changes will not be saved">
-          read only
+      <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5">
+        <Link
+          href="/projects"
+          title="Back to all of your projects"
+          className="shrink-0 text-slate-500 hover:text-slate-200"
+        >
+          Projects
+        </Link>
+        <span className="text-slate-600">/</span>
+        <span className="truncate text-[12px] font-medium text-slate-100" title={project.name}>
+          {project.name}
         </span>
-      ) : null}
 
-      <Button
-        variant="ghost"
-        disabled={!canUndo}
-        title="Undo your last change (ctrl+z). A collaborator's edits are skipped."
-        onClick={() => useDoc.getState().undo()}
-      >
-        undo
-      </Button>
-      <Button
-        variant="ghost"
-        disabled={!canRedo}
-        title="Redo (ctrl+shift+z)"
-        onClick={() => useDoc.getState().redo()}
-      >
-        redo
-      </Button>
-
-      <Button
-        variant="ghost"
-        title="Cutout and other defaults for this project"
-        onClick={() => useUi.getState().openProjectSettings()}
-      >
-        project
-      </Button>
-
-      <Link
-        href="/settings"
-        title="Your keys and prompt defaults"
-        className="rounded px-1.5 py-1 text-slate-400 hover:bg-[var(--color-ink-600)] hover:text-slate-200"
-      >
-        settings
-      </Link>
+        {project.role === "viewer" ? (
+          <span
+            className="ml-auto shrink-0 text-amber-300"
+            title="You can look, but changes will not be saved"
+          >
+            read only
+          </span>
+        ) : null}
+      </nav>
     </header>
   );
 }

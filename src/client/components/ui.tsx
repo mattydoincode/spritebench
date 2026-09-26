@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useRef,
   useState,
   type CSSProperties,
   type MouseEvent,
@@ -10,10 +11,37 @@ import {
 import { createPortal } from "react-dom";
 import { sectionCollapsed, type Pane, useUi } from "@/client/stores/ui";
 
-let openModals = 0;
+/** Open dialogs, oldest first. Only the top one answers Escape. */
+const modalStack: object[] = [];
 
 export function anyModalOpen(): boolean {
-  return openModals > 0;
+  return modalStack.length > 0;
+}
+
+/**
+ * Registers a dialog for Escape. A dialog opened from inside another (adding
+ * a key from the settings modal) must close alone, not take its parent with
+ * it, so each listener checks it is on top before acting.
+ */
+function useModalEscape(onClose: () => void) {
+  const latest = useRef(onClose);
+  latest.current = onClose;
+
+  useEffect(() => {
+    const token = {};
+    modalStack.push(token);
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && modalStack.at(-1) === token) latest.current();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      modalStack.splice(modalStack.indexOf(token), 1);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
 }
 
 export function Modal({
@@ -51,20 +79,7 @@ export function Modal({
   const [host, setHost] = useState<HTMLElement | null>(null);
   useEffect(() => setHost(document.body), []);
 
-  useEffect(() => {
-    openModals++;
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-
-    return () => {
-      openModals--;
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [onClose]);
+  useModalEscape(onClose);
 
   if (!host) return null;
 
@@ -134,17 +149,7 @@ export function PreviewLightbox({
   const [host, setHost] = useState<HTMLElement | null>(null);
   useEffect(() => setHost(document.body), []);
 
-  useEffect(() => {
-    openModals++;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      openModals--;
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [onClose]);
+  useModalEscape(onClose);
 
   if (!host) return null;
 

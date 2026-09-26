@@ -374,37 +374,22 @@ function MachineSection() {
   );
 }
 
-export function AccountSettings() {
+/**
+ * Keys, this machine, and tokens: everything on the account page, without the
+ * page. The settings modal in the studio shows the same sections, so changing
+ * a key does not mean leaving the project.
+ */
+export function AccountSettingsSections({ loading = false }: { loading?: boolean }) {
   const keys = useServer((state) => state.providerKeys);
-  const error = useUi((state) => state.error);
-
-  const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
 
   useEffect(() => {
-    useUi.getState().hydrate();
-    useUi.getState().clearMessages();
-
-    void (async () => {
-      await Promise.all([
-        useServer.getState().loadProjects(),
-        useServer.getState().loadApiTokens()
-      ]);
-      setLoading(false);
-    })();
+    void useServer.getState().loadApiTokens();
   }, []);
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-6 py-10">
-      <h1 className="text-3xl font-semibold tracking-tight text-white">Settings &amp; Keys</h1>
-
-      {error ? (
-        <p className="mt-6 rounded-md border border-rose-900 bg-rose-950/40 px-4 py-3 text-sm text-rose-300">
-          {error}
-        </p>
-      ) : null}
-
-      <section className="mt-8">
+    <>
+      <section>
         <div className="mb-4 flex items-center justify-between gap-4">
           <h2 className="text-lg font-medium text-white">Image model keys</h2>
 
@@ -436,6 +421,39 @@ export function AccountSettings() {
 
       <MachineSection />
       <TokenSection />
+    </>
+  );
+}
+
+export function AccountSettings() {
+  const error = useUi((state) => state.error);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    useUi.getState().hydrate();
+    useUi.getState().clearMessages();
+
+    void (async () => {
+      await useServer.getState().loadProjects();
+      setLoading(false);
+    })();
+  }, []);
+
+  return (
+    <div className="mx-auto w-full max-w-3xl px-6 py-10">
+      <h1 className="text-3xl font-semibold tracking-tight text-white">
+        Account settings &amp; keys
+      </h1>
+
+      {error ? (
+        <p className="mt-6 rounded-md border border-rose-900 bg-rose-950/40 px-4 py-3 text-sm text-rose-300">
+          {error}
+        </p>
+      ) : null}
+
+      <div className="mt-8">
+        <AccountSettingsSections loading={loading} />
+      </div>
     </div>
   );
 }

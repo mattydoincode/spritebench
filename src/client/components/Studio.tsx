@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { GeneratePanel } from "@/client/components/GeneratePanel";
 import { ImageEditModal } from "@/client/components/ImageEditModal";
-import { ProjectSettingsModal } from "@/client/components/ProjectSettingsModal";
+import { SettingsModal } from "@/client/components/SettingsModal";
 import { SliceModal } from "@/client/components/SliceModal";
 import { TemplateBuilderModal } from "@/client/components/TemplateBuilderModal";
 import { InspectorPanel } from "@/client/components/InspectorPanel";
@@ -74,7 +74,7 @@ export function Studio({ projectId }: { projectId: string }) {
   const scenes = useDoc((state) => state.scenes);
   const editingAssetId = useUi((state) => state.editingAssetId);
   const slicingAssetId = useUi((state) => state.slicingAssetId);
-  const projectSettingsOpen = useUi((state) => state.projectSettingsOpen);
+  const settingsOpen = useUi((state) => state.settingsTab !== null);
   const templateBuilderOpen = useUi((state) => state.templateBuilderOpen);
 
   const layout = useUi((state) => state.layout);
@@ -106,7 +106,7 @@ export function Studio({ projectId }: { projectId: string }) {
     })();
 
     return () => {
-      useUi.getState().closeProjectSettings();
+      useUi.getState().closeSettings();
       useUi.getState().closeTemplateBuilder();
       useDoc.getState().close();
     };
@@ -182,8 +182,6 @@ export function Studio({ projectId }: { projectId: string }) {
 
   return (
     <main className="studio-root relative flex h-screen flex-col">
-      <ProjectBar />
-
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {layout.collapsed.left ? (
           <PaneRail
@@ -194,7 +192,10 @@ export function Studio({ projectId }: { projectId: string }) {
         ) : (
           <>
             <div className="flex min-h-0 shrink-0 flex-col overflow-hidden" style={{ width: layout.left }}>
-              {leftTab === "godot" ? <EnginePanel /> : <GeneratePanel />}
+              <ProjectBar />
+              <div className="min-h-0 flex-1">
+                {leftTab === "godot" ? <EnginePanel /> : <GeneratePanel />}
+              </div>
             </div>
 
             <ResizeHandle
@@ -249,7 +250,7 @@ export function Studio({ projectId }: { projectId: string }) {
 
       {editingAssetId ? <ImageEditModal /> : null}
       {slicingAssetId ? <SliceModal /> : null}
-      {projectSettingsOpen ? <ProjectSettingsModal /> : null}
+      {settingsOpen ? <SettingsModal /> : null}
       {templateBuilderOpen ? <TemplateBuilderModal /> : null}
     </main>
   );

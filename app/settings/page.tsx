@@ -2,7 +2,7 @@ import { AccountSettings } from "@/client/components/AccountSettings";
 import { PageShell } from "@/client/components/AppHeader";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Settings & Keys — SpriteBench" };
+export const metadata = { title: "Account settings & keys — SpriteBench" };
 
 export default function SettingsPage() {
   return (

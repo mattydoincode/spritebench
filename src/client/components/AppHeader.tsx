@@ -4,7 +4,7 @@ import { auth, signOut } from "@/server/auth";
 
 const TABS = [
   { key: "projects", href: "/projects", label: "Projects" },
-  { key: "settings", href: "/settings", label: "Settings & Keys" }
+  { key: "settings", href: "/settings", label: "Account settings & keys" }
 ] as const;
 
 export type Tab = (typeof TABS)[number]["key"];
