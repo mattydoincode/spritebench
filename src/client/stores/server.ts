@@ -26,6 +26,7 @@ import { foldersByJobId, resolveJobFolder, suggestedFolder } from "@/shared/fold
 import { remapSelection } from "@/shared/libraryItems";
 import { shouldRememberGeneration } from "@/shared/multistep";
 import { expandPrompt } from "@/shared/promptVars";
+import { expandSnippets } from "@/shared/snippets";
 import { defaultGenerateSetup, restoreGeneration } from "@/shared/restoreGeneration";
 import {
   applyAssignStreamEvent,
@@ -512,9 +513,12 @@ export const useServer = create<ServerState>((set, get) => {
 
     async generate() {
       const ui = useUi.getState();
+      // Snippets are filled in here, so the server and the job record see the
+      // exact text that was sent, as they already do for variables.
+      const promptBody = expandSnippets(ui.promptBody, useDoc.getState().snippets);
       const { settings } = get();
 
-      if (ui.promptBody.trim().length === 0) {
+      if (promptBody.trim().length === 0) {
         ui.setError("write a prompt first");
         return;
       }
@@ -528,14 +532,14 @@ export const useServer = create<ServerState>((set, get) => {
       // you cannot slice a grid out of a canvas whose size you did not choose.
       const animation = ui.animation.enabled
         ? planAnimation({
-            subject: ui.promptBody,
+            subject: promptBody,
             actions: ui.animation.actions,
             cellSize: ui.animation.cellSize
           })
         : null;
       const itemGrid = ui.itemGrid.enabled
         ? planItemGrid({
-            subject: ui.promptBody,
+            subject: promptBody,
             columns: ui.itemGrid.columns,
             rows: ui.itemGrid.rows,
             cellSize: ui.itemGrid.cellSize
@@ -563,7 +567,7 @@ export const useServer = create<ServerState>((set, get) => {
       const variables = ui.variables.filter((entry) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(entry.name));
       const prompt = {
         prefix: "",
-        body: ui.promptBody,
+        body: promptBody,
         suffix: "",
         guide: "",
         extra: ""
@@ -596,7 +600,7 @@ export const useServer = create<ServerState>((set, get) => {
         const { jobs: created } = await projectApi<{ jobs: JobRecord[] }>(projectId(), "/generate", {
           method: "POST",
           body: JSON.stringify({
-            promptBody: ui.promptBody,
+            promptBody,
             providerKeyId: get().billingKeyId(),
             // One image per job: more images come from batches. A stored
             // imageCount from before that has no control left to change it.

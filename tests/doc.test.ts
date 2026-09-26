@@ -483,48 +483,42 @@ describe("asset edits", () => {
   });
 });
 
-describe("prompt snippets", () => {
-  it("starts empty and round-trips a named version", () => {
+describe("snippets", () => {
+  it("starts empty and round-trips a named snippet", () => {
     const target = doc.createDoc();
 
-    expect(doc.listPromptSnippets(target)).toEqual([]);
+    expect(doc.listSnippets(target)).toEqual([]);
 
-    doc.putPromptSnippet(target, {
-      id: "s1",
-      name: "16-bit house",
-      text: "pixel art, 16-bit"
-    });
+    doc.putSnippet(target, { id: "s1", name: "pixelstyle", text: "pixel art, 16-bit" });
 
-    expect(doc.listPromptSnippets(target)).toEqual([
-      { id: "s1", name: "16-bit house", text: "pixel art, 16-bit" }
+    expect(doc.listSnippets(target)).toEqual([
+      { id: "s1", name: "pixelstyle", text: "pixel art, 16-bit" }
     ]);
+  });
+
+  it("edits text in place and deletes", () => {
+    const target = doc.createDoc();
+    doc.putSnippet(target, { id: "s1", name: "style", text: "old" });
+
+    doc.setSnippetText(target, "s1", "new");
+    expect(doc.listSnippets(target)).toEqual([{ id: "s1", name: "style", text: "new" }]);
+
+    doc.deleteSnippet(target, "s1");
+    expect(doc.listSnippets(target)).toEqual([]);
   });
 
   it("keeps two people saving at once from overwriting each other", () => {
     const a = doc.createDoc();
     const b = doc.createDoc();
 
-    doc.putPromptSnippet(a, { id: "a1", name: "from a", text: "transparent" });
-    doc.putPromptSnippet(b, { id: "b1", name: "from b", text: "no shadow" });
+    doc.putSnippet(a, { id: "a1", name: "from_a", text: "transparent" });
+    doc.putSnippet(b, { id: "b1", name: "from_b", text: "no shadow" });
 
     doc.applyRemote(a, Y.encodeStateAsUpdate(b));
     doc.applyRemote(b, Y.encodeStateAsUpdate(a));
 
-    expect(doc.listPromptSnippets(a)).toEqual(doc.listPromptSnippets(b));
-    expect(doc.listPromptSnippets(a).map((entry) => entry.id).sort()).toEqual(["a1", "b1"]);
-  });
-
-  it("reads a snippet that still has a leftover kind field", () => {
-    const target = doc.createDoc();
-    const map = new Y.Map<unknown>();
-    map.set("name", "old prefix");
-    map.set("kind", "prefix");
-    map.set("text", "top down");
-    doc.promptSnippetsMap(target).set("legacy", map);
-
-    expect(doc.listPromptSnippets(target)).toEqual([
-      { id: "legacy", name: "old prefix", text: "top down" }
-    ]);
+    expect(doc.listSnippets(a)).toEqual(doc.listSnippets(b));
+    expect(doc.listSnippets(a).map((entry) => entry.id).sort()).toEqual(["a1", "b1"]);
   });
 });
 

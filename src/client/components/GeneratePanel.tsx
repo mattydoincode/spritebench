@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useDoc } from "@/client/stores/doc";
 import { useServer } from "@/client/stores/server";
 import { DEFAULT_LAYOUT, useUi } from "@/client/stores/ui";
@@ -17,27 +17,25 @@ import {
   sizeSelection,
   snapRequestSize
 } from "@/providers/models";
-import { isPixelConstraintTemplate, pixelConstraintWindow } from "@/core/pixelMask";
+import { SHEET_FRAMES_TEMPLATE_ID, SHEET_FRAMES_TEMPLATE_NAME } from "@/core/frameMask";
+import {
+  ISO_21_TEMPLATE_ID,
+  ISO_21_TEMPLATE_NAME,
+  ISO_DIAMOND_TEMPLATE_ID,
+  ISO_DIAMOND_TEMPLATE_NAME
+} from "@/core/isoMask";
+import {
+  isPixelConstraintTemplate,
+  PIXEL_CONSTRAINT_TEMPLATE_ID,
+  PIXEL_CONSTRAINT_TEMPLATE_NAME,
+  pixelConstraintWindow
+} from "@/core/pixelMask";
 import { suggestedFolder } from "@/shared/folder";
-import { composePrompt } from "@/shared/model";
 import { planAnimation, planItemGrid } from "@/shared/animationPrompt";
 import { activeFeaturePrompts } from "@/shared/featurePrompt";
 import { SuggestedPrompt } from "./SuggestedPrompt";
-import {
-  bindPrompt,
-  expandPrompt,
-  insertSlot,
-  joinValues,
-  LOOP_SLOT_NAMES,
-  loopBindings,
-  loopReservedSlots,
-  nextVariableName,
-  offeredVariables,
-  parseValues,
-  planCreate,
-  removeSlot,
-  renameSlot
-} from "@/shared/promptVars";
+import { expandPrompt, loopBindings, loopReservedSlots, planCreate } from "@/shared/promptVars";
+import { expandSnippets, snippetRefs } from "@/shared/snippets";
 import { sourceUrl } from "@/client/api";
 import type { BaseSpec, ImageSource } from "@/shared/model";
 import { DownsampleControls } from "./DownsampleControls";
@@ -49,11 +47,18 @@ import {
   Row,
   Section,
   Select,
-  TextButton,
   Toggle
 } from "./ui";
 import { DropZone, TemplatePanel } from "./TemplatePanel";
 import { LeftTabs } from "./LeftTabs";
+import { PromptEditor } from "./PromptEditor";
+
+const BUILTIN_TEMPLATE_NAMES: Record<string, string> = {
+  [ISO_DIAMOND_TEMPLATE_ID]: ISO_DIAMOND_TEMPLATE_NAME,
+  [ISO_21_TEMPLATE_ID]: ISO_21_TEMPLATE_NAME,
+  [PIXEL_CONSTRAINT_TEMPLATE_ID]: PIXEL_CONSTRAINT_TEMPLATE_NAME,
+  [SHEET_FRAMES_TEMPLATE_ID]: SHEET_FRAMES_TEMPLATE_NAME
+};
 
 function keyCaption(key: { provider: string; label: string; keySuffix: string }): string {
   const suffix = key.keySuffix.replace(/^\.\.\./, "");
@@ -252,270 +257,6 @@ function ModelAndSize() {
 
       {sizeHint ? <p className="text-[10px] text-slate-500">{sizeHint}</p> : null}
     </>
-  );
-}
-
-/**
- * Opt-in library of named prompts.
- *
- * Hidden behind "saved" so the working field stays the thing you see. Saving
- * writes to the shared document; loading copies into the working field.
- */
-function SnippetLibrary({
-  value,
-  onLoad
-}: {
-  value: string;
-  onLoad: (text: string) => void;
-}) {
-  const snippets = useDoc((state) => state.snippets);
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-
-  const save = () => {
-    const trimmed = name.trim();
-    if (!trimmed || value.trim().length === 0) return;
-
-    useDoc.getState().savePromptSnippet(trimmed, value);
-    setName("");
-  };
-
-  return (
-    <div>
-      <TextButton
-        title="Save or load a named version"
-        onClick={(event) => {
-          event.stopPropagation();
-          setOpen(!open);
-        }}
-      >
-        {open ? "hide" : snippets.length > 0 ? `saved (${snippets.length})` : "saved"}
-      </TextButton>
-
-      {open ? (
-        <div className="mt-1 mb-1.5 rounded border border-[var(--color-edge)] bg-[var(--color-ink-800)] p-1.5">
-          {snippets.length === 0 ? (
-            <p className="mb-1 px-0.5 text-[10px] text-slate-500">None saved yet.</p>
-          ) : (
-            <div className="mb-1 flex flex-col gap-0.5">
-              {snippets.map((entry) => (
-                <div key={entry.id} className="flex items-center gap-1 text-[11px]">
-                  <button
-                    type="button"
-                    title="Load this version"
-                    onClick={() => onLoad(entry.text)}
-                    className="min-w-0 flex-1 truncate px-1 py-0.5 text-left text-slate-300 hover:bg-[var(--color-ink-600)] hover:text-white"
-                  >
-                    {entry.name}
-                  </button>
-                  <TextButton
-                    danger
-                    title="Delete"
-                    onClick={() => useDoc.getState().deletePromptSnippet(entry.id)}
-                  >
-                    &times;
-                  </TextButton>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <Row>
-            <input
-              value={name}
-              placeholder="name this version"
-              onChange={(event) => setName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") save();
-              }}
-              className="min-w-0 flex-1"
-            />
-            <Button
-              variant="ghost"
-              disabled={!name.trim() || value.trim().length === 0}
-              onClick={save}
-            >
-              save
-            </Button>
-          </Row>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function VariableValues({
-  values,
-  onChange
-}: {
-  values: string;
-  onChange: (values: string) => void;
-}) {
-  const chips = parseValues(values);
-  const [draft, setDraft] = useState("");
-
-  const write = (next: string[]) => onChange(joinValues(next));
-
-  return (
-    <div className="flex min-w-0 flex-wrap items-center gap-1 rounded border border-[var(--color-edge)] bg-[var(--color-ink-800)] px-1 py-0.5">
-      {chips.map((chip, index) => (
-        <span
-          key={`${chip}-${index}`}
-          className="flex items-center gap-0.5 rounded bg-[var(--color-ink-600)] px-1 py-0.5 text-[10px] leading-none text-slate-200"
-        >
-          {chip}
-          <button
-            type="button"
-            title={`Remove ${chip}`}
-            onClick={() => write(chips.filter((_, at) => at !== index))}
-            className="text-slate-500 hover:text-white"
-          >
-            ×
-          </button>
-        </span>
-      ))}
-      <input
-        type="text"
-        value={draft}
-        placeholder={chips.length === 0 ? "green, red, blue" : "add"}
-        spellCheck={false}
-        style={{
-          width: "auto",
-          minWidth: chips.length === 0 ? "8rem" : "3.5rem",
-          border: "none",
-          background: "transparent",
-          padding: "2px 4px"
-        }}
-        className="min-w-0 flex-1 text-[11px]"
-        onChange={(event) => {
-          const text = event.target.value;
-          if (!text.includes(",")) {
-            setDraft(text);
-            return;
-          }
-          const parts = text.split(",");
-          const rest = parts.pop() ?? "";
-          const added = parts.map((entry) => entry.trim()).filter((entry) => entry.length > 0);
-          if (added.length > 0) write([...chips, ...added]);
-          setDraft(rest);
-        }}
-        onPaste={(event) => {
-          const text = event.clipboardData.getData("text");
-          if (!text.includes(",")) return;
-          event.preventDefault();
-          write([...chips, ...parseValues(`${draft}${text}`)]);
-          setDraft("");
-        }}
-        onKeyDown={(event) => {
-          if ((event.key === "Enter" || event.key === ",") && draft.trim()) {
-            event.preventDefault();
-            write([...chips, draft.trim()]);
-            setDraft("");
-            return;
-          }
-          if (event.key === "Backspace" && draft === "" && chips.length > 0) {
-            write(chips.slice(0, -1));
-          }
-        }}
-        onBlur={() => {
-          if (!draft.trim()) return;
-          write([...chips, draft.trim()]);
-          setDraft("");
-        }}
-      />
-    </div>
-  );
-}
-
-function VariablesEditor() {
-  const promptBody = useUi((state) => state.promptBody);
-  const variables = useUi((state) => state.variables);
-  const loop = useUi((state) => state.loop);
-  const ui = useUi.getState;
-
-  const reserved = loopReservedSlots(loop.enabled);
-  const prompt = { prefix: "", body: promptBody, suffix: "" };
-  const rows = offeredVariables(prompt, variables, reserved).filter(
-    (entry) => !reserved.includes(entry.name)
-  );
-
-  const write = (next: typeof rows) => ui().setVariables(next);
-
-  const rewriteSlots = (from: string, to: string) => {
-    ui().setPromptBody(renameSlot(promptBody, from, to));
-  };
-
-  const drop = (name: string, index: number) => {
-    ui().setPromptBody(removeSlot(promptBody, name));
-    write(rows.filter((_, at) => at !== index));
-  };
-
-  return (
-    <div className="mb-2">
-      <span className="mb-1 flex items-baseline justify-between gap-2">
-        <span className="text-[11px] uppercase tracking-wide text-slate-400">Variables</span>
-        <span className="text-[10px] text-slate-500">{`{name} in the prompt`}</span>
-      </span>
-
-      {loop.enabled ? (
-        <div className="mb-1 flex flex-wrap items-center gap-1">
-          {LOOP_SLOT_NAMES.map((name) => (
-            <TextButton
-              key={name}
-              title={`Insert {${name}} — filled each loop step`}
-              onClick={() => ui().setPromptBody(insertSlot(promptBody, name))}
-            >
-              {`{${name}}`}
-            </TextButton>
-          ))}
-          <span className="text-[10px] text-slate-500">filled each step</span>
-        </div>
-      ) : null}
-
-      {rows.map((entry, index) => (
-        <div
-          key={`${entry.name}-${index}`}
-          className="mb-1.5 rounded border border-[var(--color-edge)] bg-[var(--color-ink-800)]/50 p-1.5"
-        >
-          <Row className="mb-1">
-            <input
-              type="text"
-              value={entry.name}
-              spellCheck={false}
-              title="Slot name"
-              style={{ width: 88 }}
-              onChange={(event) => {
-                const name = event.target.value.replace(/[^A-Za-z0-9_]/g, "");
-                if (name !== entry.name) rewriteSlots(entry.name, name);
-                write(rows.map((row, at) => (at === index ? { ...row, name } : row)));
-              }}
-            />
-            <span className="min-w-0 truncate text-[10px] text-slate-500">{`{${entry.name || "name"}}`}</span>
-            <span className="flex-1" />
-            <TextButton danger title="Remove this variable" onClick={() => drop(entry.name, index)}>
-              remove
-            </TextButton>
-          </Row>
-          <VariableValues
-            values={entry.values}
-            onChange={(next) =>
-              write(rows.map((row, at) => (at === index ? { ...row, values: next } : row)))
-            }
-          />
-        </div>
-      ))}
-
-      <Button
-        className="w-full"
-        onClick={() => {
-          const name = nextVariableName(rows);
-          ui().setPromptBody(insertSlot(promptBody, name));
-          write([...rows, { name, values: "" }]);
-        }}
-      >
-        add variable
-      </Button>
-    </div>
   );
 }
 
@@ -964,6 +705,8 @@ export function GeneratePanel() {
   const folder = useUi((state) => state.folder);
   const busy = useUi((state) => state.busy);
   const promptHeight = useUi((state) => state.layout.prompt);
+  const snippets = useDoc((state) => state.snippets);
+  const templates = useServer((state) => state.templates);
   const store = useServer.getState;
   const ui = useUi.getState;
 
@@ -984,8 +727,12 @@ export function GeneratePanel() {
   }, [billingKey, generation.model, store]);
 
   const sheetOn = animation.enabled || itemGrid.enabled;
-  const promptSpec = { prefix: "", body: promptBody, suffix: "" };
-  const composed = composePrompt(promptSpec);
+  // Everything below plans against the prompt as it will be sent: snippets
+  // filled in, so their `{variables}` count like any others.
+  const promptSpec = { prefix: "", body: expandSnippets(promptBody, snippets), suffix: "" };
+  const missingSnippets = snippetRefs(promptBody).filter(
+    (name) => !snippets.some((entry) => entry.name === name)
+  );
   const reserved = loopReservedSlots(loop.enabled);
   const create = planCreate({
     prompt: promptSpec,
@@ -1006,12 +753,36 @@ export function GeneratePanel() {
     reserved,
     animate: animateExpansions && !loop.enabled && !chunk.enabled && !each.enabled && !sheetOn
   });
+  if (!create.blocked && missingSnippets.length > 0) {
+    create.blocked = `no snippet named ${missingSnippets.map((name) => `@${name}`).join(", ")}`;
+  }
   const canAnimate = create.expansions > 1 && !loop.enabled && !chunk.enabled && !each.enabled && !sheetOn;
-  const expansions = expandPrompt(promptSpec, variables, reserved).map((entry) =>
+  const bindings = expandPrompt(promptSpec, variables, reserved).map((entry) =>
     loop.enabled
-      ? { ...entry, prompt: bindPrompt(entry.prompt, loopBindings({ steps: loop.steps, index: 1 })) }
-      : entry
+      ? { ...entry.bindings, ...loopBindings({ steps: loop.steps, index: 1 }) }
+      : entry.bindings
   );
+
+  const templateName = (source: ImageSource) =>
+    source.kind === "asset"
+      ? "a library image"
+      : (templates.find((entry) => entry.id === source.templateId)?.name ??
+        BUILTIN_TEMPLATE_NAMES[source.templateId] ??
+        "a template");
+  const summary = [
+    animation.enabled ? "animation sheet" : null,
+    itemGrid.enabled && !animation.enabled ? `item grid ${itemGrid.columns}×${itemGrid.rows}` : null,
+    loop.enabled ? `loop, ${loop.steps} steps` : null,
+    chunk.enabled ? `chunks ${chunk.columns}×${chunk.rows}` : null,
+    each.enabled ? "edit each image" : null,
+    mask ? `mask: ${templateName(mask.source)}` : null,
+    !sheetOn && bases.length > 0
+      ? bases.length === 1
+        ? `image: ${templateName(bases[0].source)}`
+        : `${bases.length} images`
+      : null,
+    each.enabled && billingKey?.provider === "gemini" ? "Gemini revise guide" : null
+  ].filter((entry): entry is string => entry !== null);
   const folderHint = suggestedFolder({
     animation: animation.enabled,
     itemGrid: itemGrid.enabled && !animation.enabled,
@@ -1019,41 +790,8 @@ export function GeneratePanel() {
   });
 
   const prompt = (
-    <>
-      <div className="mb-1 flex items-center gap-2">
-        <span className="text-[10px] tracking-widest text-slate-500 uppercase">prompt</span>
-        <span className="flex-1" />
-        <span className="text-[10px] text-slate-500">{promptBody.length} chars</span>
-        <TextButton
-          title="Reset prompt, modes, templates, and batches. Keeps the current model."
-          onClick={() => store().resetGenerateDefaults()}
-        >
-          reset
-        </TextButton>
-        <SnippetLibrary value={promptBody} onLoad={(value) => ui().setPromptBody(value)} />
-      </div>
-      {/* Grows with the section; drag the section's top edge to resize. */}
-      <textarea
-        value={promptBody}
-        placeholder="a rusty steel footlocker, closed lid, worn paint"
-        onChange={(event) => ui().setPromptBody(event.target.value)}
-        className="mb-2 min-h-16 flex-1 resize-none"
-      />
-
-      <VariablesEditor />
-
-      <details className="mb-2">
-        <summary className="cursor-pointer text-[11px] text-slate-400">
-          Preview composed prompt
-          {expansions.length > 1 ? ` · first of ${expansions.length}` : ""}
-        </summary>
-        <pre className="mt-1 max-h-40 overflow-auto rounded bg-[var(--color-ink-900)] p-2 text-[10px] whitespace-pre-wrap text-slate-400">
-          {(expansions[0] ? composePrompt(expansions[0].prompt) : composed) || "(empty)"}
-          {expansions.length > 1 ? `\n\n+${expansions.length - 1} more` : ""}
-        </pre>
-      </details>
-
-      <div className="flex items-center gap-2">
+    <PromptEditor bindings={bindings} summary={summary}>
+      <div className="flex shrink-0 items-center gap-2">
         <Button
           variant="primary"
           className="flex-1 py-1.5 text-sm"
@@ -1082,11 +820,11 @@ export function GeneratePanel() {
         </label>
       </div>
       {create.blocked ? (
-        <p className="mt-1 text-[10px] leading-snug text-amber-300">{create.blocked}</p>
+        <p className="mt-1 shrink-0 text-[10px] leading-snug text-amber-300">{create.blocked}</p>
       ) : create.breakdown ? (
-        <p className="mt-1 text-[10px] leading-snug text-slate-500">{create.breakdown}</p>
+        <p className="mt-1 shrink-0 text-[10px] leading-snug text-slate-500">{create.breakdown}</p>
       ) : null}
-    </>
+    </PromptEditor>
   );
 
   return (

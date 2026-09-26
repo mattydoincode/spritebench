@@ -64,30 +64,6 @@ export function joinValues(values: string[]): string {
     .join(", ");
 }
 
-function isSlotName(name: string): boolean {
-  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
-}
-
-/** Drop `{name}` tokens and the leftover spaces they leave behind. */
-export function removeSlot(text: string, name: string): string {
-  if (!isSlotName(name)) return text;
-  return text
-    .split(`{${name}}`)
-    .join("")
-    .replace(/[ \t]{2,}/g, " ")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n[ \t]+/g, "\n")
-    .replace(/^[ \t]+/, "")
-    .trimEnd();
-}
-
-export function renameSlot(text: string, from: string, to: string): string {
-  if (from === to || !isSlotName(from)) return text;
-  if (!to) return removeSlot(text, from);
-  if (!isSlotName(to)) return text;
-  return text.split(`{${from}}`).join(`{${to}}`);
-}
-
 export function collectSlots(...parts: string[]): string[] {
   const seen = new Set<string>();
   const names: string[] = [];
@@ -298,21 +274,6 @@ export function planCreate(input: {
   };
 }
 
-/** Rows the UI should show: saved variables plus a blank row for each new slot. */
-export function offeredVariables(
-  prompt: PromptSpec,
-  variables: PromptVariable[],
-  reserved: readonly string[] = []
-): PromptVariable[] {
-  const have = new Set(variables.map((entry) => entry.name));
-  const skip = new Set(reserved);
-  const extra = slotsInPrompt(prompt)
-    .filter((name) => !have.has(name) && !skip.has(name))
-    .map((name) => ({ name, values: "" }));
-
-  return [...variables, ...extra];
-}
-
 export function nextVariableName(existing: PromptVariable[]): string {
   const have = new Set(existing.map((entry) => entry.name));
   if (!have.has("var")) return "var";
@@ -322,9 +283,70 @@ export function nextVariableName(existing: PromptVariable[]): string {
   return `var${n}`;
 }
 
-export function insertSlot(body: string, name: string): string {
-  const token = `{${name}}`;
-  if (body.includes(token)) return body;
-  const trimmed = body.trimEnd();
-  return trimmed.length > 0 ? `${trimmed} ${token}` : token;
+function renameVariable(
+  variables: PromptVariable[],
+  from: string,
+  to: string
+): PromptVariable[] {
+  return variables
+    .filter((entry) => entry.name !== to)
+    .map((entry) => (entry.name === from ? { ...entry, name: to } : entry));
+}
+
+function hasValues(variables: PromptVariable[], name: string): boolean {
+  return variables.some((entry) => entry.name === name && parseValues(entry.values).length > 0);
+}
+
+/**
+ * Keeps a variable's values when its `{name}` is respelled in the prompt.
+ *
+ * Variables are renamed only by editing the prompt. One slot disappearing
+ * while one appears is a rename. Deleting a name and retyping it passes
+ * through a state with no slot at all, so the name that just vanished is
+ * held as `orphan` for one step and adopted by the next slot to appear.
+ *
+ * Takes the prompt with snippets already filled in, so a name that is still
+ * used by a snippet is never counted as gone.
+ */
+export function carryVariables(
+  previous: string,
+  next: string,
+  variables: PromptVariable[],
+  orphan: string | null
+): { variables: PromptVariable[]; orphan: string | null } {
+  const before = new Set(collectSlots(previous));
+  const after = new Set(collectSlots(next));
+  const removed = [...before].filter((name) => !after.has(name));
+  const added = [...after].filter((name) => !before.has(name));
+
+  if (removed.length === 0 && added.length === 0) return { variables, orphan };
+
+  if (removed.length === 1 && added.length === 1) {
+    if (hasValues(variables, added[0])) return { variables, orphan: null };
+    return { variables: renameVariable(variables, removed[0], added[0]), orphan: null };
+  }
+
+  if (removed.length === 1 && added.length === 0) return { variables, orphan: removed[0] };
+
+  if (removed.length === 0 && added.length === 1 && orphan && !hasValues(variables, added[0])) {
+    return { variables: renameVariable(variables, orphan, added[0]), orphan: null };
+  }
+
+  return { variables, orphan: null };
+}
+
+/** The value list for `name`, or "" when it has none yet. */
+export function variableValues(variables: PromptVariable[], name: string): string {
+  return variables.find((entry) => entry.name === name)?.values ?? "";
+}
+
+/** Sets `name`'s values, adding the row if it is new. Other rows are untouched. */
+export function withVariableValues(
+  variables: PromptVariable[],
+  name: string,
+  values: string
+): PromptVariable[] {
+  return variables.some((entry) => entry.name === name)
+    ? variables.map((entry) => (entry.name === name ? { ...entry, values } : entry))
+    : [...variables, { name, values }];
 }

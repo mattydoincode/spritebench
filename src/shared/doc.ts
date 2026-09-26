@@ -37,7 +37,7 @@ import {
   type AssetEdits,
   type AssetRecord,
   type Scene,
-  type PromptSnippet,
+  type Snippet,
   type RepeatGroup,
   type ResolvedAsset,
   type StagedItem,
@@ -69,7 +69,8 @@ import {
 const SCENES = "scenes";
 const ASSET_EDITS = "assetEdits";
 const ASSET_SETS = "assetSets";
-const PROMPT_SNIPPETS = "promptSnippets";
+// Not "promptSnippets": that held whole saved prompts, which were dropped.
+const SNIPPETS = "snippets";
 const SETTINGS_CUTOUT = "settings.cutout";
 const SETTINGS_CUTOUT_FLOOD = "settings.cutout.edgeFloodFill";
 const SETTINGS_CUTOUT_CHROMA = "settings.cutout.chromaKey";
@@ -122,8 +123,8 @@ export function assetEditsMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
   return doc.getMap<Y.Map<unknown>>(ASSET_EDITS);
 }
 
-export function promptSnippetsMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
-  return doc.getMap<Y.Map<unknown>>(PROMPT_SNIPPETS);
+export function snippetsMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
+  return doc.getMap<Y.Map<unknown>>(SNIPPETS);
 }
 
 export function assetSetsMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
@@ -451,10 +452,10 @@ export function compareStacking(
   return a.zIndex - b.zIndex || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
-function readSnippet(id: string, map: Y.Map<unknown>): PromptSnippet | null {
+function readSnippet(id: string, map: Y.Map<unknown>): Snippet | null {
   const name = str(map, "name");
   const text = str(map, "text");
-  if (!name && !text) return null;
+  if (!name) return null;
 
   return {
     id,
@@ -463,8 +464,8 @@ function readSnippet(id: string, map: Y.Map<unknown>): PromptSnippet | null {
   };
 }
 
-export function listPromptSnippets(doc: Y.Doc): PromptSnippet[] {
-  return [...promptSnippetsMap(doc).entries()]
+export function listSnippets(doc: Y.Doc): Snippet[] {
+  return [...snippetsMap(doc).entries()]
     .flatMap(([id, map]) => {
       const snippet = readSnippet(id, map);
       return snippet ? [snippet] : [];
@@ -472,10 +473,10 @@ export function listPromptSnippets(doc: Y.Doc): PromptSnippet[] {
     .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 }
 
-export function putPromptSnippet(doc: Y.Doc, snippet: PromptSnippet): void {
+export function putSnippet(doc: Y.Doc, snippet: Snippet): void {
   transactLocal(doc, () => {
     const map = new Y.Map<unknown>();
-    promptSnippetsMap(doc).set(snippet.id, map);
+    snippetsMap(doc).set(snippet.id, map);
     setFields(map, {
       name: snippet.name,
       text: snippet.text
@@ -566,8 +567,15 @@ export function setAssetHidden(doc: Y.Doc, assetId: string, hidden: boolean): vo
   transactLocal(doc, () => map.set("hidden", hidden));
 }
 
-export function deletePromptSnippet(doc: Y.Doc, id: string): void {
-  transactLocal(doc, () => promptSnippetsMap(doc).delete(id));
+export function setSnippetText(doc: Y.Doc, id: string, text: string): void {
+  const map = snippetsMap(doc).get(id);
+  if (!map) return;
+
+  transactLocal(doc, () => map.set("text", text));
+}
+
+export function deleteSnippet(doc: Y.Doc, id: string): void {
+  transactLocal(doc, () => snippetsMap(doc).delete(id));
 }
 
 function plainRecord(map: Y.Map<unknown>): Record<string, unknown> {

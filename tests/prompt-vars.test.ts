@@ -5,18 +5,14 @@ import {
   collectSlots,
   expandCreate,
   expandPrompt,
-  insertSlot,
   joinValues,
   LOOP_SLOT_NAMES,
   loopBindings,
   loopReservedSlots,
   nextVariableName,
-  offeredVariables,
   parseValues,
   planCreate,
-  promptForJob,
-  removeSlot,
-  renameSlot
+  promptForJob
 } from "@/shared/promptVars";
 
 function prompt(body: string, prefix = "", suffix = ""): PromptSpec {
@@ -33,22 +29,6 @@ describe("parseValues", () => {
   it("round-trips through joinValues", () => {
     expect(joinValues(["green", " red", ""])).toBe("green, red");
     expect(parseValues(joinValues(["green", "red", "blue"]))).toEqual(["green", "red", "blue"]);
-  });
-});
-
-describe("removeSlot", () => {
-  it("strips the token and leftover spaces", () => {
-    expect(removeSlot("a crate {color}", "color")).toBe("a crate");
-    expect(removeSlot("a {color} crate", "color")).toBe("a crate");
-    expect(removeSlot("{color}", "color")).toBe("");
-    expect(removeSlot("a {color} {size}", "color")).toBe("a {size}");
-    expect(removeSlot("{var} {var2}", "var")).toBe("{var2}");
-  });
-
-  it("renames a token in place", () => {
-    expect(renameSlot("a {color} bin", "color", "tint")).toBe("a {tint} bin");
-    expect(renameSlot("a {color} bin", "color", "")).toBe("a bin");
-    expect(renameSlot("a {color} bin", "color", "color")).toBe("a {color} bin");
   });
 });
 
@@ -392,27 +372,7 @@ describe("expandCreate", () => {
   });
 });
 
-describe("offeredVariables", () => {
-  it("appends a blank row for a new slot", () => {
-    expect(offeredVariables(prompt("a {color} bin"), [])).toEqual([{ name: "color", values: "" }]);
-  });
-
-  it("keeps typed values and does not duplicate", () => {
-    const have = [{ name: "color", values: "green" }];
-    expect(offeredVariables(prompt("a {color} {size} bin"), have)).toEqual([
-      { name: "color", values: "green" },
-      { name: "size", values: "" }
-    ]);
-  });
-});
-
-describe("insertSlot", () => {
-  it("appends a new token and leaves an existing one alone", () => {
-    expect(insertSlot("a crate", "color")).toBe("a crate {color}");
-    expect(insertSlot("a {color} crate", "color")).toBe("a {color} crate");
-    expect(insertSlot("", "color")).toBe("{color}");
-  });
-
+describe("nextVariableName", () => {
   it("picks an unused name", () => {
     expect(nextVariableName([])).toBe("var");
     expect(nextVariableName([{ name: "var", values: "" }])).toBe("var2");
@@ -455,7 +415,6 @@ describe("loop slots", () => {
 
     expect(plan.blocked).toBeNull();
     expect(plan.jobs).toBe(4);
-    expect(offeredVariables(prompt("step {step} of {total_steps}"), [], reserved)).toEqual([]);
   });
 
   it("fills step and total_steps from the concrete loop row", () => {

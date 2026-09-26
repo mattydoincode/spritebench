@@ -17,7 +17,7 @@ import {
   type AssetRecord,
   type JobRecord,
   type Scene,
-  type PromptSnippet,
+  type Snippet,
   type RepeatGroup,
   type StagedItem,
   type TerrainGroup,
@@ -54,7 +54,7 @@ interface DocState {
   scenes: Scene[];
   edits: Record<string, AssetEdits>;
   sets: AssetSet[];
-  snippets: PromptSnippet[];
+  snippets: Snippet[];
   settings: ProjectSettings;
   canUndo: boolean;
   canRedo: boolean;
@@ -62,8 +62,9 @@ interface DocState {
   open: (projectId: string, canEdit: boolean) => void;
   close: () => void;
 
-  savePromptSnippet: (name: string, text: string) => void;
-  deletePromptSnippet: (id: string) => void;
+  createSnippet: (name: string, text: string) => void;
+  setSnippetText: (id: string, text: string) => void;
+  deleteSnippet: (id: string) => void;
   patchSettings: (patch: ProjectSettingsPatch) => void;
 
   undo: () => void;
@@ -162,7 +163,7 @@ export const useDoc = create<DocState>((set, get) => {
       revision: get().revision + 1,
       ready: sync.ready,
       scenes: doc.listScenes(sync.doc),
-      snippets: doc.listPromptSnippets(sync.doc),
+      snippets: doc.listSnippets(sync.doc),
       settings: doc.readProjectSettings(sync.doc),
       edits: Object.fromEntries(
         [...doc.assetEditsMap(sync.doc).keys()].flatMap((assetId) => {
@@ -223,20 +224,21 @@ export const useDoc = create<DocState>((set, get) => {
       });
     },
 
-    savePromptSnippet(name, text) {
+    createSnippet(name, text) {
       const { sync } = get();
       if (!sync) return;
 
-      doc.putPromptSnippet(sync.doc, {
-        id: crypto.randomUUID(),
-        name,
-        text
-      });
+      doc.putSnippet(sync.doc, { id: crypto.randomUUID(), name, text });
     },
 
-    deletePromptSnippet(id) {
+    setSnippetText(id, text) {
       const { sync } = get();
-      if (sync) doc.deletePromptSnippet(sync.doc, id);
+      if (sync) doc.setSnippetText(sync.doc, id, text);
+    },
+
+    deleteSnippet(id) {
+      const { sync } = get();
+      if (sync) doc.deleteSnippet(sync.doc, id);
     },
 
     patchSettings(patch) {

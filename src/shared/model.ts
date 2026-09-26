@@ -607,13 +607,12 @@ export interface StudioSettings {
 }
 
 /**
- * A named prompt saved on the project.
+ * A named block of prompt text, dropped into a prompt by writing `@name`.
  *
- * Shared rather than personal: a prompt someone likes enough to name is
- * useful to the next person who opens the same project. The working box
- * stays where it is -- this is the library you load from and save into.
+ * Shared on the project, so collaborators draw from the same set. Only ever
+ * added where the prompt says so -- nothing is appended behind your back.
  */
-export interface PromptSnippet {
+export interface Snippet {
   id: string;
   name: string;
   text: string;
