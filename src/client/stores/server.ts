@@ -38,6 +38,7 @@ import { applySlotEdits, sameAssignment, type SlotEdit } from "@/shared/slotEdit
 import { createSlotQueue } from "@/client/slotQueue";
 import type { EngineCollectionView } from "@/shared/engineCollection";
 import type { StudioBootstrap } from "@/shared/studioBootstrap";
+import { recordSetup } from "@/client/promptHistory";
 import { useDoc } from "./doc";
 import { useUi } from "./ui";
 
@@ -681,6 +682,7 @@ export const useServer = create<ServerState>((set, get) => {
     },
 
     resetGenerateDefaults() {
+      recordSetup();
       const restored = defaultGenerateSetup(get().settings.generation.model);
       useUi.getState().applyGenerationSetup(restored);
       useUi.getState().setBatches(1);
@@ -689,6 +691,7 @@ export const useServer = create<ServerState>((set, get) => {
     },
 
     restoreFromAsset(asset) {
+      recordSetup();
       const restored = restoreGeneration(asset);
       useUi.getState().applyGenerationSetup(restored);
       get().setGeneration(restored.generation);

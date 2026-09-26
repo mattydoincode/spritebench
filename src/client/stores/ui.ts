@@ -729,6 +729,8 @@ interface UiState extends Stored {
   setChunk: (patch: Partial<ChunkSettings>) => void;
   setEach: (patch: Partial<EachSettings>) => void;
   setVariables: (variables: PromptVariable[]) => void;
+  /** Puts back part of the generate draft, for prompt undo. */
+  restoreDraft: (patch: Partial<ProjectDraft> & { batches?: number }) => void;
   setAnimateExpansions: (value: boolean) => void;
 
   openImageEditor: (id: string) => void;
@@ -934,6 +936,11 @@ export const useUi = create<UiState>((set, get) => {
         animation: each.enabled ? { ...get().animation, enabled: false } : get().animation,
         itemGrid: each.enabled ? { ...get().itemGrid, enabled: false } : get().itemGrid
       });
+      save();
+    },
+
+    restoreDraft(patch) {
+      set(patch);
       save();
     },
 

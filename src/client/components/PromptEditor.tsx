@@ -2,6 +2,7 @@
 
 import { useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { recordPrompt, redoPrompt, undoPrompt } from "@/client/promptHistory";
 import { useDoc } from "@/client/stores/doc";
 import { useServer } from "@/client/stores/server";
 import { useUi } from "@/client/stores/ui";
@@ -93,7 +94,7 @@ export function PromptEditor({
     if (option.create) useDoc.getState().createSnippet(option.name, "");
 
     const done = completeSnippet(promptBody, suggest.start, suggest.caret, option.name);
-    edit(done.text);
+    edit(done.text, false);
     setSuggest(null);
     selection.current = { start: done.caret, end: done.caret };
 
@@ -103,7 +104,9 @@ export function PromptEditor({
     });
   };
 
-  const edit = (next: string) => {
+  /** `typing` folds keystrokes into one undo step; anything else is its own. */
+  const edit = (next: string, typing = true) => {
+    recordPrompt({ typing });
     const carried = carryVariables(
       resolved(promptBody),
       resolved(next),
@@ -120,6 +123,7 @@ export function PromptEditor({
     const { start, end } = selection.current;
     const cleared = promptBody.slice(0, start) + promptBody.slice(end);
     const placed = insertAt(cleared, Math.min(start, cleared.length), token);
+    recordPrompt();
     ui().setPromptBody(placed.text);
     selection.current = { start: placed.caret, end: placed.caret };
     setTab("edit");
@@ -148,7 +152,12 @@ export function PromptEditor({
         <TextButton
           className="self-center"
           title="Reset prompt, modes, templates, and batches. Keeps the current model."
-          onClick={() => useServer.getState().resetGenerateDefaults()}
+          onClick={() => {
+            useServer.getState().resetGenerateDefaults();
+            // So "reset, oops, Ctrl+Z" lands on the prompt's undo, not the scene's.
+            setTab("edit");
+            requestAnimationFrame(() => textarea.current?.focus());
+          }}
         >
           reset
         </TextButton>
@@ -169,6 +178,15 @@ export function PromptEditor({
           }}
           onBlur={() => setSuggest(null)}
           onKeyDown={(event) => {
+            const key = event.key.toLowerCase();
+            if ((event.ctrlKey || event.metaKey) && (key === "z" || key === "y")) {
+              event.preventDefault();
+              setSuggest(null);
+              if (key === "y" || event.shiftKey) redoPrompt();
+              else undoPrompt();
+              return;
+            }
+
             if (!suggest || options.length === 0) return;
 
             if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -511,7 +529,10 @@ function VariablesBlock({ onInsert }: { onInsert: (token: string) => void }) {
           </span>
           <VariableValues
             values={variableValues(variables, name)}
-            onChange={(values) => ui().setVariables(withVariableValues(ui().variables, name, values))}
+            onChange={(values) => {
+              recordPrompt();
+              ui().setVariables(withVariableValues(ui().variables, name, values));
+            }}
           />
         </div>
       ))}
