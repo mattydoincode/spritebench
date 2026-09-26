@@ -36,6 +36,7 @@ import type { EngineSlotRecord } from "@/shared/engineSlot";
 import { applySlotEdits, sameAssignment, type SlotEdit } from "@/shared/slotEdits";
 import { createSlotQueue } from "@/client/slotQueue";
 import type { EngineCollectionView } from "@/shared/engineCollection";
+import type { StudioBootstrap } from "@/shared/studioBootstrap";
 import { useDoc } from "./doc";
 import { useUi } from "./ui";
 
@@ -130,11 +131,12 @@ interface ServerState {
 
   loadProjects: () => Promise<ProjectSummary[]>;
   /**
-   * Switches to a project synchronously, before anything is fetched: drops
-   * the last project's rows and shows this one's name if the list already has
-   * it. Call before paint so the old project never flashes.
+   * Switches to a project synchronously from what the server resolved for
+   * the page: its summary, keys and your settings. Drops the last project's
+   * rows. Call before paint so the old project never flashes.
    */
-  beginProject: (projectId: string) => void;
+  beginProject: (bootstrap: StudioBootstrap) => void;
+  /** Loads the rows for the project `beginProject` switched to. */
   openProject: (projectId: string) => Promise<void>;
   createProject: (name: string) => Promise<string | null>;
   renameProject: (projectId: string, name: string) => Promise<void>;
@@ -310,28 +312,37 @@ export const useServer = create<ServerState>((set, get) => {
       }
     },
 
-    beginProject(id) {
-      if (get().project?.id === id && get().loadedProjectId === id) return;
+    beginProject({ project, projectKeys, settings, providerKeys }) {
+      const same = get().project?.id === project.id && get().loadedProjectId === project.id;
+      const known = get().projects.some((entry) => entry.id === project.id);
 
       set({
-        loadedProjectId: null,
-        project: get().projects.find((entry) => entry.id === id) ?? null,
-        projectKeys: null,
-        assets: [],
-        jobs: [],
-        palettes: [],
-        templates: [],
-        slots: [],
-        collections: []
+        project,
+        projectKeys,
+        settings,
+        providerKeys,
+        projects: known
+          ? get().projects.map((entry) => (entry.id === project.id ? project : entry))
+          : [...get().projects, project],
+        // Reopening the project already in memory keeps its rows on screen
+        // while fresh ones load; any other project starts empty.
+        ...(same
+          ? {}
+          : {
+              loadedProjectId: null,
+              assets: [],
+              jobs: [],
+              palettes: [],
+              templates: [],
+              slots: [],
+              collections: []
+            })
       });
     },
 
     async openProject(id) {
-      const project = get().projects.find((entry) => entry.id === id);
-      if (!project) return;
-
-      get().beginProject(id);
-      set({ project });
+      const project = get().project;
+      if (!project || project.id !== id) return;
 
       // Every request below outlives the screen that made it. Anything that
       // lands after you have switched away is dropped, not merged into the
@@ -342,22 +353,6 @@ export const useServer = create<ServerState>((set, get) => {
       // scene with no asset rows yet renders empty, which is correct,
       // whereas waiting for both makes a cold load feel twice as slow.
       useDoc.getState().open(id, project.role !== "viewer");
-
-      // Keys load beside the rows, not after them, and on their own: a slow
-      // or failing key list should not hold up the library.
-      if (project.canGenerate || project.isOwner) {
-        projectApi<{ keys: ProviderKeyStatus[] }>(id, "/keys")
-          .then(({ keys }) => {
-            if (current()) set({ projectKeys: keys });
-          })
-          .catch((error: unknown) => {
-            if (!current()) return;
-            set({ projectKeys: [] });
-            fail(error);
-          });
-      } else {
-        set({ projectKeys: [] });
-      }
 
       try {
         const [assetsRes, jobsRes, palettesRes, templatesRes, slotsRes] = await Promise.all([

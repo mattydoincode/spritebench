@@ -38,6 +38,47 @@ export async function listProjects(userId: string): Promise<ProjectSummary[]> {
 }
 
 /**
+ * One project as `listProjects` would describe it, or null when it does not
+ * exist or is not shared with this user -- the same answer for both, as in
+ * `requireMember`.
+ */
+export async function getProjectSummary(
+  userId: string,
+  projectId: string
+): Promise<ProjectSummary | null> {
+  const [row] = await db()
+    .select({
+      id: projects.id,
+      name: projects.name,
+      ownerUserId: projects.ownerUserId,
+      createdAt: projects.createdAt,
+      role: projectMembers.role,
+      canGenerate: projectMembers.canGenerate
+    })
+    .from(projectMembers)
+    .innerJoin(projects, eq(projects.id, projectMembers.projectId))
+    .where(
+      and(
+        eq(projectMembers.projectId, projectId),
+        eq(projectMembers.userId, userId),
+        isNull(projects.deletedAt)
+      )
+    )
+    .limit(1);
+
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    name: row.name,
+    role: row.role,
+    canGenerate: row.canGenerate,
+    isOwner: row.ownerUserId === userId,
+    createdAt: row.createdAt.toISOString()
+  };
+}
+
+/**
  * Creates a project and its owner membership together. The owner gets a
  * `project_members` row like anyone else so authorization never has to
  * special-case them -- `requireMember` is the only path in.

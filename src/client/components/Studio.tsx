@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useState } from "react";
-import Link from "next/link";
+import { useEffect, useLayoutEffect } from "react";
 import { GeneratePanel } from "@/client/components/GeneratePanel";
 import { ImageEditModal } from "@/client/components/ImageEditModal";
 import { SettingsModal } from "@/client/components/SettingsModal";
@@ -19,6 +18,7 @@ import { usePrefetchNewAssets } from "@/client/prefetch";
 import { useDoc } from "@/client/stores/doc";
 import { useProjectLoaded, useServer } from "@/client/stores/server";
 import { DEFAULT_LAYOUT, type Pane, useUi } from "@/client/stores/ui";
+import type { StudioBootstrap } from "@/shared/studioBootstrap";
 
 /** Holds the scene's space while the project and its document load. */
 function ScenePlaceholder() {
@@ -40,7 +40,8 @@ function ScenePlaceholder() {
  * collaborator -- who lands on the same scene rather than on whatever
  * they last had open.
  */
-export function Studio({ projectId }: { projectId: string }) {
+export function Studio({ bootstrap }: { bootstrap: StudioBootstrap }) {
+  const projectId = bootstrap.project.id;
   const loaded = useProjectLoaded();
   const project = useServer((state) => state.project);
   const jobs = useServer((state) => state.jobs);
@@ -53,9 +54,8 @@ export function Studio({ projectId }: { projectId: string }) {
 
   const layout = useUi((state) => state.layout);
   const leftTab = useUi((state) => state.leftTab);
-  const [missing, setMissing] = useState(false);
 
-  // Before paint: the studio draws its full layout straight away now, so the
+  // Before paint: the studio draws its full layout straight away, so the
   // stored pane sizes have to be in place before the first frame, and the
   // last project's rows have to be gone before this one's name is shown.
   useLayoutEffect(() => {
@@ -63,27 +63,17 @@ export function Studio({ projectId }: { projectId: string }) {
   }, []);
 
   useLayoutEffect(() => {
-    useServer.getState().beginProject(projectId);
-  }, [projectId]);
+    useServer.getState().beginProject(bootstrap);
+  }, [bootstrap]);
 
   const resize = (pane: Pane, size: number) => useUi.getState().setPaneSize(pane, size);
 
-  // The project list has to load first: `openProject` reads the membership row
-  // out of it to know whether this user may edit, which decides whether the
-  // document syncs read-only.
+  // Membership was settled on the server before this rendered, so the rows
+  // can load straight away.
   useEffect(() => {
-    void (async () => {
-      const projects = await useServer.getState().loadProjects();
-
-      if (!projects.some((entry) => entry.id === projectId)) {
-        setMissing(true);
-        return;
-      }
-
-      // Remembered only so the dashboard can offer to pick this back up.
-      useUi.getState().setActiveProject(projectId);
-      await useServer.getState().openProject(projectId);
-    })();
+    // Remembered only so the dashboard can offer to pick this back up.
+    useUi.getState().setActiveProject(projectId);
+    void useServer.getState().openProject(projectId);
 
     return () => {
       useUi.getState().closeSettings();
@@ -138,19 +128,6 @@ export function Studio({ projectId }: { projectId: string }) {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
-
-  if (missing) {
-    return (
-      <main className="flex h-screen flex-col items-center justify-center gap-3 text-sm">
-        <p className="text-slate-400">
-          That project does not exist, or is not shared with you.
-        </p>
-        <Link href="/projects" className="text-[var(--color-accent)] hover:underline">
-          back to your projects
-        </Link>
-      </main>
-    );
-  }
 
   return (
     <main className="studio-root relative flex h-screen flex-col">
