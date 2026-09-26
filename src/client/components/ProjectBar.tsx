@@ -1,66 +1,48 @@
 "use client";
 
 import Link from "next/link";
-import { useDoc } from "@/client/stores/doc";
 import { useServer } from "@/client/stores/server";
 import { useUi } from "@/client/stores/ui";
 import { Button } from "./ui";
 
 /**
- * Which project you are in, a way out, undo, and settings.
+ * Which project you are in, a way out, and settings.
  *
  * Sits over the left pane only, not across the whole window: the scene and
- * the inspector get their full height, and the chrome that is about the
- * project lives in one corner instead of a strip that is mostly empty.
+ * the inspector get their full height. Undo and redo are keyboard only.
+ *
+ * Settings floats right so the breadcrumb shares the logo's line when the
+ * pane is wide enough, and wraps under it at full width when it is not.
  */
 export function ProjectBar() {
   const project = useServer((state) => state.project);
-  const canUndo = useDoc((state) => state.canUndo);
-  const canRedo = useDoc((state) => state.canRedo);
 
   if (!project) return null;
 
   return (
-    <header className="flex shrink-0 flex-col gap-1.5 border-b border-[var(--color-edge)] bg-[var(--color-ink-700)] px-3 py-2 text-[11px]">
-      <div className="flex items-center gap-1">
-        <Link
-          href="/projects"
-          title="All of your projects"
-          aria-label="SpriteBench — all projects"
-          className="mr-auto shrink-0"
-        >
-          <img src="/branding/logo-white.png" alt="SpriteBench" className="h-3.5 w-auto" />
-        </Link>
+    <header className="flow-root shrink-0 border-b border-[var(--color-edge)] bg-[var(--color-ink-700)] px-3 py-1.5 text-[11px] leading-6">
+      <Button
+        variant="ghost"
+        className="float-right ml-2"
+        title="Project defaults, plus your account and keys"
+        onClick={() => useUi.getState().openSettings()}
+      >
+        settings
+      </Button>
 
-        <Button
-          variant="ghost"
-          disabled={!canUndo}
-          title="Undo your last change (ctrl+z). A collaborator's edits are skipped."
-          aria-label="Undo"
-          onClick={() => useDoc.getState().undo()}
-        >
-          {"↶"}
-        </Button>
-        <Button
-          variant="ghost"
-          disabled={!canRedo}
-          title="Redo (ctrl+shift+z)"
-          aria-label="Redo"
-          onClick={() => useDoc.getState().redo()}
-        >
-          {"↷"}
-        </Button>
+      <Link
+        href="/projects"
+        title="All of your projects"
+        aria-label="SpriteBench — all projects"
+        className="mr-3 inline-flex h-6 items-center align-top"
+      >
+        <img src="/branding/logo-white.png" alt="SpriteBench" className="h-3.5 w-auto" />
+      </Link>
 
-        <Button
-          variant="ghost"
-          title="Project defaults, plus your account and keys"
-          onClick={() => useUi.getState().openSettings()}
-        >
-          settings
-        </Button>
-      </div>
-
-      <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5">
+      <nav
+        aria-label="Breadcrumb"
+        className="inline-flex h-6 max-w-full items-center gap-1.5 align-top"
+      >
         <Link
           href="/projects"
           title="Back to all of your projects"
@@ -75,7 +57,7 @@ export function ProjectBar() {
 
         {project.role === "viewer" ? (
           <span
-            className="ml-auto shrink-0 text-amber-300"
+            className="ml-1 shrink-0 text-amber-300"
             title="You can look, but changes will not be saved"
           >
             read only
