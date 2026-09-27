@@ -913,7 +913,22 @@ export function GeneratePanel() {
 
   const prompt = (
     <PromptEditor bindings={bindings} summary={summary}>
-      <div className="flex shrink-0 items-center gap-2">
+      <Destination batching={batching} />
+      {canAnimate ? (
+        <div className="mt-1 shrink-0">
+          <Toggle
+            label="Collect into an animation"
+            checked={animateExpansions}
+            onChange={(value) => ui().setAnimateExpansions(value)}
+          />
+        </div>
+      ) : null}
+      {create.blocked ? (
+        <p className="mt-1 shrink-0 text-[10px] leading-snug text-amber-300">{create.blocked}</p>
+      ) : create.breakdown ? (
+        <p className="mt-1 shrink-0 text-[10px] leading-snug text-slate-500">{create.breakdown}</p>
+      ) : null}
+      <div className="mt-1.5 flex shrink-0 items-center gap-2">
         <Button
           variant="primary"
           className="flex-1 py-1.5 text-sm"
@@ -935,21 +950,6 @@ export function GeneratePanel() {
           <BatchesInput />
         </label>
       </div>
-      {create.blocked ? (
-        <p className="mt-1 shrink-0 text-[10px] leading-snug text-amber-300">{create.blocked}</p>
-      ) : create.breakdown ? (
-        <p className="mt-1 shrink-0 text-[10px] leading-snug text-slate-500">{create.breakdown}</p>
-      ) : null}
-      <Destination batching={batching} />
-      {canAnimate ? (
-        <div className="mt-1 shrink-0">
-          <Toggle
-            label="Collect into an animation"
-            checked={animateExpansions}
-            onChange={(value) => ui().setAnimateExpansions(value)}
-          />
-        </div>
-      ) : null}
     </PromptEditor>
   );
 

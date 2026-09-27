@@ -168,7 +168,6 @@ interface ServerState {
   clearFailedJobs: () => Promise<void>;
 
   deleteAsset: (id: string) => Promise<void>;
-  approve: (id: string, name?: string) => Promise<void>;
 
   ensurePalette: (paletteId: string) => Promise<Rgb[]>;
   addPalettes: (files: File[]) => Promise<void>;
@@ -874,34 +873,6 @@ export const useServer = create<ServerState>((set, get) => {
       ui.selectMany(ui.selectedIds.filter((entry) => entry !== id));
       if (ui.editingAssetId === id) ui.closeImageEditor();
       if (ui.slicingAssetId === id) ui.closeSlicer();
-    },
-
-    async approve(id, name) {
-      const ui = useUi.getState();
-      ui.setBusy("exporting");
-      ui.setError(null);
-
-      try {
-        const { asset, exported } = await projectApi<{
-          asset: AssetRecord;
-          exported: { path: string; width: number; height: number };
-        }>(projectId(), "/approve", {
-          method: "POST",
-          body: JSON.stringify({ assetId: id, name })
-        });
-
-        set({
-          assets: get().assets.map((entry) => (entry.id === asset.id ? asset : entry))
-        });
-
-        useUi
-          .getState()
-          .setNotice(`exported ${exported.path} at ${exported.width}x${exported.height}`);
-      } catch (error) {
-        fail(error);
-      } finally {
-        useUi.getState().setBusy(null);
-      }
     },
 
     async ensurePalette(paletteId) {

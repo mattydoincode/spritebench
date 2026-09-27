@@ -77,7 +77,6 @@ export function InspectorPanel() {
   const palettes = useServer((state) => state.palettes);
   const folders = useDoc((state) => state.folders);
   const scene = useActiveScene();
-  const busy = useUi((state) => state.busy);
   const asset = useSelectedAsset();
   const job = useSelectedJob();
   const activeSequenceId = useUi((state) => state.activeSequenceId);
@@ -285,6 +284,106 @@ export function InspectorPanel() {
           {preview.description ? <> &middot; {preview.description}</> : null}
         </p>
       ) : null}
+      {/* Always here, under the image: what it is, where it lives, and getting it out. */}
+      <div className="mt-2 flex shrink-0 flex-col gap-1.5 border-t border-[var(--color-edge)] pt-2">
+        <div className="flex items-center gap-1.5">
+          <input
+            type="text"
+            value={asset.name}
+            placeholder={`name (asset ${asset.seq})`}
+            title="Name, blank to use the number"
+            className="min-w-0 flex-1"
+            onChange={(event) => doc().rename(asset.id, event.target.value)}
+          />
+          <select
+            value={folders.some((entry) => entry.id === asset.folderId) ? asset.folderId : ""}
+            title="Folder. Moves this image's whole batch."
+            style={{ width: "auto", maxWidth: "45%" }}
+            onChange={(event) => doc().moveToFolder([asset.id], event.target.value)}
+          >
+            <option value="">No Folder</option>
+            {folders.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <input
+          type="text"
+          value={asset.tags.join(", ")}
+          placeholder="tags, comma separated"
+          title="Tags, comma separated"
+          onChange={(event) =>
+            doc().setTags(
+              asset.id,
+              event.target.value
+                .split(",")
+                .map((tag) => tag.trim())
+                .filter((tag) => tag.length > 0)
+            )
+          }
+        />
+
+        <div className="flex items-center gap-1.5">
+          <input
+            type="text"
+            value={exportName}
+            placeholder="filename"
+            title="Download filename, no extension"
+            className="min-w-0 flex-1"
+            onChange={(event) => setExportName(event.target.value)}
+          />
+          <Button variant="primary" onClick={() => setExporting(true)}>
+            download
+          </Button>
+          <TextButton
+            disabled={!scene}
+            title={scene ? "Stage this image in the current scene" : "Open a scene first"}
+            onClick={() => {
+              if (!scene) return;
+
+              doc().addItem(scene.id, {
+                id: crypto.randomUUID(),
+                assetId: asset.id,
+                x: (scene.items.length % 6) * 96,
+                y: Math.floor(scene.items.length / 6) * 96,
+                footprint: { width: 0, height: 0 },
+                flipHorizontal: false,
+                flipVertical: false,
+                isoTurn: 0,
+                isoProjection: isoProjectionFromSource(useUi.getState().mask?.source),
+                showSource: false,
+                opacity: 1,
+                paused: false,
+                sequenceId: "",
+                heldFrame: 0,
+                rotation: 0,
+                display: isSetAsset(asset) ? "sheet" : "cell"
+              });
+            }}
+          >
+            + scene
+          </TextButton>
+        </div>
+
+        {selectedIds.length > 1 ? (
+          <TextButton
+            className="self-start"
+            title="Copy this image's processing settings onto every selected image"
+            onClick={() => {
+              // Crops are per-image; copying them onto a different sprite would
+              // cut it in the wrong place.
+              const { edits, ...shared } = processing;
+              void edits;
+              doc().applyProcessingToMany(selectedIds, shared as typeof processing);
+            }}
+          >
+            apply these settings to all {selectedIds.length} selected
+          </TextButton>
+        ) : null}
+      </div>
     </>
   );
 
@@ -311,52 +410,6 @@ export function InspectorPanel() {
         </Button>
       }
     >
-      <Section id="inspector.asset" label="asset">
-        <Field label="Name" hint={`asset ${asset.seq}, blank to use the number`}>
-          <input
-            type="text"
-            value={asset.name}
-            placeholder={asset.label}
-            onChange={(event) => doc().rename(asset.id, event.target.value)}
-          />
-        </Field>
-
-        <Row>
-          <div className="flex-1">
-            <Field label="Folder">
-              <select
-                value={folders.some((entry) => entry.id === asset.folderId) ? asset.folderId : ""}
-                onChange={(event) => doc().moveToFolder([asset.id], event.target.value)}
-              >
-                <option value="">No Folder</option>
-                {folders.map((entry) => (
-                  <option key={entry.id} value={entry.id}>
-                    {entry.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          </div>
-          <div className="flex-1">
-            <Field label="Tags" hint="comma separated">
-              <input
-                type="text"
-                value={asset.tags.join(", ")}
-                onChange={(event) =>
-                  doc().setTags(
-                    asset.id,
-                    event.target.value
-                      .split(",")
-                      .map((tag) => tag.trim())
-                      .filter((tag) => tag.length > 0)
-                  )
-                }
-              />
-            </Field>
-          </div>
-        </Row>
-      </Section>
-
       {asset.set ? (
         <SetSection
           asset={asset}
@@ -637,79 +690,6 @@ export function InspectorPanel() {
 
       <Section id="inspector.history" label="history">
         <GenerationHistory asset={frameAsset ?? asset} />
-      </Section>
-
-      <Section id="inspector.output" label="output">
-        {selectedIds.length > 1 ? (
-          <Button
-            className="mb-2 w-full"
-            title="Copy this asset's processing settings onto every selected asset"
-            onClick={() => {
-              // Crops are per-image; copying them onto a different sprite would
-              // cut it in the wrong place.
-              const { edits, ...shared } = processing;
-              void edits;
-              doc().applyProcessingToMany(selectedIds, shared as typeof processing);
-            }}
-          >
-            apply these settings to all {selectedIds.length} selected
-          </Button>
-        ) : null}
-
-        <Button
-          className="mb-2 w-full"
-          disabled={!scene}
-          onClick={() => {
-            if (!scene) return;
-
-            doc().addItem(scene.id, {
-              id: crypto.randomUUID(),
-              assetId: asset.id,
-              x: (scene.items.length % 6) * 96,
-              y: Math.floor(scene.items.length / 6) * 96,
-              footprint: { width: 0, height: 0 },
-              flipHorizontal: false,
-              flipVertical: false,
-              isoTurn: 0,
-              isoProjection: isoProjectionFromSource(useUi.getState().mask?.source),
-              showSource: false,
-              opacity: 1,
-              paused: false,
-              sequenceId: "",
-              heldFrame: 0,
-              rotation: 0,
-              display: isSetAsset(asset) ? "sheet" : "cell"
-            });
-          }}
-        >
-          add to scene
-        </Button>
-
-        <Field label="Download filename" hint="no extension">
-          <input
-            type="text"
-            value={exportName}
-            onChange={(event) => setExportName(event.target.value)}
-          />
-        </Field>
-
-        <Button variant="primary" className="w-full" onClick={() => setExporting(true)}>
-          download
-        </Button>
-
-        <Button
-          variant="ghost"
-          className="mt-1 w-full"
-          disabled={busy !== null}
-          title="Writes a copy into this app's own storage instead of downloading it. Counts against your storage."
-          onClick={() => void server().approve(asset.id, exportName)}
-        >
-          {busy === "exporting" ? "saving..." : "save a server-side copy"}
-        </Button>
-
-        {asset.exportPath ? (
-          <p className="mt-2 text-[10px] break-all text-emerald-400">{asset.exportPath}</p>
-        ) : null}
       </Section>
 
       {exporting ? (
