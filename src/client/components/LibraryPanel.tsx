@@ -675,8 +675,37 @@ export function LibraryPanel() {
       />
     );
 
+  const toolbar = (
+    <>
+      <input
+        type="text"
+        placeholder="search"
+        title="Search name, prompt, tag, error"
+        value={search}
+        style={{ width: "auto", flex: "1 1 10rem", minWidth: "5rem", maxWidth: "10rem" }}
+        onChange={(event) => setSearch(event.target.value)}
+      />
+      <select
+        value={activeFilter}
+        title="Show one folder. New images go to the folder you are looking at."
+        style={{ width: "auto", maxWidth: "10rem" }}
+        onChange={(event) => ui().setLibraryFolder(event.target.value)}
+      >
+        <option value="">All folders</option>
+        {folders.map((entry) => (
+          <option key={entry.id} value={entry.id}>
+            {entry.name}
+          </option>
+        ))}
+        <option value={UNFILED}>No Folder</option>
+      </select>
+      <NewFolderButton />
+    </>
+  );
+
   return (
-    <div className="relative h-full">
+    // A size container, so the toolbar follows the panel's width, not the window's.
+    <div className="@container relative h-full">
       <Panel
         title="Library"
         count={loaded ? items.length : undefined}
@@ -691,32 +720,12 @@ export function LibraryPanel() {
                 clear failed
               </Button>
             ) : null}
-            <input
-              type="text"
-              placeholder="search"
-              title="Search name, prompt, tag, error"
-              value={search}
-              style={{ width: "10rem" }}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-            <select
-              value={activeFilter}
-              title="Show one folder. New images go to the folder you are looking at."
-              style={{ width: "auto", maxWidth: "10rem" }}
-              onChange={(event) => ui().setLibraryFolder(event.target.value)}
-            >
-              <option value="">All folders</option>
-              {folders.map((entry) => (
-                <option key={entry.id} value={entry.id}>
-                  {entry.name}
-                </option>
-              ))}
-              <option value={UNFILED}>No Folder</option>
-            </select>
-            <NewFolderButton />
+            <div className="hidden min-w-0 items-center gap-1 @min-[30rem]:flex">{toolbar}</div>
           </>
         }
       >
+        {/* The same controls, on their own row once the header is too narrow. */}
+        <div className="mb-3 flex items-center gap-1 @min-[30rem]:hidden">{toolbar}</div>
         {!loaded ? (
           <div className="flex flex-wrap items-start gap-2">
             {Array.from({ length: 12 }, (_, index) => (
