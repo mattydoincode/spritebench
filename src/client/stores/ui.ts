@@ -188,6 +188,8 @@ interface Stored extends ProjectDraft {
    * workers just interleaves on the same core.
    */
   processWorkers: number;
+  /** The feedback panel was closed; a link in the project header reopens it. */
+  feedbackHidden: boolean;
 }
 
 export type BubbleId = "view" | "elements" | "scenes" | "tree";
@@ -213,7 +215,7 @@ export function sectionCollapsed(
   return stored[id] ?? defaults[id] ?? false;
 }
 
-export type Pane = "left" | "right" | "library" | "prompt" | "preview";
+export type Pane = "left" | "right" | "library" | "prompt" | "preview" | "feedback";
 export type LeftTab = "generate" | "godot";
 export type SettingsTab = "project" | "account";
 
@@ -225,6 +227,8 @@ export interface Layout {
   prompt: number;
   /** Height of the pinned preview at the top of the inspector. */
   preview: number;
+  /** Height of the feedback panel under the inspector. */
+  feedback: number;
 }
 
 const PANE_LIMITS: Record<Pane, { min: number; max: number }> = {
@@ -232,7 +236,9 @@ const PANE_LIMITS: Record<Pane, { min: number; max: number }> = {
   right: { min: 200, max: 900 },
   library: { min: 60, max: 1600 },
   prompt: { min: 160, max: 1600 },
-  preview: { min: 160, max: 1600 }
+  preview: { min: 160, max: 1600 },
+  // Down to its header: out of the way without being gone.
+  feedback: { min: 40, max: 1600 }
 };
 
 function clampPane(pane: Pane, size: number): number {
@@ -252,7 +258,8 @@ const LAYOUT_SHARES: Record<Pane, number> = {
   right: 0.2,
   library: 0.35,
   prompt: 0.4,
-  preview: 0.4
+  preview: 0.4,
+  feedback: 0.25
 };
 
 /** Project bar plus panel header, above the left panel's body. */
@@ -273,7 +280,8 @@ export function defaultLayout(
     right: clampPane("right", viewport.width * LAYOUT_SHARES.right),
     library: clampPane("library", viewport.height * LAYOUT_SHARES.library),
     prompt: clampPane("prompt", (viewport.height - LEFT_CHROME) * LAYOUT_SHARES.prompt),
-    preview: clampPane("preview", (viewport.height - RIGHT_CHROME) * LAYOUT_SHARES.preview)
+    preview: clampPane("preview", (viewport.height - RIGHT_CHROME) * LAYOUT_SHARES.preview),
+    feedback: clampPane("feedback", viewport.height * LAYOUT_SHARES.feedback)
   };
 }
 
@@ -587,7 +595,8 @@ const DEFAULTS: Stored = {
   collapsedSections: {},
   // Real window shares are applied in `hydrate`, before first paint.
   layout: defaultLayout(FALLBACK_VIEWPORT),
-  processWorkers: DEFAULT_PROCESS_WORKERS
+  processWorkers: DEFAULT_PROCESS_WORKERS,
+  feedbackHidden: false
 };
 
 function read(): Stored {
@@ -618,9 +627,11 @@ function read(): Stored {
         right: stored.layout?.right ?? defaultPaneSize("right"),
         library: stored.layout?.library ?? defaultPaneSize("library"),
         prompt: stored.layout?.prompt ?? defaultPaneSize("prompt"),
-        preview: stored.layout?.preview ?? defaultPaneSize("preview")
+        preview: stored.layout?.preview ?? defaultPaneSize("preview"),
+        feedback: stored.layout?.feedback ?? defaultPaneSize("feedback")
       },
       processWorkers: clampProcessWorkers(stored.processWorkers),
+      feedbackHidden: stored.feedbackHidden === true,
       engineThumbSize: clampEngineThumbSize(stored.engineThumbSize),
       sceneView: readSceneView(stored.sceneView)
     };
@@ -655,7 +666,8 @@ function persist(state: Stored): void {
           collapsedBatches: state.collapsedBatches,
           collapsedSections: state.collapsedSections,
           layout: state.layout,
-          processWorkers: state.processWorkers
+          processWorkers: state.processWorkers,
+          feedbackHidden: state.feedbackHidden
         })
       );
     } catch {
@@ -733,6 +745,7 @@ interface UiState extends Stored {
   setPaneSize: (pane: Pane, size: number) => void;
   setLeftTab: (tab: LeftTab) => void;
   setProcessWorkers: (count: number) => void;
+  setFeedbackHidden: (hidden: boolean) => void;
 
 
   cameraFor: (sceneId: string) => Camera;
@@ -818,6 +831,11 @@ export const useUi = create<UiState>((set, get) => {
       const stored = read();
       set(stored);
       processor.setWorkers(stored.processWorkers);
+    },
+
+    setFeedbackHidden(hidden) {
+      set({ feedbackHidden: hidden });
+      save();
     },
 
     setProcessWorkers(count) {

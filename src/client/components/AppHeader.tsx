@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { isAdmin } from "@/db/repo/feedback";
 import { auth, signOut } from "@/server/auth";
 
 const TABS = [
@@ -7,7 +8,7 @@ const TABS = [
   { key: "settings", href: "/settings", label: "Account settings & keys" }
 ] as const;
 
-export type Tab = (typeof TABS)[number]["key"];
+export type Tab = (typeof TABS)[number]["key"] | "admin";
 
 /**
  * The bar above everything except the studio.
@@ -18,6 +19,7 @@ export type Tab = (typeof TABS)[number]["key"];
  */
 async function AppHeader({ active }: { active: Tab }) {
   const session = await auth();
+  const admin = session?.user?.id ? await isAdmin(session.user.id) : false;
 
   return (
     <header className="flex shrink-0 items-center gap-4 border-b border-[var(--color-edge)] bg-[var(--color-ink-800)] px-5 py-2.5">
@@ -39,6 +41,18 @@ async function AppHeader({ active }: { active: Tab }) {
             {tab.label}
           </Link>
         ))}
+        {admin ? (
+          <Link
+            href="/admin"
+            className={`rounded px-2.5 py-1.5 text-sm transition ${
+              active === "admin"
+                ? "bg-[var(--color-ink-600)] text-white"
+                : "text-slate-400 hover:bg-[var(--color-ink-700)] hover:text-slate-200"
+            }`}
+          >
+            Admin
+          </Link>
+        ) : null}
       </nav>
 
       <span className="flex-1" />

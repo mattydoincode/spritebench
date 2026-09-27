@@ -8,6 +8,7 @@ import { SliceModal } from "@/client/components/SliceModal";
 import { TemplateBuilderModal } from "@/client/components/TemplateBuilderModal";
 import { InspectorPanel } from "@/client/components/InspectorPanel";
 import { EnginePanel } from "@/client/components/EnginePanel";
+import { FeedbackPanel } from "@/client/components/FeedbackPanel";
 import { LibraryPanel } from "@/client/components/LibraryPanel";
 import { ProcessDock } from "@/client/components/ProcessDock";
 import { Scene } from "@/client/components/Scene";
@@ -54,6 +55,7 @@ export function Studio({ bootstrap }: { bootstrap: StudioBootstrap }) {
 
   const layout = useUi((state) => state.layout);
   const leftTab = useUi((state) => state.leftTab);
+  const feedbackHidden = useUi((state) => state.feedbackHidden);
 
   // Before paint: the studio draws its full layout straight away, so the
   // stored pane sizes have to be in place before the first frame, and the
@@ -169,7 +171,25 @@ export function Studio({ bootstrap }: { bootstrap: StudioBootstrap }) {
         />
 
         <div className="flex min-h-0 shrink-0 flex-col overflow-hidden" style={{ width: layout.right }}>
-          <InspectorPanel />
+          <div className="min-h-0 flex-1">
+            <InspectorPanel />
+          </div>
+
+          {feedbackHidden ? null : (
+            <>
+              <ResizeHandle
+                orientation="horizontal"
+                onDrag={(delta) => resize("feedback", layout.feedback - delta)}
+                onReset={() => resize("feedback", defaultPaneSize("feedback"))}
+              />
+              <div
+                className="min-h-0 shrink-0 overflow-hidden"
+                style={{ height: layout.feedback, maxHeight: "calc(100% - 160px)" }}
+              >
+                <FeedbackPanel />
+              </div>
+            </>
+          )}
         </div>
       </div>
 

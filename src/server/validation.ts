@@ -246,6 +246,12 @@ export const generateBodySchema = z.object({
   remember: z.boolean().optional()
 });
 
+export const feedbackBodySchema = z.object({
+  body: z.string().trim().min(1).max(4000),
+  /** The project open when it was sent. Kept only if the sender is a member. */
+  projectId: z.string().uuid().nullish()
+});
+
 export const keyDefaultBodySchema = z.object({
   provider: z.string().min(1).max(40),
   /** Null goes back to the owner's account default. */

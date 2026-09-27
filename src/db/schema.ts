@@ -52,6 +52,12 @@ export const users = pgTable("users", {
   email: text("email").notNull(),
   emailVerified: timestamp("email_verified", { withTimezone: true }),
   image: text("image"),
+  /**
+   * Opens /admin. Set by hand in the database and nowhere else: there is
+   * deliberately no route, page or script that grants it, so becoming an
+   * admin takes database access.
+   */
+  isAdmin: boolean("is_admin").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp("deleted_at", { withTimezone: true })
 }, (table) => [uniqueIndex("users_email_key").on(table.email)]);
@@ -140,6 +146,16 @@ export const projects = pgTable("projects", {
  * owner's money: an editor who can rearrange the scene is not
  * necessarily an editor who can bill you for images.
  */
+/** Bug reports, feedback and feature requests sent from the studio's feedback panel. */
+export const feedback = pgTable("feedback", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+  /** The project open when it was sent, if any. */
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+}, (table) => [index("feedback_created_idx").on(table.createdAt)]);
+
 export const projectMembers = pgTable("project_members", {
   projectId: uuid("project_id")
     .notNull()
