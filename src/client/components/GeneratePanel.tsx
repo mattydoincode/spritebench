@@ -288,11 +288,11 @@ type Automation = "none" | "loop" | "chunk" | "each" | "animation" | "itemGrid";
 
 const AUTOMATIONS: Array<{ id: Automation; label: string; hint: string; edits?: boolean }> = [
   { id: "none", label: "None", hint: "one image per job" },
-  { id: "loop", label: "Loop", hint: "each result feeds the next step", edits: true },
-  { id: "chunk", label: "Chunk", hint: "split a start image into cells, redo each", edits: true },
+  { id: "loop", label: "Chain results", hint: "each result feeds the next step", edits: true },
+  { id: "chunk", label: "Chunk and process", hint: "split a start image into cells, redo each", edits: true },
   { id: "each", label: "Each image", hint: "same prompt on every attached image", edits: true },
-  { id: "animation", label: "Animation sheet", hint: "actions as rows of frames" },
-  { id: "itemGrid", label: "Item grid", hint: "many separate items on one sheet" }
+  { id: "animation", label: "Animation (Sprite Sheet)", hint: "rows of frames, sliced into animations" },
+  { id: "itemGrid", label: "Variations (Sprite Sheet)", hint: "many separate images on one sheet" }
 ];
 
 /**
@@ -949,10 +949,10 @@ export function GeneratePanel() {
         BUILTIN_TEMPLATE_NAMES[source.templateId] ??
         "a template");
   const summary = [
-    animation.enabled ? "animation sheet" : null,
-    itemGrid.enabled && !animation.enabled ? `item grid ${itemGrid.columns}×${itemGrid.rows}` : null,
-    loop.enabled ? `loop, ${loop.steps} steps` : null,
-    chunk.enabled ? `chunks ${chunk.columns}×${chunk.rows}` : null,
+    animation.enabled ? "animation" : null,
+    itemGrid.enabled && !animation.enabled ? `variations ${itemGrid.columns}×${itemGrid.rows}` : null,
+    loop.enabled ? `chain, ${loop.steps} steps` : null,
+    chunk.enabled ? `chunk ${chunk.columns}×${chunk.rows}` : null,
     each.enabled ? "edit each image" : null,
     mask ? `mask: ${templateName(mask.source)}` : null,
     !sheetOn && bases.length > 0

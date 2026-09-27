@@ -669,7 +669,7 @@ export function TemplatePanel() {
         {mode === "frames" ? (
           <p className="mb-2 text-[10px] leading-snug text-slate-500">
             Empty white cells for each frame, dark gutters between them. No pixel grid and no
-            downsample from this plate. Turn on an animation sheet or item grid to size the cells.
+            downsample from this plate. Pick Animation or Variations (Sprite Sheet) to size the cells.
           </p>
         ) : null}
 

@@ -96,9 +96,9 @@ export function modesSummary(modes: {
 }): string {
   return join([
     modes.animation && "animation",
-    modes.itemGrid && `item grid ${modes.itemGrid.columns}×${modes.itemGrid.rows}`,
-    modes.loopSteps ? `loop ${modes.loopSteps}` : null,
-    modes.chunk && `chunks ${modes.chunk.columns}×${modes.chunk.rows}`,
+    modes.itemGrid && `variations ${modes.itemGrid.columns}×${modes.itemGrid.rows}`,
+    modes.loopSteps ? `chain ${modes.loopSteps}` : null,
+    modes.chunk && `chunk ${modes.chunk.columns}×${modes.chunk.rows}`,
     modes.each && "each image"
   ]);
 }

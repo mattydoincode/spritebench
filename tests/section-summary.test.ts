@@ -31,7 +31,7 @@ describe("section summaries", () => {
     expect(modelSummary("gpt-image-2", { useAutoSize: false, size: { width: 1024, height: 1536 } })).toBe(
       "gpt-image-2 · 1024×1536"
     );
-    expect(modesSummary({ animation: false, loopSteps: 4, each: false })).toBe("loop 4");
+    expect(modesSummary({ animation: false, loopSteps: 4, each: false })).toBe("chain 4");
     expect(templateSummary({ images: 2, mask: "iso diamond" })).toBe("2 images · mask: iso diamond");
   });
 });
