@@ -23,11 +23,9 @@ import { Button, Field, Modal, Row, Select } from "./ui";
  */
 export function ExportDialog({
   assets,
-  nameOverride,
   onClose
 }: {
   assets: ResolvedAsset[];
-  nameOverride?: string;
   onClose: () => void;
 }) {
   const project = useServer((state) => state.project);
@@ -62,7 +60,7 @@ export function ExportDialog({
 
     try {
       if (single && !wantsSequence) {
-        await downloadAsset(context, assets[0], kind, lookup, nameOverride);
+        await downloadAsset(context, assets[0], kind, lookup);
         onClose();
         return;
       }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useActiveScene, useAsset, useSelectedAsset, useSelectedJob } from "@/client/stores/assets";
 import { useDoc } from "@/client/stores/doc";
 import { useServer } from "@/client/stores/server";
@@ -94,14 +94,7 @@ export function InspectorPanel() {
 
   const [view, setView] = useState<ViewMode>("processed");
   const [showMask, setShowMask] = useState(false);
-  const [exportName, setExportName] = useState("");
   const [exporting, setExporting] = useState(false);
-
-  // Seeded from the asset's label, which is its pretty name if it has one and
-  // its number otherwise, so a never-renamed asset downloads as `001`.
-  useEffect(() => {
-    setExportName(asset?.label ?? "");
-  }, [asset?.id, asset?.label]);
 
   const palette = useAssetPalette(asset);
 
@@ -286,19 +279,20 @@ export function InspectorPanel() {
       ) : null}
       {/* Always here, under the image: what it is, where it lives, and getting it out. */}
       <div className="mt-2 flex shrink-0 flex-col gap-1.5 border-t border-[var(--color-edge)] pt-2">
-        <div className="flex items-center gap-1.5">
+        {/* One line when there is room; wraps when the inspector is narrow. */}
+        <div className="flex flex-wrap items-center gap-1.5">
           <input
             type="text"
             value={asset.name}
-            placeholder={`name (asset ${asset.seq})`}
-            title="Name, blank to use the number"
-            className="min-w-0 flex-1"
+            placeholder={asset.label}
+            title="Name, also the download filename. Blank uses the number."
+            style={{ width: "auto", flex: "1 1 6rem", minWidth: "6rem" }}
             onChange={(event) => doc().rename(asset.id, event.target.value)}
           />
           <select
             value={folders.some((entry) => entry.id === asset.folderId) ? asset.folderId : ""}
             title="Folder. Moves this image's whole batch."
-            style={{ width: "auto", maxWidth: "45%" }}
+            style={{ width: "auto", maxWidth: "10rem" }}
             onChange={(event) => doc().moveToFolder([asset.id], event.target.value)}
           >
             <option value="">No Folder</option>
@@ -308,64 +302,39 @@ export function InspectorPanel() {
               </option>
             ))}
           </select>
-        </div>
+          <span className="flex items-center gap-1">
+            <Button variant="primary" onClick={() => setExporting(true)}>
+              download
+            </Button>
+            <TextButton
+              disabled={!scene}
+              title={scene ? "Stage this image in the current scene" : "Open a scene first"}
+              onClick={() => {
+                if (!scene) return;
 
-        <input
-          type="text"
-          value={asset.tags.join(", ")}
-          placeholder="tags, comma separated"
-          title="Tags, comma separated"
-          onChange={(event) =>
-            doc().setTags(
-              asset.id,
-              event.target.value
-                .split(",")
-                .map((tag) => tag.trim())
-                .filter((tag) => tag.length > 0)
-            )
-          }
-        />
-
-        <div className="flex items-center gap-1.5">
-          <input
-            type="text"
-            value={exportName}
-            placeholder="filename"
-            title="Download filename, no extension"
-            className="min-w-0 flex-1"
-            onChange={(event) => setExportName(event.target.value)}
-          />
-          <Button variant="primary" onClick={() => setExporting(true)}>
-            download
-          </Button>
-          <TextButton
-            disabled={!scene}
-            title={scene ? "Stage this image in the current scene" : "Open a scene first"}
-            onClick={() => {
-              if (!scene) return;
-
-              doc().addItem(scene.id, {
-                id: crypto.randomUUID(),
-                assetId: asset.id,
-                x: (scene.items.length % 6) * 96,
-                y: Math.floor(scene.items.length / 6) * 96,
-                footprint: { width: 0, height: 0 },
-                flipHorizontal: false,
-                flipVertical: false,
-                isoTurn: 0,
-                isoProjection: isoProjectionFromSource(useUi.getState().mask?.source),
-                showSource: false,
-                opacity: 1,
-                paused: false,
-                sequenceId: "",
-                heldFrame: 0,
-                rotation: 0,
-                display: isSetAsset(asset) ? "sheet" : "cell"
-              });
-            }}
-          >
-            + scene
-          </TextButton>
+                doc().addItem(scene.id, {
+                  id: crypto.randomUUID(),
+                  assetId: asset.id,
+                  x: (scene.items.length % 6) * 96,
+                  y: Math.floor(scene.items.length / 6) * 96,
+                  footprint: { width: 0, height: 0 },
+                  flipHorizontal: false,
+                  flipVertical: false,
+                  isoTurn: 0,
+                  isoProjection: isoProjectionFromSource(useUi.getState().mask?.source),
+                  showSource: false,
+                  opacity: 1,
+                  paused: false,
+                  sequenceId: "",
+                  heldFrame: 0,
+                  rotation: 0,
+                  display: isSetAsset(asset) ? "sheet" : "cell"
+                });
+              }}
+            >
+              + scene
+            </TextButton>
+          </span>
         </div>
 
         {selectedIds.length > 1 ? (
@@ -695,7 +664,6 @@ export function InspectorPanel() {
       {exporting ? (
         <ExportDialog
           assets={[asset]}
-          nameOverride={exportName}
           onClose={() => setExporting(false)}
         />
       ) : null}
