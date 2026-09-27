@@ -13,7 +13,7 @@ import { PROCESS_PRIORITY } from "@/client/processor";
 import { useSequenceFrames, useSequencePlayback } from "@/client/sequence";
 import { isSetAsset } from "@/shared/repeaterMix";
 import { frameSettings, frameSourceAssetId, type Sequence } from "@/shared/sequence";
-import { AnimationBar, AnimationSection } from "./AnimationSection";
+import { AnimationBar } from "./AnimationBar";
 import { SetSection } from "./SetSection";
 import { BitmapCanvas, useAssetPalette, useProcessed } from "./AssetBitmap";
 import { DownsampleControls } from "./DownsampleControls";
@@ -190,6 +190,14 @@ export function InspectorPanel() {
               />
               mask
             </label>
+          ) : null}
+          {!asset.set && asset.sequences.length === 0 && view !== "prompt" ? (
+            <TextButton
+              title="Slice this image into frames to play it as an animation. Works on any sheet laid out on a grid."
+              onClick={() => ui().openSlicer(asset.id)}
+            >
+              slice
+            </TextButton>
           ) : null}
           <TextButton
             title="Crop this image without touching the raw file, for every instance at once"
@@ -376,9 +384,7 @@ export function InspectorPanel() {
           playback={playback}
           frames={frames}
         />
-      ) : (
-        <AnimationSection asset={asset} sequence={sequence} playback={playback} />
-      )}
+      ) : null}
 
       <Section id="inspector.size" label="size">
         <DownsampleControls processing={processing} onChange={update} />
