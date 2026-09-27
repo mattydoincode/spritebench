@@ -217,7 +217,7 @@ export function sectionCollapsed(
 
 export type Pane = "left" | "right" | "library" | "prompt" | "preview" | "feedback";
 export type LeftTab = "generate" | "godot";
-export type SettingsTab = "project" | "account";
+export type SettingsTab = "project" | "defaults" | "account";
 
 export interface Layout {
   left: number;

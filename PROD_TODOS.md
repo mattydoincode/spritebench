@@ -9,7 +9,7 @@ at the top of each section; tick things off rather than deleting them.
 - [x] Cap how many workers one user can hold at once (`WORKER_USER_CONCURRENCY`, default 2
       of `WORKER_CONCURRENCY` 4). Jobs are grouped by the user who pressed Generate;
       pg-boss skips a user at their cap, so big requests queue behind themselves.
-- [ ] Apply migrations `0005_provider_key_defaults` and `0006_feedback_admin` in production
+- [ ] Apply migrations `0005_provider_key_defaults`, `0006_feedback_admin` and `0007_share_links` in production
       (`npm run db:migrate:prod`) with the deploy. Generation breaks without 0005.
 - [ ] Clear refresh tokens Google already issued:
       `update accounts set refresh_token = null, access_token = null where provider = 'google';`
@@ -47,11 +47,10 @@ at the top of each section; tick things off rather than deleting them.
 
 ## Accounts and access
 
-- [ ] Sharing by link. `project_invites` already exists in the schema (token column) but has
-      no code. Owner makes a link with a role (viewer/editor) and a "can generate" flag (off by
-      default: it spends the owner's key); `/join/<token>` adds a signed-in user as a member;
-      Members list in Project settings to change roles, remove people, revoke links. Links
-      revocable, ideally expiring or use-limited.
+- [x] Sharing by link: Settings → Project (the default tab) shows the name (owner renames it),
+      stats, people with access (owner changes access or removes; others can leave) and share
+      links (viewer / editor / editor + generate, a week each, revocable). `/join/<token>` signs
+      people in and adds them. Also on the dashboard's ⋯ menu as "Share…".
 - [ ] Sign-up gate (allowlist or invite codes) if open sign-up becomes a problem.
 - [ ] Account deletion and data export. Until then, say in the privacy page how to request
       deletion, and know the SQL to do it.

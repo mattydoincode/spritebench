@@ -128,7 +128,7 @@ function BillingLine({ provider }: { provider: string }) {
 
   if (!project) return null;
 
-  const link = (label: string, tab: "project" | "account") => (
+  const link = (label: string, tab: "defaults" | "account") => (
     <TextButton onClick={() => useUi.getState().openSettings(tab)}>{label}</TextButton>
   );
 
@@ -143,7 +143,7 @@ function BillingLine({ provider }: { provider: string }) {
         ) : (
           <>
             several {name} keys and no default
-            {project.isOwner ? link("pick one", "project") : null}
+            {project.isOwner ? link("pick one", "defaults") : null}
           </>
         )}
       </p>
@@ -157,7 +157,7 @@ function BillingLine({ provider }: { provider: string }) {
   return (
     <p className="-mt-1 mb-2 flex flex-wrap items-center gap-1 text-[10px] text-slate-500">
       billed to {key ? keyCaption(key) : name} · {source}
-      {project.isOwner ? link("change", "project") : null}
+      {project.isOwner ? link("change", "defaults") : null}
     </p>
   );
 }

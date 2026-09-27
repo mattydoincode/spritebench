@@ -181,7 +181,8 @@ export const projectInvites = pgTable("project_invites", {
   projectId: uuid("project_id")
     .notNull()
     .references(() => projects.id, { onDelete: "cascade" }),
-  email: text("email").notNull(),
+  /** Null for a share link, which anyone signed in can use until it expires. */
+  email: text("email"),
   role: text("role").$type<ProjectRole>().notNull().default("editor"),
   canGenerate: boolean("can_generate").notNull().default(false),
   token: text("token").notNull(),
@@ -190,6 +191,8 @@ export const projectInvites = pgTable("project_invites", {
     .references(() => users.id, { onDelete: "cascade" }),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+  /** Set when the owner turns a link off before it expires. */
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
 }, (table) => [
   uniqueIndex("project_invites_token_key").on(table.token),

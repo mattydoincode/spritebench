@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useServer } from "@/client/stores/server";
 import { useUi } from "@/client/stores/ui";
 import type { ProjectSummary } from "@/shared/model";
+import { ProjectAccess } from "./ProjectAccess";
 import { Modal } from "./ui";
 
 function roleLabel(project: ProjectSummary): string {
@@ -114,11 +115,13 @@ function DeleteModal({
 function ProjectCard({
   project,
   onOpen,
+  onShare,
   onRename,
   onDelete
 }: {
   project: ProjectSummary;
   onOpen: () => void;
+  onShare: () => void;
   onRename: () => void;
   onDelete: () => void;
 }) {
@@ -175,6 +178,17 @@ function ProjectCard({
                   onClick={(event) => {
                     event.stopPropagation();
                     setMenuOpen(false);
+                    onShare();
+                  }}
+                  className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-[var(--color-ink-600)]"
+                >
+                  Share…
+                </button>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setMenuOpen(false);
                     onRename();
                   }}
                   className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-[var(--color-ink-600)]"
@@ -213,6 +227,7 @@ export function ProjectsDashboard() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [renaming, setRenaming] = useState<ProjectSummary | null>(null);
+  const [sharing, setSharing] = useState<ProjectSummary | null>(null);
   const [deleting, setDeleting] = useState<ProjectSummary | null>(null);
 
   useEffect(() => {
@@ -270,6 +285,7 @@ export function ProjectsDashboard() {
               key={project.id}
               project={project}
               onOpen={() => open(project.id)}
+              onShare={() => setSharing(project)}
               onRename={() => setRenaming(project)}
               onDelete={() => setDeleting(project)}
             />
@@ -300,6 +316,12 @@ export function ProjectsDashboard() {
           onClose={() => setRenaming(null)}
           onSubmit={(name) => useServer.getState().renameProject(renaming.id, name)}
         />
+      ) : null}
+
+      {sharing ? (
+        <Modal title={`Share ${sharing.name}`} variant="plain" width={640} onClose={() => setSharing(null)}>
+          <ProjectAccess projectId={sharing.id} />
+        </Modal>
       ) : null}
 
       {deleting ? (

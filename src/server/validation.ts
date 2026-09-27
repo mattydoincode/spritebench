@@ -246,6 +246,11 @@ export const generateBodySchema = z.object({
   remember: z.boolean().optional()
 });
 
+export const memberAccessSchema = z.object({
+  role: z.enum(["editor", "viewer"]),
+  canGenerate: z.boolean().default(false)
+});
+
 export const feedbackBodySchema = z.object({
   body: z.string().trim().min(1).max(4000),
   /** The project open when it was sent. Kept only if the sender is a member. */

@@ -9,6 +9,7 @@ import { useUi, type SettingsTab } from "@/client/stores/ui";
 import type { IsoLight } from "@/core/isoTemplate";
 import type { ProjectCutoutPatch } from "@/shared/projectSettings";
 import { AccountSettingsSections } from "./AccountSettings";
+import { ProjectAccess } from "./ProjectAccess";
 import { IsoLightField } from "./IsoLightField";
 import { IsoPitchField } from "./IsoPitchField";
 import {
@@ -44,12 +45,14 @@ function MethodHeading({
 }
 
 /**
- * One settings dialog for the studio: this project's defaults on one tab, your
- * account (keys, machine, tokens) on the other. The account tab is the same
- * component as the account page, so neither drifts from the other.
+ * One settings dialog for the studio: who has this project (the default tab,
+ * like a Share dialog), the project's defaults, and your account (keys,
+ * machine, tokens). The Project and Account tabs are the same components the
+ * dashboard uses, so neither drifts.
  */
 export function SettingsModal() {
   const tab = useUi((state) => state.settingsTab) ?? "project";
+  const projectId = useServer((state) => state.project?.id ?? null);
   const setTab = (next: SettingsTab) => useUi.getState().openSettings(next);
 
   return (
@@ -62,6 +65,9 @@ export function SettingsModal() {
           <PanelTab selected={tab === "project"} onClick={() => setTab("project")}>
             Project
           </PanelTab>
+          <PanelTab selected={tab === "defaults"} onClick={() => setTab("defaults")}>
+            Defaults
+          </PanelTab>
           <PanelTab selected={tab === "account"} onClick={() => setTab("account")}>
             Account &amp; keys
           </PanelTab>
@@ -73,9 +79,13 @@ export function SettingsModal() {
         <div className="page-shell p-2">
           <AccountSettingsSections />
         </div>
-      ) : (
+      ) : tab === "defaults" ? (
         <ProjectSettings />
-      )}
+      ) : projectId ? (
+        <div className="page-shell p-2">
+          <ProjectAccess projectId={projectId} />
+        </div>
+      ) : null}
     </Modal>
   );
 }
