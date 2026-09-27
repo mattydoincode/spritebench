@@ -30,12 +30,14 @@ import { ExportDialog } from "./ExportDialog";
 import { Button, ConfirmTextButton, Panel, Row, Skeleton, TextButton } from "./ui";
 
 /**
- * What a batch adds around its thumbs: the label row (16px plus a 2px gap),
- * the box border (2px) and its padding (12px). An image outside any batch is
- * drawn this much larger instead, so both take the same height and a lone
- * image reads as one bigger thing rather than a group of one.
+ * A batch is a label row (16px plus a 2px gap) above a tinted box whose
+ * border and padding add 14px around its thumbs. An image outside any batch
+ * leaves the label row blank and fills the box's height instead, so its top
+ * lines up with the tint and a lone image reads as one bigger thing rather
+ * than a group of one.
  */
-const BATCH_CHROME = 32;
+const BATCH_LABEL = "pt-[18px]";
+const BATCH_BOX = 14;
 
 const JOB_STATUS_STYLES: Record<JobStatus, string> = {
   queued: "border-slate-600 text-slate-400",
@@ -281,7 +283,9 @@ function FolderContents({
       {groupByBatch(entries).map((group) => {
         if (!group.batch) {
           return group.items.map((entry) => (
-            <div key={entry.id}>{thumb(entry, thumbSize + BATCH_CHROME)}</div>
+            <div key={entry.id} className={BATCH_LABEL}>
+              {thumb(entry, thumbSize + BATCH_BOX)}
+            </div>
           ));
         }
 
