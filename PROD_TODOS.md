@@ -42,8 +42,9 @@ at the top of each section; tick things off rather than deleting them.
 - [ ] Per-user storage or image cap. Nothing limits how many images a user keeps (the /admin
       usage table is the basis for one).
 - [ ] Clean up storage for soft-deleted projects (files stay in R2 forever today).
-- [ ] Rate limits on write endpoints: sign-up/bootstrap, project create, token create,
-      feedback, generate.
+- [x] Rate limits in middleware (`src/server/rateLimit.ts`): per session/PAT token buckets for
+      reads, writes, uploads, generate, create and sign-in, plus a loose per-IP backstop. In
+      memory, so it assumes one web instance; move to Postgres/Redis before scaling web out.
 - [x] Removed the leftover per-project quota code (`pendingImages`, the project row lock);
       only the per-request fan-out limit remains.
 - [ ] Consider grouping jobs by billed provider key as well as user, since provider rate
