@@ -14,8 +14,12 @@ export function LegalPage({
   return (
     <div className="page-shell flex min-h-screen flex-col">
       <header className="flex shrink-0 items-center border-b border-[var(--color-edge)] px-6 py-3">
-        <Link href="/" className="text-sm font-semibold tracking-tight text-white">
-          SpriteBench
+        <Link href="/" aria-label="SpriteBench home">
+          <img
+            src="/branding/logo-white.png"
+            alt="SpriteBench"
+            className="h-[15px] w-auto [image-rendering:pixelated]"
+          />
         </Link>
       </header>
 

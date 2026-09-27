@@ -16,6 +16,11 @@ at the top of each section; tick things off rather than deleting them.
 - [ ] Google Cloud Console: move the OAuth consent screen from "Testing" to "In production"
       (Testing caps at 100 users and expires sign-ins weekly). Basic scopes need no review.
 - [ ] Make yourself admin: `update users set is_admin = true where email = '…';`
+- [ ] R2 bucket is private: in the bucket's Settings, "Public Development URL" (r2.dev) is
+      disabled and "Custom Domains" is empty; and `R2_PUBLIC_BASE` is unset in production.
+      With either on, image links become permanent public URLs instead of 1-hour signed ones.
+- [ ] R2 bucket has no lifecycle rule deleting objects (Settings → Object lifecycle rules),
+      now that the app keeps originals forever.
 - [ ] Confirm the production domain matches the Godot addon's default base URL
       (`https://spritebench.com` in `spritebench-godot/addons/spritebench/credentials.gd`).
 
