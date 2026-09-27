@@ -311,6 +311,15 @@ function SlotRow({
         >
           {active ? describeSlotActivity(assigning, queued) : changed ? "changed" : STATUS_LABEL[slot.status]}
         </span>
+        {canEdit && !active && slot.assignedAssetIds.length > 0 ? (
+          <TextButton
+            className="shrink-0"
+            title="Render this slot's images again from their current edits and send them to Godot"
+            onClick={() => void useServer.getState().syncSlots([slot.id])}
+          >
+            resend
+          </TextButton>
+        ) : null}
       </div>
 
       {assigning ? (

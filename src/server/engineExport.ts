@@ -3,7 +3,7 @@ import type { ProcessingSettings } from "@/core/settings";
 import { getAssetRow, listAssets, toAssetRecord } from "@/db/repo/assets";
 import { readDoc } from "@/db/repo/projectDoc";
 import { hashExportBytes } from "@/server/apiToken";
-import { ApproveError, approveAsset, exportBytesForAsset } from "@/server/approve";
+import { ApproveError, approveAsset } from "@/server/approve";
 import { loadPalette } from "@/server/palettes";
 import { decodePng, encodePng } from "@/server/png";
 import { attachSet, setByAssetId } from "@/shared/assetSet";
@@ -355,17 +355,18 @@ async function exportTextures(
   };
 }
 
+/**
+ * Always renders afresh from the image's current edits. Reusing an earlier
+ * saved copy here made a sync after a processing change re-send the old
+ * pixels with the old hash, so Godot never saw anything to pull.
+ */
 async function exportTexture(projectId: string, assetId: string): Promise<TextureExport> {
-  let exported = await exportBytesForAsset(projectId, assetId);
-  if (!exported) {
-    const approved = await approveAsset(projectId, assetId);
-    exported = { bytes: approved.bytes, path: approved.path };
-  }
+  const approved = await approveAsset(projectId, assetId);
 
   return {
     intent: "texture",
-    remoteHash: hashExportBytes(exported.bytes),
-    path: exported.path
+    remoteHash: hashExportBytes(approved.bytes),
+    path: approved.path
   };
 }
 

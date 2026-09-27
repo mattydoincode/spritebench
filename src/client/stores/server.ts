@@ -253,6 +253,9 @@ export const useServer = create<ServerState>((set, get) => {
     ui.setAssigning(slotId, emptyAssignProgress(slotId, assetIds));
 
     try {
+      // The server renders from its copy of the document; make sure the
+      // edits this export is meant to carry have reached it.
+      await useDoc.getState().flush();
       const response = await fetch(`/api/v1/projects/${projectId()}/slots/${slotId}/assign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

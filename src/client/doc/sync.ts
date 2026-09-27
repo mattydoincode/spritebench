@@ -49,6 +49,7 @@ export class DocSync {
   private seq = 0;
   private outbound: Uint8Array[] = [];
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private inflight: Promise<void> | null = null;
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private lastLocalEditAt = 0;
   private stopped = false;
@@ -178,7 +179,28 @@ export class DocSync {
    * document on screen has already moved, so losing the update would leave
    * this client permanently ahead of everyone else with no sign of it.
    */
-  private async flush(): Promise<void> {
+  /**
+   * Sends anything still waiting and resolves once the server has it. For
+   * work that reads the document on the server right after an edit, like a
+   * Godot export, which would otherwise render the state from before it.
+   */
+  async flushNow(): Promise<void> {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+    await this.inflight;
+    await this.flush();
+  }
+
+  private flush(): Promise<void> {
+    this.inflight = this.send().finally(() => {
+      this.inflight = null;
+    });
+    return this.inflight;
+  }
+
+  private async send(): Promise<void> {
     if (this.outbound.length === 0) return;
 
     const batch = this.outbound;

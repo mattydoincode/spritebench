@@ -131,6 +131,8 @@ interface DocState {
   setJobFolder: (jobId: string, folderId: string) => void;
   jobFolderOf: (jobId: string) => string;
   setSlotExport: (slotId: string, fingerprint: string) => void;
+  /** Resolves once every local edit has reached the server. */
+  flush: () => Promise<void>;
   setTags: (assetId: string, tags: string[]) => void;
   patchProcessing: (assetId: string, patch: Partial<ProcessingSettings>) => void;
   applyProcessingToMany: (assetIds: string[], processing: ProcessingSettings) => void;
@@ -529,6 +531,10 @@ export const useDoc = create<DocState>((set, get) => {
     deleteFolder(id) {
       const { sync } = get();
       if (sync) doc.deleteFolder(sync.doc, id);
+    },
+
+    async flush() {
+      await get().sync?.flushNow();
     },
 
     setSlotExport(slotId, fingerprint) {

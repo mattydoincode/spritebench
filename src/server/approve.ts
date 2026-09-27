@@ -135,18 +135,3 @@ export async function approveAsset(
   };
 }
 
-export async function exportBytesForAsset(
-  projectId: string,
-  assetId: string
-): Promise<{ bytes: Buffer; path: string } | null> {
-  const row = await getAssetRow(projectId, assetId);
-  if (!row?.exportKey) return null;
-
-  try {
-    const bytes = await storage().get(row.exportKey);
-    return { bytes: Buffer.from(bytes), path: row.exportKey };
-  } catch (error) {
-    if (error instanceof ObjectNotFoundError) return null;
-    throw error;
-  }
-}
