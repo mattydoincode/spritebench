@@ -12,7 +12,6 @@ import type { Size } from "@/core/types";
 import { db, type Transaction } from "@/db";
 import { getAssetRow } from "@/db/repo/assets";
 import { insertJob, setQueueJobId, toJobRecord } from "@/db/repo/jobs";
-import { lockProject } from "@/db/repo/projects";
 import { getTemplate } from "@/db/repo/templates";
 import { dispatchJob } from "@/queue/dispatch";
 import {
@@ -100,11 +99,7 @@ export class FanOutExceededError extends Error {
  * Checked before anything is dispatched, since refusing after the provider
  * call would spend real money on images we then throw away.
  */
-export async function assertCapacity(
-  _projectId: string,
-  images: number,
-  _connection?: Transaction
-): Promise<void> {
+export function assertFanOut(images: number): void {
   if (images > maxImagesPerRequest()) {
     throw new FanOutExceededError(images, maxImagesPerRequest());
   }
@@ -224,8 +219,7 @@ export async function enqueueGeneration(request: EnqueueRequest): Promise<JobRec
   }
 
   const rows = await db().transaction(async (transaction) => {
-    await lockProject(request.projectId, transaction);
-    await assertCapacity(request.projectId, images, transaction);
+    assertFanOut(images);
 
     const inserted = [];
 

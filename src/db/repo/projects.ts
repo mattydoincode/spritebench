@@ -104,19 +104,6 @@ export async function createProject(
   return connection ? run(connection) : db().transaction(run);
 }
 
-/**
- * Takes a row lock on the project for the rest of the transaction.
- *
- * The quota check reads a count and then acts on it, which is only sound if
- * concurrent requests for the same project take turns. Two collaborators
- * pressing Generate at once would otherwise both see room for one more batch.
- */
-export async function lockProject(projectId: string, connection: Transaction): Promise<void> {
-  await connection.execute(
-    sql`select 1 from ${projects} where ${projects.id} = ${projectId} for update`
-  );
-}
-
 export async function getProject(id: string): Promise<ProjectRow | null> {
   const [row] = await db()
     .select()

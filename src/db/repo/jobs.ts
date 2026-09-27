@@ -107,27 +107,6 @@ export async function insertJob(
   return row;
 }
 
-/**
- * Images that queued and running jobs are already going to produce.
- *
- * The asset count alone understates what a project has committed to: a queued
- * batch has not written its rows yet, so without this a burst of requests
- * could each pass the quota check and collectively blow past the limit.
- */
-export async function pendingImages(
-  projectId: string,
-  connection: Transaction = db()
-): Promise<number> {
-  const [row] = await connection
-    .select({
-      value: sql<number>`coalesce(sum(greatest(1, (${jobs.generation} ->> 'imageCount')::int)), 0)`
-    })
-    .from(jobs)
-    .where(and(eq(jobs.projectId, projectId), inArray(jobs.status, ["queued", "blocked", "running"])));
-
-  return Number(row?.value ?? 0);
-}
-
 export async function setQueueJobId(
   id: string,
   queueJobId: string | null,

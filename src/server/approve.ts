@@ -30,9 +30,9 @@ export interface ApprovedExport {
 }
 
 /**
- * Renders an asset at its current Yjs settings and files the PNG. Shared by
- * the approve route and slot assign/pull so the plugin always gets processed
- * pixels, not the raw source.
+ * Renders an asset at its current Yjs settings and files the PNG. Slot
+ * assign/pull use it so the plugin always gets processed pixels, not the raw
+ * source.
  */
 export async function approveAsset(
   projectId: string,

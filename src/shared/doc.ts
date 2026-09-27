@@ -57,7 +57,7 @@ import {
 
 /**
  * The shared document: one Yjs doc per project, holding everything a human
- * edits. Runs unchanged in the browser and in Node -- the approve route
+ * edits. Runs unchanged in the browser and in Node -- the Godot export
  * decodes it server-side to read processing settings.
  *
  * What is *not* here is as deliberate as what is. Asset provenance (storage

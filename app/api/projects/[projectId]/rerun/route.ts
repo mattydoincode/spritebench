@@ -10,7 +10,7 @@ import { loadProjectSettings } from "@/server/projectSettings";
 import { processingForNewAsset } from "@/shared/projectSettings";
 import {
   FanOutExceededError,
-  assertCapacity,
+  assertFanOut,
   enqueueGeneration
 } from "@/server/generation";
 import { parseBody, rerunBodySchema, withValidation } from "@/server/validation";
@@ -47,8 +47,7 @@ export async function POST(request: Request, { params }: Params) {
     try {
       // Checked for the whole set up front, so a rerun of 80 assets is refused
       // before any of them reach the provider.
-      await assertCapacity(
-        projectId,
+      assertFanOut(
         targets.reduce((total, asset) => total + Math.max(1, asset.generation.imageCount), 0)
       );
 

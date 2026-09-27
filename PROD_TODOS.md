@@ -14,15 +14,18 @@ at the top of each section; tick things off rather than deleting them.
       (`npm run db:migrate:prod`) with the deploy. Generation breaks without 0005.
 - [ ] Clear refresh tokens Google already issued:
       `update accounts set refresh_token = null, access_token = null where provider = 'google';`
-- [ ] Google Cloud Console: move the OAuth consent screen from "Testing" to "In production"
-      (Testing caps at 100 users and expires sign-ins weekly). Basic scopes need no review.
+- [ ] Google Cloud Console: Google Auth Platform → Audience → Publish app, so the same project
+      goes from "Testing" (only listed test users can sign in) to "In production". Basic scopes
+      need no review, and localhost redirects keep working. Check the OAuth client lists
+      `https://spritebench.com/api/auth/callback/google`. Skip the consent-screen logo for now
+      (it can trigger brand verification).
 - [ ] Make yourself admin: `update users set is_admin = true where email = '…';`
-- [ ] R2 bucket is private: in the bucket's Settings, "Public Development URL" (r2.dev) is
+- [x] R2 bucket is private: in the bucket's Settings, "Public Development URL" (r2.dev) is
       disabled and "Custom Domains" is empty; and `R2_PUBLIC_BASE` is unset in production.
       With either on, image links become permanent public URLs instead of 1-hour signed ones.
-- [ ] R2 bucket has no lifecycle rule deleting objects (Settings → Object lifecycle rules),
+- [x] R2 bucket has no lifecycle rule deleting objects (Settings → Object lifecycle rules),
       now that the app keeps originals forever.
-- [ ] Confirm the production domain matches the Godot addon's default base URL
+- [x] Confirm the production domain matches the Godot addon's default base URL
       (`https://spritebench.com` in `spritebench-godot/addons/spritebench/credentials.gd`).
 
 ## Costs and abuse (you pay storage and worker time; users pay generation)
@@ -41,8 +44,8 @@ at the top of each section; tick things off rather than deleting them.
 - [ ] Clean up storage for soft-deleted projects (files stay in R2 forever today).
 - [ ] Rate limits on write endpoints: sign-up/bootstrap, project create, token create,
       feedback, generate.
-- [ ] Remove or re-wire the leftover per-project quota code (`pendingImages` in
-      `src/db/repo/jobs.ts` is unused).
+- [x] Removed the leftover per-project quota code (`pendingImages`, the project row lock);
+      only the per-request fan-out limit remains.
 - [ ] Consider grouping jobs by billed provider key as well as user, since provider rate
       limits are per key (matters once projects are shared).
 
@@ -52,16 +55,15 @@ at the top of each section; tick things off rather than deleting them.
       stats, people with access (owner changes access or removes; others can leave) and share
       links (viewer / editor / editor + generate, a week each, revocable). `/join/<token>` signs
       people in and adds them. Also on the dashboard's ⋯ menu as "Share…".
-- [ ] Sign-up gate (allowlist or invite codes) if open sign-up becomes a problem.
-- [ ] Account deletion and data export. Until then, say in the privacy page how to request
-      deletion, and know the SQL to do it.
+- [x] ~~Sign-up gate~~ and ~~data export~~: not needed.
+- [x] Privacy page says how to request account deletion (done by hand in SQL).
 - [ ] Personal access tokens never expire; consider an expiry or "last used" cleanup.
-- [ ] `/api/projects/[id]/approve` (server-side copies) is unused by the UI now; decide
-      whether the flow comes back or the route goes.
+- [x] Removed `/api/projects/[id]/approve` (the old server-side copy button). `approveAsset`
+      stays; Godot slot assign/pull use it.
 
 ## Godot addon
 
-- [ ] Interim: make `spritebench-godot` public, cut a GitHub Release with
+- [ ] Interim: `spritebench-godot` is public now; still cut a GitHub Release with
       `addons/spritebench/` zipped (a GitHub Action on version tags), and link
       "Download the Godot addon" next to access tokens in Account settings.
 - [ ] Official Godot Asset Library: submit repo URL + version tag; needs a square icon

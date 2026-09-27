@@ -303,13 +303,6 @@ export const rerunBodySchema = z.object({
   folder: z.string().max(255).optional()
 });
 
-export const approveBodySchema = z.object({
-  assetId: z.string().uuid(),
-  /** Overrides the name the export is filed under. Optional. */
-  name: z.string().max(255).optional(),
-  subfolder: z.string().max(255).optional()
-});
-
 export const apiTokenBodySchema = z.object({
   name: z.string().trim().min(1).max(80)
 });
