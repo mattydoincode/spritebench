@@ -13,8 +13,12 @@ import { ensureBootstrap } from "@/db/repo/users";
  * Database sessions rather than JWTs. A JWT would save a query per request,
  * but it also means a revoked account keeps working until its token expires,
  * and every request that touches a project hits the database anyway.
+ *
+ * The config is a function so `db()` runs on the first request, not on
+ * import. `next build` imports every route to collect page data, and the
+ * build has no DATABASE_URL.
  */
-export const { handlers, auth, signIn, signOut } = NextAuth({
+export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
   adapter: DrizzleAdapter(db(), {
     usersTable: users,
     accountsTable: accounts,
@@ -50,4 +54,4 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return session;
     }
   }
-});
+}));
