@@ -48,6 +48,34 @@ const JOB_STATUS_STYLES: Record<JobStatus, string> = {
   cancelled: "border-slate-700 text-slate-500"
 };
 
+const THUMB_ICONS = {
+  // A gamepad: this image is wired into the game.
+  godot: "M4 5.5h8a2.5 2.5 0 0 1 2.4 3.2l-.9 3a1.6 1.6 0 0 1-2.7.6L9.6 11H6.4l-1.2 1.3a1.6 1.6 0 0 1-2.7-.6l-.9-3A2.5 2.5 0 0 1 4 5.5ZM5 7.5v2M4 8.5h2M10.5 8h.01M11.8 9.2h.01",
+  // A cloud: a processed copy is stored server-side.
+  saved: "M5 12.5h6.5a2.5 2.5 0 0 0 .3-5A3.5 3.5 0 0 0 5 6.6a3 3 0 0 0 0 5.9Z",
+  // Circling arrow: generated again from an earlier image.
+  rerun: "M12.5 8a4.5 4.5 0 1 1-1.3-3.2M12.5 3v2.5H10"
+} as const;
+
+/** A small icon over a thumb's corner. Hover says what it means. */
+function ThumbIcon({ icon, tone, title }: { icon: keyof typeof THUMB_ICONS; tone: string; title: string }) {
+  return (
+    <span title={title} className={`flex h-4 w-4 items-center justify-center rounded bg-black/70 ${tone}`}>
+      <svg aria-hidden viewBox="0 0 16 16" className="h-3 w-3">
+        <path
+          d={THUMB_ICONS[icon]}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+      <span className="sr-only">{title}</span>
+    </span>
+  );
+}
+
 function LibraryThumb({
   asset,
   selected,
@@ -57,9 +85,12 @@ function LibraryThumb({
   stageIndex,
   preferSource,
   reveal,
+  godotSlots,
   onClick
 }: {
   asset: ResolvedAsset;
+  /** Labels of the Godot slots this image is assigned to. */
+  godotSlots: string[];
   selected: boolean;
   selectedAssetIds: string[];
   thumbSize: number;
@@ -106,23 +137,24 @@ function LibraryThumb({
       <div className="relative">
         <AssetThumb asset={asset} size={thumbSize} variant={preferSource ? "source" : "thumb"} />
         {/* On the image, like the frame count, so every thumb is the same height. */}
-        {asset.exportPath || asset.rerunOf ? (
-          <span className="pointer-events-none absolute top-0.5 left-0.5 flex gap-0.5">
+        {godotSlots.length > 0 || asset.exportPath || asset.rerunOf ? (
+          <span className="absolute top-0.5 left-0.5 flex gap-0.5">
+            {godotSlots.length > 0 ? (
+              <ThumbIcon
+                icon="godot"
+                tone="text-violet-300"
+                title={`In Godot: assigned to ${godotSlots.join(", ")}`}
+              />
+            ) : null}
             {asset.exportPath ? (
-              <span
-                title={`Server-side copy saved: ${asset.exportPath}`}
-                className="rounded bg-black/70 px-1 text-[9px] leading-tight text-emerald-300"
-              >
-                saved
-              </span>
+              <ThumbIcon
+                icon="saved"
+                tone="text-emerald-300"
+                title={`Processed copy saved to storage (${asset.exportPath}). Made when this is sent to Godot, or from the inspector.`}
+              />
             ) : null}
             {asset.rerunOf ? (
-              <span
-                title="A rerun of an earlier image"
-                className="rounded bg-black/70 px-1 text-[9px] leading-tight text-sky-300"
-              >
-                rerun
-              </span>
+              <ThumbIcon icon="rerun" tone="text-sky-300" title="A rerun of an earlier image" />
             ) : null}
           </span>
         ) : null}
@@ -273,6 +305,7 @@ function stageMany(sceneId: string, assetIds: string[], startIndex: number): voi
 type Entry = LibraryEntry<ResolvedAsset>;
 
 const UNFILED = "unfiled";
+const NO_SLOTS: string[] = [];
 
 /** Asset ids in a set of entries; running jobs have none yet. */
 function assetIdsOf(entries: Entry[]): string[] {
@@ -520,6 +553,7 @@ export function LibraryPanel() {
   const assets = useAssets();
   const jobs = useServer((state) => state.jobs);
   const folders = useDoc((state) => state.folders);
+  const slots = useServer((state) => state.slots);
   const selectedIds = useUi((state) => state.selectedIds);
   const busy = useUi((state) => state.busy);
   const filter = useUi((state) => state.libraryFolder);
@@ -538,6 +572,16 @@ export function LibraryPanel() {
   );
 
   const known = useMemo(() => new Set(folders.map((entry) => entry.id)), [folders]);
+
+  const godotSlots = useMemo(() => {
+    const byAsset = new Map<string, string[]>();
+    for (const slot of slots) {
+      for (const id of slot.assignedAssetIds) {
+        byAsset.set(id, [...(byAsset.get(id) ?? []), slot.label || "a slot"]);
+      }
+    }
+    return byAsset;
+  }, [slots]);
   // A folder id that no longer resolves (the folder was deleted) reads as unfiled.
   const folderOf = (entry: Entry) => (known.has(entry.folderId) ? entry.folderId : UNFILED);
 
@@ -631,6 +675,7 @@ export function LibraryPanel() {
         stageIndex={scene?.items.length ?? 0}
         preferSource={entry.id === selectedIds[selectedIds.length - 1]}
         reveal={entry.id === selectedIds[0]}
+        godotSlots={godotSlots.get(entry.id) ?? NO_SLOTS}
         onClick={onThumbClick}
       />
     );
