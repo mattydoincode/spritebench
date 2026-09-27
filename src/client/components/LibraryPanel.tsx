@@ -29,7 +29,13 @@ import { AssetThumb } from "./AssetBitmap";
 import { ExportDialog } from "./ExportDialog";
 import { Button, ConfirmTextButton, Panel, Row, Skeleton, TextButton } from "./ui";
 
-const TITLE_PAD = "pt-4";
+/**
+ * What a batch adds around its thumbs: the label row (16px plus a 2px gap),
+ * the box border (2px) and its padding (12px). An image outside any batch is
+ * drawn this much larger instead, so both take the same height and a lone
+ * image reads as one bigger thing rather than a group of one.
+ */
+const BATCH_CHROME = 32;
 
 const JOB_STATUS_STYLES: Record<JobStatus, string> = {
   queued: "border-slate-600 text-slate-400",
@@ -256,10 +262,12 @@ function assetIdsOf(entries: Entry[]): string[] {
  */
 function FolderContents({
   entries,
-  thumb
+  thumb,
+  thumbSize
 }: {
   entries: Entry[];
-  thumb: (entry: Entry) => React.ReactNode;
+  thumb: (entry: Entry, size?: number) => React.ReactNode;
+  thumbSize: number;
 }) {
   const collapsedBatches = useUi((state) => state.collapsedBatches);
   const ui = useUi.getState;
@@ -273,9 +281,7 @@ function FolderContents({
       {groupByBatch(entries).map((group) => {
         if (!group.batch) {
           return group.items.map((entry) => (
-            <div key={entry.id} className={TITLE_PAD}>
-              {thumb(entry)}
-            </div>
+            <div key={entry.id}>{thumb(entry, thumbSize + BATCH_CHROME)}</div>
           ));
         }
 
@@ -337,13 +343,15 @@ function FolderSection({
   id,
   name,
   entries,
-  thumb
+  thumb,
+  thumbSize
 }: {
   /** A folder id, or `UNFILED`. */
   id: string;
   name: string;
   entries: Entry[];
-  thumb: (entry: Entry) => React.ReactNode;
+  thumb: (entry: Entry, size?: number) => React.ReactNode;
+  thumbSize: number;
 }) {
   const sectionId = `library.folder.${id}`;
   const collapsed = useUi((state) => sectionCollapsed(sectionId, state.collapsedSections));
@@ -440,7 +448,7 @@ function FolderSection({
       </div>
       {collapsed ? null : (
         <div className="px-3 pt-2.5 pb-3">
-          <FolderContents entries={entries} thumb={thumb} />
+          <FolderContents entries={entries} thumb={thumb} thumbSize={thumbSize} />
         </div>
       )}
     </section>
@@ -576,13 +584,13 @@ export function LibraryPanel() {
     ui().select(id, event.ctrlKey || event.metaKey);
   };
 
-  const thumb = (entry: Entry) =>
+  const thumb = (entry: Entry, size = thumbSize) =>
     entry.kind === "job" ? (
       <JobThumb
         key={entry.id}
         job={entry.job}
         selected={selectedIds.includes(entry.id)}
-        thumbSize={thumbSize}
+        thumbSize={size}
         now={now}
         projectId={projectId}
         onClick={onThumbClick}
@@ -593,7 +601,7 @@ export function LibraryPanel() {
         asset={entry.asset}
         selected={selectedIds.includes(entry.id)}
         selectedAssetIds={selectedAssets.map((asset) => asset.id)}
-        thumbSize={thumbSize}
+        thumbSize={size}
         sceneId={scene?.id ?? null}
         stageIndex={scene?.items.length ?? 0}
         preferSource={entry.id === selectedIds[selectedIds.length - 1]}
@@ -748,6 +756,7 @@ export function LibraryPanel() {
               name={section.name}
               entries={section.entries}
               thumb={thumb}
+              thumbSize={thumbSize}
             />
           ))}
         </div>
