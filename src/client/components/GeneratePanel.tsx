@@ -958,7 +958,7 @@ export function GeneratePanel() {
       tabs={<LeftTabs />}
       actions={
         <TextButton
-          title="Reset the whole Generate panel: prompt, variables, modes, templates, batches, quality and size (the model stays). Ctrl+Z in the prompt undoes it."
+          title="Reset the whole Generate panel: prompt, variables, modes, templates, batch count and name, folder, quality and size (the model stays). Ctrl+Z in the prompt undoes it."
           onClick={() => {
             store().resetGenerateDefaults();
             focusPrompt();

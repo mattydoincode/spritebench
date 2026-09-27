@@ -718,7 +718,10 @@ export const useServer = create<ServerState>((set, get) => {
       recordSetup();
       const restored = defaultGenerateSetup(get().settings.generation.model);
       useUi.getState().applyGenerationSetup(restored);
+      // Back to where a fresh project starts: one batch, no name, no folder.
       useUi.getState().setBatches(1);
+      useUi.getState().setBatchName("");
+      useUi.getState().setGenerateFolder("");
       get().setGeneration(restored.generation);
       get().setDefaultProcessing(restored.processing);
     },

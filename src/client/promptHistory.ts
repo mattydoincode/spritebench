@@ -24,6 +24,7 @@ const SETUP_KEYS: readonly DraftKey[] = [
   "promptBody",
   "variables",
   "batchName",
+  "folderId",
   "animation",
   "itemGrid",
   "loop",
