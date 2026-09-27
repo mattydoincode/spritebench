@@ -9,7 +9,7 @@ import {
   stopBoss
 } from "@/queue/boss";
 import type { GenerateJobPayload } from "@/queue/dispatch";
-import { configProblems, workerConcurrency } from "@/server/config";
+import { configProblems, workerConcurrency, workerUserConcurrency } from "@/server/config";
 import { compactProjectDocs, pruneExpiredSources } from "./prune";
 import { runJob } from "./runJob";
 
@@ -63,6 +63,9 @@ async function main(): Promise<void> {
   const generateOptions = {
     batchSize: 1,
     localConcurrency: concurrency,
+    // Per user (the job's group), tracked in the database so the cap holds
+    // across worker processes too.
+    groupConcurrency: workerUserConcurrency(),
     includeMetadata: true
   } as const;
 
@@ -92,7 +95,7 @@ async function main(): Promise<void> {
 
   await instance.schedule(PRUNE_QUEUE, PRUNE_SCHEDULE);
 
-  console.log(`[worker] ready, concurrency ${concurrency}`);
+  console.log(`[worker] ready, concurrency ${concurrency}, per user ${workerUserConcurrency()}`);
 }
 
 process.on("SIGTERM", () => void shutdown("SIGTERM"));

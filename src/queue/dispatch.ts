@@ -20,6 +20,8 @@ export interface GenerateJobPayload {
  */
 export async function dispatchJob(
   jobId: string,
+  /** Who asked for it. Jobs are grouped by user so no one person takes every worker. */
+  userId: string | null,
   transaction?: Parameters<Parameters<Database["transaction"]>[0]>[0]
 ): Promise<string | null> {
   const instance = await boss();
@@ -31,6 +33,10 @@ export async function dispatchJob(
       // A duplicate send for the same row is a no-op rather than a second
       // paid generation.
       singletonKey: jobId,
+      // The worker caps how many jobs of one group run at once (see
+      // WORKER_USER_CONCURRENCY), so a 40-image request queues behind itself
+      // rather than in front of everyone else. A job with no user is ungrouped.
+      ...(userId ? { group: { id: userId } } : {}),
       ...(transaction ? { db: fromDrizzle(transaction, sql) } : {})
     }
   );

@@ -275,7 +275,7 @@ export async function enqueueGeneration(request: EnqueueRequest): Promise<JobRec
           );
 
           if (planned.dispatch) {
-            const queueJobId = await dispatchJob(row.id, transaction);
+            const queueJobId = await dispatchJob(row.id, request.userId, transaction);
             if (queueJobId) await setQueueJobId(row.id, queueJobId, transaction);
           }
 

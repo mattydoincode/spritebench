@@ -31,6 +31,6 @@ export async function applyLoopFollowUp(
   });
   if (!unblocked) return;
 
-  const queueJobId = await dispatchJob(unblocked.id);
+  const queueJobId = await dispatchJob(unblocked.id, unblocked.userId);
   if (queueJobId) await setQueueJobId(unblocked.id, queueJobId);
 }

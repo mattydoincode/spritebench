@@ -15,6 +15,14 @@ export function workerConcurrency(): number {
   return count("WORKER_CONCURRENCY");
 }
 
+/**
+ * Of those, how many one user's jobs may hold at once. The rest of their
+ * queue waits while other people's jobs run.
+ */
+export function workerUserConcurrency(): number {
+  return count("WORKER_USER_CONCURRENCY");
+}
+
 /** Days a full-resolution source is kept before roll-off. */
 export function assetRetentionDays(): number {
   return count("ASSET_RETENTION_DAYS");
