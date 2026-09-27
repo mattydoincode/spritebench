@@ -220,6 +220,72 @@ function useChangedSlots(slots: EngineSlotRecord[], canEdit: boolean): string[] 
   );
 }
 
+/**
+ * Amber while slots have edits Godot does not have; blue with a progress bar
+ * once sync is pressed, filling as each slot's export finishes.
+ */
+function SyncBanner({ changed, canEdit }: { changed: string[]; canEdit: boolean }) {
+  const [run, setRun] = useState<{ total: number; done: number } | null>(null);
+
+  const sync = () => {
+    if (run || changed.length === 0) return;
+    const ids = [...changed];
+    setRun({ total: ids.length, done: 0 });
+
+    const server = useServer.getState();
+    void Promise.all(
+      ids.map((id) =>
+        server
+          .editSlot(id, { type: "refresh" })
+          .finally(() => setRun((current) => (current ? { ...current, done: current.done + 1 } : current)))
+      )
+    ).finally(() => setRun(null));
+  };
+
+  if (run) {
+    const percent = run.total > 0 ? Math.round((run.done / run.total) * 100) : 0;
+    return (
+      <div className="mb-2 rounded border border-sky-700/60 bg-sky-950/40 px-2 py-1.5 text-[11px] text-sky-200">
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <span>
+            Syncing {Math.min(run.done + 1, run.total)} of {run.total} {run.total === 1 ? "slot" : "slots"}…
+          </span>
+          <span className="tabular-nums text-sky-300/80">{percent}%</span>
+        </div>
+        <div
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={run.total}
+          aria-valuenow={run.done}
+          className="h-1 overflow-hidden rounded bg-sky-900/60"
+        >
+          <div className="h-full bg-sky-400 transition-[width] duration-300" style={{ width: `${percent}%` }} />
+        </div>
+      </div>
+    );
+  }
+
+  if (changed.length === 0) return null;
+
+  return (
+    <div className="mb-2 flex items-center gap-2 rounded border border-amber-700/60 bg-amber-950/30 px-2 py-1.5 text-[11px] text-amber-200">
+      <span className="min-w-0 flex-1">
+        {changed.length === 1 ? "1 slot has" : `${changed.length} slots have`} edits Godot does not
+        have yet
+      </span>
+      {canEdit ? (
+        <Button
+          variant="primary"
+          title="Send the latest version of every changed image to Godot"
+          onClick={sync}
+        >
+          sync
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 function SlotRow({
   slot,
   highlight,
@@ -396,23 +462,7 @@ export function EnginePanel() {
         </p>
       ) : null}
 
-      {changed.length > 0 ? (
-        <div className="mb-2 flex items-center gap-2 rounded border border-amber-700/60 bg-amber-950/30 px-2 py-1.5 text-[11px] text-amber-200">
-          <span className="min-w-0 flex-1">
-            {changed.length === 1 ? "1 slot has" : `${changed.length} slots have`} edits Godot does
-            not have yet
-          </span>
-          {canEdit ? (
-            <Button
-              variant="primary"
-              title="Send the latest version of every changed image to Godot"
-              onClick={() => void useServer.getState().syncSlots(changed)}
-            >
-              sync
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
+      <SyncBanner changed={changed} canEdit={Boolean(canEdit)} />
 
       {allSlots.length > 0 || collections.length > 0 ? (
         <label className="mb-2 flex items-center gap-2 text-[10px] text-slate-500">
