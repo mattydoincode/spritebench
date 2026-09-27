@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { GeneratePanel } from "@/client/components/GeneratePanel";
 import { ImageEditModal } from "@/client/components/ImageEditModal";
 import { SettingsModal } from "@/client/components/SettingsModal";
@@ -56,6 +56,7 @@ export function Studio({ bootstrap }: { bootstrap: StudioBootstrap }) {
   const layout = useUi((state) => state.layout);
   const leftTab = useUi((state) => state.leftTab);
   const feedbackHidden = useUi((state) => state.feedbackHidden);
+  const feedbackRef = useRef<HTMLDivElement | null>(null);
 
   // Before paint: the studio draws its full layout straight away, so the
   // stored pane sizes have to be in place before the first frame, and the
@@ -175,16 +176,36 @@ export function Studio({ bootstrap }: { bootstrap: StudioBootstrap }) {
             <InspectorPanel />
           </div>
 
-          {feedbackHidden ? null : (
+          {feedbackHidden ? (
+            // Closed, but one click from coming back, where it was.
+            <button
+              type="button"
+              title="Show the feedback panel"
+              onClick={() => useUi.getState().setFeedbackHidden(false)}
+              className="flex h-6 w-full shrink-0 items-center justify-center gap-1.5 border-t border-[var(--color-edge)] bg-[var(--color-ink-800)] transition hover:bg-[var(--color-ink-700)]"
+            >
+              <span className="text-[10px] tracking-wider text-slate-500 uppercase">
+                {"\u02c4"} feedback
+              </span>
+            </button>
+          ) : (
             <>
               <ResizeHandle
                 orientation="horizontal"
-                onDrag={(delta) => resize("feedback", layout.feedback - delta)}
-                onReset={() => resize("feedback", defaultPaneSize("feedback"))}
+                // Fits its content until dragged; the first drag starts from
+                // whatever height that came to.
+                onDrag={(delta) =>
+                  resize("feedback", (layout.feedback || feedbackRef.current?.offsetHeight || 0) - delta)
+                }
+                onReset={() => resize("feedback", 0)}
               />
               <div
+                ref={feedbackRef}
                 className="min-h-0 shrink-0 overflow-hidden"
-                style={{ height: layout.feedback, maxHeight: "calc(100% - 160px)" }}
+                style={{
+                  height: layout.feedback > 0 ? layout.feedback : "auto",
+                  maxHeight: "calc(100% - 160px)"
+                }}
               >
                 <FeedbackPanel />
               </div>

@@ -188,7 +188,7 @@ interface Stored extends ProjectDraft {
    * workers just interleaves on the same core.
    */
   processWorkers: number;
-  /** The feedback panel was closed; a link in the project header reopens it. */
+  /** The feedback panel was closed; a strip at the bottom of the column reopens it. */
   feedbackHidden: boolean;
 }
 
@@ -227,7 +227,7 @@ export interface Layout {
   prompt: number;
   /** Height of the pinned preview at the top of the inspector. */
   preview: number;
-  /** Height of the feedback panel under the inspector. */
+  /** Height of the feedback panel under the inspector; 0 fits its content. */
   feedback: number;
 }
 
@@ -242,6 +242,7 @@ const PANE_LIMITS: Record<Pane, { min: number; max: number }> = {
 };
 
 function clampPane(pane: Pane, size: number): number {
+  if (pane === "feedback" && size === 0) return 0;
   const { min, max } = PANE_LIMITS[pane];
   return Math.min(max, Math.max(min, Math.round(size)));
 }
@@ -259,7 +260,8 @@ const LAYOUT_SHARES: Record<Pane, number> = {
   library: 0.35,
   prompt: 0.4,
   preview: 0.4,
-  feedback: 0.25
+  // Unused: feedback defaults to fitting its content (0), not a share.
+  feedback: 0
 };
 
 /** Project bar plus panel header, above the left panel's body. */
@@ -281,7 +283,7 @@ export function defaultLayout(
     library: clampPane("library", viewport.height * LAYOUT_SHARES.library),
     prompt: clampPane("prompt", (viewport.height - LEFT_CHROME) * LAYOUT_SHARES.prompt),
     preview: clampPane("preview", (viewport.height - RIGHT_CHROME) * LAYOUT_SHARES.preview),
-    feedback: clampPane("feedback", viewport.height * LAYOUT_SHARES.feedback)
+    feedback: 0
   };
 }
 

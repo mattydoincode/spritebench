@@ -15,7 +15,6 @@ import { useUi } from "@/client/stores/ui";
  */
 export function ProjectBar() {
   const project = useServer((state) => state.project);
-  const feedbackHidden = useUi((state) => state.feedbackHidden);
 
   if (!project) return null;
 
@@ -30,16 +29,7 @@ export function ProjectBar() {
       >
         settings
       </button>
-      {feedbackHidden ? (
-        <button
-          type="button"
-          title="Show the feedback panel"
-          onClick={() => useUi.getState().setFeedbackHidden(false)}
-          className="float-right ml-1 inline-flex h-6 items-center rounded px-2 text-xs text-slate-400 transition hover:bg-[var(--color-ink-600)] hover:text-white"
-        >
-          feedback
-        </button>
-      ) : null}
+
 
       <Link
         href="/projects"

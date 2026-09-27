@@ -34,7 +34,7 @@ export function FeedbackPanel() {
       title="Feedback"
       actions={
         <TextButton
-          title="Hide the feedback panel. The feedback link at the top left brings it back."
+          title="Hide the feedback panel. The strip at the bottom of this column brings it back."
           onClick={() => useUi.getState().setFeedbackHidden(true)}
         >
           &times;
@@ -56,7 +56,7 @@ export function FeedbackPanel() {
           <textarea
             value={text}
             rows={4}
-            placeholder="What happened, or what would help?"
+            placeholder="Your comment"
             className="mb-2 resize-y"
             onChange={(event) => setText(event.target.value)}
             onKeyDown={(event) => {
