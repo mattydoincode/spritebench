@@ -9,10 +9,10 @@ at the top of each section; tick things off rather than deleting them.
 - [x] Cap how many workers one user can hold at once (`WORKER_USER_CONCURRENCY`, default 2
       of `WORKER_CONCURRENCY` 4). Jobs are grouped by the user who pressed Generate;
       pg-boss skips a user at their cap, so big requests queue behind themselves.
-- [ ] Apply migrations `0005` through `0012` in production (provider key defaults, feedback/admin,
+- [x] Production wiped and rebuilt from `0000` on 2026-09-27 (was: apply migrations `0005` through `0012` in production (provider key defaults, feedback/admin,
       share links, engine sync time, asset origin, final lane, web game assets, removed on web)
-      (`npm run db:migrate:prod`) with the deploy. Generation breaks without 0005.
-- [ ] Clear refresh tokens Google already issued:
+      (`npm run db:migrate:prod`) with the deploy).
+- [x] ~~Clear refresh tokens Google already issued~~ (moot after the wipe):
       `update accounts set refresh_token = null, access_token = null where provider = 'google';`
 - [ ] Google Cloud Console: Google Auth Platform → Audience → Publish app, so the same project
       goes from "Testing" (only listed test users can sign in) to "In production". Basic scopes
