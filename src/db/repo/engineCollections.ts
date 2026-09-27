@@ -433,7 +433,8 @@ export async function createWebTable(
 }
 
 /**
- * Replaces a web table's fields; its cells follow (new fields appear, removed
+ * Replaces a table's fields (taking it over from Godot if it came from
+ * there); its cells follow (new fields appear, removed
  * ones go). `renames` carry each row's art, in both lanes, from an old field
  * key to its new one, since a cell's slot id is derived from the key.
  */
@@ -445,13 +446,13 @@ export async function setWebTableFields(
 ): Promise<void> {
   const now = new Date();
   await db().transaction(async (tx) => {
-    const collection = await liveCollection(tx, projectId, collectionId);
-    if (collection.origin !== "web") {
-      throw new CollectionError("this table's fields are set in Godot", 409);
-    }
+    await liveCollection(tx, projectId, collectionId);
+    // Editing a Godot table's columns here hands it to SpriteBench: from now
+    // on its columns and name come from here, and the plugin rewrites its
+    // .tres to match rather than overruling it.
     const [updated] = await tx
       .update(engineCollections)
-      .set({ fields, updatedAt: now })
+      .set({ fields, origin: "web", updatedAt: now })
       .where(eq(engineCollections.id, collectionId))
       .returning();
     await syncFieldSlots(tx, projectId, updated, now);
@@ -482,12 +483,11 @@ export async function setWebTableFields(
   });
 }
 
-/** Renames a table made in SpriteBench; its cells' labels follow. */
+/** Renames a table, taking it over from Godot if it came from there; its cells' labels follow. */
 export async function renameWebTable(projectId: string, collectionId: string, label: string): Promise<void> {
   const now = new Date();
   await db().transaction(async (tx) => {
-    const collection = await liveCollection(tx, projectId, collectionId);
-    if (collection.origin !== "web") throw new CollectionError("rename this table in Godot", 409);
+    await liveCollection(tx, projectId, collectionId);
     const [clash] = await tx
       .select({ id: engineCollections.id })
       .from(engineCollections)
@@ -504,7 +504,7 @@ export async function renameWebTable(projectId: string, collectionId: string, la
     }
     const [updated] = await tx
       .update(engineCollections)
-      .set({ label, updatedAt: now })
+      .set({ label, origin: "web", updatedAt: now })
       .where(eq(engineCollections.id, collectionId))
       .returning();
     await syncFieldSlots(tx, projectId, updated, now);
