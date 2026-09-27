@@ -115,11 +115,10 @@ interface DocState {
   ) => void;
   editsFor: (assetId: string) => AssetEdits | null;
   rename: (assetId: string, name: string) => void;
-  setBatch: (assetId: string, batch: string) => void;
   /**
-   * Moves images into a folder ("" for unfiled). A batch moved whole keeps
-   * its name; images taken out of a batch leave it, so a batch never ends up
-   * split across folders.
+   * Moves images into a folder ("" for none). An image always moves with its
+   * whole batch: a batch is a permanent fact about where an image came from,
+   * so it is never split across folders or left behind.
    */
   moveToFolder: (assetIds: string[], folderId: string) => void;
   /** Returns the new folder's id. */
@@ -490,29 +489,18 @@ export const useDoc = create<DocState>((set, get) => {
       if (sync) doc.patchAssetEdits(sync.doc, assetId, { name });
     },
 
-    setBatch(assetId, batch) {
-      const { sync } = get();
-      if (sync) doc.patchAssetEdits(sync.doc, assetId, { batch });
-    },
-
     moveToFolder(assetIds, folderId) {
       const { sync, edits } = get();
       if (!sync) return;
 
+      const batches = new Set(assetIds.map((id) => edits[id]?.batch ?? "").filter(Boolean));
       const moving = new Set(assetIds);
-      // Which batches are moving whole: every member is in `assetIds`.
-      const members = new Map<string, string[]>();
       for (const [id, entry] of Object.entries(edits)) {
-        if (!entry.batch) continue;
-        members.set(entry.batch, [...(members.get(entry.batch) ?? []), id]);
+        if (entry.batch && batches.has(entry.batch)) moving.add(id);
       }
 
       doc.transactLocal(sync.doc, () => {
-        for (const id of moving) {
-          const batch = edits[id]?.batch ?? "";
-          const whole = batch !== "" && (members.get(batch) ?? []).every((member) => moving.has(member));
-          doc.patchAssetEdits(sync.doc, id, whole ? { folderId } : { folderId, batch: "" });
-        }
+        for (const id of moving) doc.patchAssetEdits(sync.doc, id, { folderId });
       });
     },
 
