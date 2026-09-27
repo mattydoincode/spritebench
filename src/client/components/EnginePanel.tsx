@@ -502,7 +502,7 @@ export function EnginePanel() {
       ) : slots.length === 0 && collections.length === 0 ? (
         <p className="text-[11px] leading-snug text-slate-500">
           No Godot slots yet. Enable the SpriteBench addon, paste a personal access
-          token, and sync. Slots you opt into over there show up here.
+          token, and sync.
         </p>
       ) : slots.length === 0 ? null : (
         <ul className="flex flex-col gap-2">
@@ -519,12 +519,6 @@ export function EnginePanel() {
         </ul>
       )}
 
-      {slots.length > 0 && canEdit ? (
-        <p className="mt-2 text-[10px] text-slate-600">
-          Drag library assets onto a slot to assign them. Click a slot to find its art
-          in the library; open an array to reorder or remove images.
-        </p>
-      ) : null}
     </Panel>
   );
 }

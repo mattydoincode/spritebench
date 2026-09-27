@@ -660,16 +660,13 @@ export function TemplatePanel() {
 
         {mode === "pixel" ? (
           <p className="mb-2 text-[10px] leading-snug text-slate-500">
-            Asset size is the grid ({pixelWindow.width}×{pixelWindow.height} cells). The plate is the
-            request size ({pixelCanvas.width}×{pixelCanvas.height}); each square is one finished
-            pixel.
+            Grid {pixelWindow.width}×{pixelWindow.height} cells; each square is one pixel.
           </p>
         ) : null}
 
         {mode === "frames" ? (
           <p className="mb-2 text-[10px] leading-snug text-slate-500">
-            Empty white cells for each frame, dark gutters between them. No pixel grid and no
-            downsample from this plate. Pick Animation or Variations (Sprite Sheet) to size the cells.
+            Pick Animation or Variations (Sprite Sheet) to size the cells.
           </p>
         ) : null}
 
@@ -806,8 +803,7 @@ export function TemplatePanel() {
                     />
                   </Field>
                   <p className="text-[10px] leading-snug text-slate-500">
-                    A stencil guides the model, it is not a hard cut. Expect the silhouette to be
-                    approximate.
+                    Stencils are approximate.
                   </p>
                 </div>
               </details>

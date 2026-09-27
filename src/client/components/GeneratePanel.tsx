@@ -230,8 +230,7 @@ function ModelAndSize() {
 
       {sheetOwnsCanvas && sheetSize ? (
         <p className="mb-2 text-[10px] leading-snug text-slate-500">
-          Sheets pick their own canvas -- this job will request {sheetSize.width}x
-          {sheetSize.height}. The size below is only used for stills.
+          Sheet requests {sheetSize.width}×{sheetSize.height}.
         </p>
       ) : null}
 
@@ -472,12 +471,7 @@ function LoopMode() {
             onChange={(includeStart) => ui().setLoop({ includeStart })}
           />
           <p className="mb-2 text-[10px] leading-snug text-slate-500">
-            Needs a starting image. {loop.steps} edits in series.{" "}
-            {`{step}`} and {`{total_steps}`} fill per job.
-            {loop.sendStart
-              ? " Each step also gets the original start as a second reference."
-              : ""}
-            {loop.includeStart ? " The start is frame 1 of the finished loop." : ""}
+            Needs a starting image. {loop.steps} edits in series.
           </p>
         </>
       ) : null}
@@ -578,8 +572,9 @@ function EachMode() {
         <>
           <EachImages />
           <p className="mb-2 text-[10px] leading-snug text-slate-500">
-            Same prompt on every image. {bases.length > 0 ? `${bases.length} edit${bases.length === 1 ? "" : "s"}` : "Add images first"}
-            , then Generate. Lands as one batch, like variables.
+            {bases.length > 0
+              ? `${bases.length} image${bases.length === 1 ? "" : "s"} to edit.`
+              : "Add images to edit."}
           </p>
         </>
       ) : null}
@@ -1029,8 +1024,7 @@ export function GeneratePanel() {
     >
       {!canGenerate ? (
         <p className="mb-3 rounded border border-amber-700 bg-amber-950/40 p-2 text-[11px] text-amber-200">
-          You can edit this project but not generate in it. Generation bills the owner&apos;s image
-          model key, so they have to grant it separately.
+          You can edit this project but not generate in it. Ask the owner.
         </p>
       ) : !projectHasKey ? (
         <p className="mb-3 rounded border border-amber-700 bg-amber-950/40 p-2 text-[11px] text-amber-200">
@@ -1086,7 +1080,7 @@ export function GeneratePanel() {
           hint={
             mask?.source.kind === "template" && isPixelConstraintTemplate(mask.source.templateId)
               ? `Pixel constraint uses this as the checkerboard (${pixelConstraintWindow(processing.targetSize).width}×${pixelConstraintWindow(processing.targetSize).height} cells if an axis is 0). Unchecking keeps these values for the plate but skips sampling.`
-              : "New assets shrink to this. 0 on one axis takes the other. The raw source is always kept."
+              : "0 on one axis keeps the aspect."
           }
         />
       </Section>

@@ -620,10 +620,6 @@ export function SliceModal() {
 
           <Divider label="frame size" />
 
-          <p className="mb-2 text-[10px] leading-snug text-slate-500">
-            Same crop for every frame. Tighten eats shared empty margin. Fit to grid puts the
-            boxes back on an even split of the sheet.
-          </p>
 
           <Row>
             <div className="flex-1">
@@ -657,13 +653,18 @@ export function SliceModal() {
           <Button
             className="mb-2 w-full"
             disabled={!source || !cellSize}
-            title="Even split: sheet ÷ columns × rows, boxes recentred on each cell"
+            title="Put the boxes back on an even split of the sheet (sheet ÷ columns × rows). Same crop for every frame."
             onClick={fitToGrid}
           >
             {cellSize ? `fit to grid · ${cellSize.width}×${cellSize.height}` : "fit to grid"}
           </Button>
 
-          <Button className="mb-2 w-full" disabled={!source || usedRects.length === 0} onClick={tighten}>
+          <Button
+            className="mb-2 w-full"
+            disabled={!source || usedRects.length === 0}
+            title="Trim the empty margin every frame shares. Same crop for every frame."
+            onClick={tighten}
+          >
             tighten
           </Button>
 

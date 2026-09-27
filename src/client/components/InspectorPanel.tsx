@@ -502,9 +502,7 @@ export function InspectorPanel() {
 
         {processing.paletteId === "" && scenePalette !== "" ? (
           <p className="mb-2 text-[10px] leading-snug text-amber-300">
-            The scene is previewing this with {paletteName(scenePalette)}, but it exports
-            in full colour until you pick a palette here or bake the scene one in. Choosing one
-            here always wins over the scene.
+            Scene previews with {paletteName(scenePalette)}; exports in full colour.
           </p>
         ) : null}
 

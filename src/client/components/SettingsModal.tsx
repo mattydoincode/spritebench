@@ -163,8 +163,7 @@ function ProjectSettings() {
 
       <MethodHeading active={false}>defaults</MethodHeading>
       <p className="mb-3 text-[11px] leading-snug text-slate-400">
-        Cutout applies to new generations. Iso pitch and lighting are the
-        defaults for the template builder; pitch also seeds iso repeaters.
+        Defaults for new generations and templates.
       </p>
 
       <IsoPitchField

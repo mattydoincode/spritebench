@@ -3244,8 +3244,7 @@ function GroupControls({ group, assets }: { group: RepeatGroup; assets: Resolved
       </Row>
 
       <p className="mb-2 text-[10px] leading-snug text-slate-500">
-        {members.length} asset(s). Drag thumbnails from the library onto this panel or onto the
-        tiles to add them to the mix.
+        {members.length} {members.length === 1 ? "asset" : "assets"}. Drag images here to add.
       </p>
 
       <div className="mb-2 flex flex-wrap gap-1">
