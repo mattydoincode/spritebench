@@ -22,7 +22,7 @@ async function AppHeader({ active }: { active: Tab }) {
   return (
     <header className="flex shrink-0 items-center gap-4 border-b border-[var(--color-edge)] bg-[var(--color-ink-800)] px-5 py-2.5">
       <Link href="/projects" aria-label="SpriteBench">
-        <img src="/branding/logo-white.png" alt="SpriteBench" className="h-3.5 w-auto" />
+        <img src="/branding/logo-white.png" alt="SpriteBench" className="h-[15px] w-auto [image-rendering:pixelated]" />
       </Link>
 
       <nav className="flex items-center gap-1">

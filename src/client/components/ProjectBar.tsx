@@ -36,7 +36,7 @@ export function ProjectBar() {
         aria-label="SpriteBench — all projects"
         className="mr-3 inline-flex h-6 items-center align-top"
       >
-        <img src="/branding/logo-white.png" alt="SpriteBench" className="h-3.5 w-auto" />
+        <img src="/branding/logo-white.png" alt="SpriteBench" className="h-[15px] w-auto [image-rendering:pixelated]" />
       </Link>
 
       <nav

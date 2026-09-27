@@ -45,7 +45,7 @@ export default async function LandingPage() {
   return (
     <div className="page-shell flex min-h-screen flex-col">
       <header className="flex shrink-0 items-center gap-3 border-b border-[var(--color-edge)] px-6 py-3">
-        <img src="/branding/logo-white.png" alt="SpriteBench" className="h-4 w-auto" />
+        <img src="/branding/logo-white.png" alt="SpriteBench" className="h-[15px] w-auto [image-rendering:pixelated]" />
 
         <span className="flex-1" />
 
@@ -111,7 +111,7 @@ export default async function LandingPage() {
 
       <footer className="shrink-0 border-t border-[var(--color-edge)] px-6 py-5">
         <div className="mx-auto flex max-w-5xl items-center gap-4 text-[11px] text-slate-600">
-          <img src="/branding/logo-white.png" alt="SpriteBench" className="h-3 w-auto opacity-60" />
+          <img src="/branding/logo-white.png" alt="SpriteBench" className="h-[10px] w-auto opacity-60 [image-rendering:pixelated]" />
           <span className="flex-1" />
           <Link href="/privacy" className="hover:text-slate-400">
             Privacy
