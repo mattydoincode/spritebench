@@ -82,7 +82,6 @@ function lightboxScale(width: number, height: number): number {
 export function InspectorPanel() {
   const selectedIds = useUi((state) => state.selectedIds);
   const palettes = useServer((state) => state.palettes);
-  const folders = useDoc((state) => state.folders);
   const scene = useActiveScene();
   const asset = useSelectedAsset();
   const job = useSelectedJob();
@@ -291,19 +290,6 @@ export function InspectorPanel() {
             style={{ width: "auto", flex: "1 1 6rem", minWidth: "6rem" }}
             onChange={(event) => doc().rename(asset.id, event.target.value)}
           />
-          <select
-            value={folders.some((entry) => entry.id === asset.folderId) ? asset.folderId : ""}
-            title="Folder. Moves this image's whole batch."
-            style={{ width: "auto", maxWidth: "10rem" }}
-            onChange={(event) => doc().moveToFolder([asset.id], event.target.value)}
-          >
-            <option value="">No Folder</option>
-            {folders.map((entry) => (
-              <option key={entry.id} value={entry.id}>
-                {entry.name}
-              </option>
-            ))}
-          </select>
           <span className="flex items-center gap-1">
             <Button variant="primary" onClick={() => setExporting(true)}>
               download
