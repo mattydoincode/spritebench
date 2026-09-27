@@ -6,12 +6,10 @@ import { useDoc } from "@/client/stores/doc";
 import { useServer } from "@/client/stores/server";
 import { defaultPaneSize, useUi } from "@/client/stores/ui";
 import { MAX_CHROMA_KEYS } from "@/core/settings";
-import { isoProjectionFromSource } from "@/core/isoMask";
 import { CUTOUT_LABELS, CUTOUT_MODES, DISTANCE_MODES, DITHER_MODES, ORIENTATIONS } from "@/core/types";
 import { useMaskOverlay } from "@/client/maskOverlay";
 import { PROCESS_PRIORITY } from "@/client/processor";
 import { useSequenceFrames, useSequencePlayback } from "@/client/sequence";
-import { isSetAsset } from "@/shared/repeaterMix";
 import {
   cleanupSummary,
   paletteSummary,
@@ -19,6 +17,7 @@ import {
   transparencySummary
 } from "@/shared/sectionSummary";
 import { frameSettings, frameSourceAssetId, type Sequence } from "@/shared/sequence";
+import { stageAtCamera } from "@/client/stage";
 import { AnimationBar } from "./AnimationBar";
 import { SetSection } from "./SetSection";
 import { BitmapCanvas, useAssetPalette, useProcessed } from "./AssetBitmap";
@@ -296,29 +295,8 @@ export function InspectorPanel() {
             </Button>
             <TextButton
               disabled={!scene}
-              title={scene ? "Stage this image in the current scene" : "Open a scene first"}
-              onClick={() => {
-                if (!scene) return;
-
-                doc().addItem(scene.id, {
-                  id: crypto.randomUUID(),
-                  assetId: asset.id,
-                  x: (scene.items.length % 6) * 96,
-                  y: Math.floor(scene.items.length / 6) * 96,
-                  footprint: { width: 0, height: 0 },
-                  flipHorizontal: false,
-                  flipVertical: false,
-                  isoTurn: 0,
-                  isoProjection: isoProjectionFromSource(useUi.getState().mask?.source),
-                  showSource: false,
-                  opacity: 1,
-                  paused: false,
-                  sequenceId: "",
-                  heldFrame: 0,
-                  rotation: 0,
-                  display: isSetAsset(asset) ? "sheet" : "cell"
-                });
-              }}
+              title={scene ? "Put this image in the middle of the scene view" : "Open a scene first"}
+              onClick={() => stageAtCamera([asset.id])}
             >
               + scene
             </TextButton>

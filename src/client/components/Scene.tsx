@@ -40,7 +40,7 @@ import {
   isoPitchesEqual
 } from "@/core/iso";
 import { clampIsoTurn, spriteFacingCss } from "@/core/isoTurn";
-import { isoProjectionFromSource } from "@/core/isoMask";
+import { stageAssets } from "@/client/stage";
 import {
   isoDiamondOrigin,
   isoLattice,
@@ -54,7 +54,6 @@ import {
 } from "@/core/repeater";
 import {
   activeSceneId,
-  resolveAssetsNow,
   useActiveScene,
   useAssets
 } from "@/client/stores/assets";
@@ -181,44 +180,6 @@ function setTerrainTile(
 function terrainLabel(terrain: TerrainGroup): string {
   if (terrain.name.trim()) return terrain.name;
   return `terrain ${clampTerrainCount(terrain.countX)}x${clampTerrainCount(terrain.countY)}`;
-}
-
-function stageAssets(
-  assetIds: string[],
-  at: { x: number; y: number },
-  stagger = 8
-): void {
-  const sceneId = activeSceneId();
-  if (!sceneId) return;
-
-  // One transaction for the whole drop: ten sprites dragged in together are
-  // one Ctrl+Z and one network update rather than ten of each.
-  const resolved = resolveAssetsNow();
-
-  useDoc.getState().batch(() => {
-    for (const [index, assetId] of assetIds.entries()) {
-      const asset = resolved.find((entry) => entry.id === assetId) ?? null;
-
-      useDoc.getState().addItem(sceneId, {
-        id: crypto.randomUUID(),
-        assetId,
-        x: at.x + index * stagger,
-        y: at.y + index * stagger,
-        footprint: { width: 0, height: 0 },
-        flipHorizontal: false,
-        flipVertical: false,
-        isoTurn: 0,
-        isoProjection: isoProjectionFromSource(useUi.getState().mask?.source),
-        showSource: false,
-        opacity: 1,
-        paused: false,
-        sequenceId: "",
-        heldFrame: 0,
-        rotation: 0,
-        display: isSetAsset(asset ?? { sequences: [] }) ? "sheet" : "cell"
-      });
-    }
-  });
 }
 
 function tileIndices(

@@ -3,12 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { requestPartUrl } from "@/client/api";
 import { isAssetDrag, readAssetDrag, startAssetDrag } from "@/client/dragAssets";
-import { resolveAssetsNow, useActiveScene, useAssets } from "@/client/stores/assets";
+import { stageAtCamera } from "@/client/stage";
+import { useAssets } from "@/client/stores/assets";
 import { useDoc } from "@/client/stores/doc";
 import { useProjectLoaded, useServer } from "@/client/stores/server";
 import { sectionCollapsed, useUi } from "@/client/stores/ui";
 import { useNow } from "@/client/useNow";
-import { isoProjectionFromSource } from "@/core/isoMask";
 import { describeSettings } from "@/core/describe";
 import { faceId, isLibraryVisible, setBadge } from "@/shared/assetSet";
 import { batchSwatch, groupByBatch, type BatchSwatch } from "@/shared/batch";
@@ -24,7 +24,6 @@ import {
 import { formatElapsed, jobElapsedSeconds } from "@/shared/jobTime";
 import type { JobRecord, JobStatus, ResolvedAsset } from "@/shared/model";
 import { providerAttachmentPlan } from "@/shared/providerPrompt";
-import { isSetAsset } from "@/shared/repeaterMix";
 import { AssetThumb } from "./AssetBitmap";
 import { Button, ConfirmTextButton, Panel, Skeleton, TextButton } from "./ui";
 
@@ -80,8 +79,6 @@ function LibraryThumb({
   selected,
   selectedAssetIds,
   thumbSize,
-  sceneId,
-  stageIndex,
   preferSource,
   reveal,
   godotSlots,
@@ -93,8 +90,6 @@ function LibraryThumb({
   selected: boolean;
   selectedAssetIds: string[];
   thumbSize: number;
-  sceneId: string | null;
-  stageIndex: number;
   preferSource: boolean;
   /** Scroll into view: selection arrived from another panel. */
   reveal: boolean;
@@ -118,9 +113,7 @@ function LibraryThumb({
         )
       }
       onClick={(event) => onClick(event, asset.id)}
-      onDoubleClick={() => {
-        if (sceneId) stageMany(sceneId, [asset.id], stageIndex);
-      }}
+      onDoubleClick={() => stageAtCamera([asset.id])}
       title={`${asset.label}\n${asset.prompt.body}\n${describeSettings(
         asset.processing,
         { width: asset.sourceWidth, height: asset.sourceHeight },
@@ -268,37 +261,6 @@ function BatchToggle({
       {collapsed ? <span className="mt-1 tabular-nums">+{hidden}</span> : null}
     </button>
   );
-}
-
-/** One-per-row staging, so dropping ten assets on the canvas is one undo. */
-function stageMany(sceneId: string, assetIds: string[], startIndex: number): void {
-  const resolved = resolveAssetsNow();
-
-  useDoc.getState().batch(() => {
-    for (const [offset, assetId] of assetIds.entries()) {
-      const slot = startIndex + offset;
-      const asset = resolved.find((entry) => entry.id === assetId);
-
-      useDoc.getState().addItem(sceneId, {
-        id: crypto.randomUUID(),
-        assetId,
-        x: (slot % 6) * 96,
-        y: Math.floor(slot / 6) * 96,
-        footprint: { width: 0, height: 0 },
-        flipHorizontal: false,
-        flipVertical: false,
-        isoTurn: 0,
-        isoProjection: isoProjectionFromSource(useUi.getState().mask?.source),
-        showSource: false,
-        opacity: 1,
-        paused: false,
-        sequenceId: "",
-        heldFrame: 0,
-        rotation: 0,
-        display: isSetAsset(asset ?? { sequences: [] }) ? "sheet" : "cell"
-      });
-    }
-  });
 }
 
 type Entry = LibraryEntry<ResolvedAsset>;
@@ -556,7 +518,6 @@ export function LibraryPanel() {
   const selectedIds = useUi((state) => state.selectedIds);
   const filter = useUi((state) => state.libraryFolder);
   const collapsedBatches = useUi((state) => state.collapsedBatches);
-  const scene = useActiveScene();
   const store = useServer.getState;
   const ui = useUi.getState;
 
@@ -666,8 +627,6 @@ export function LibraryPanel() {
         selected={selectedIds.includes(entry.id)}
         selectedAssetIds={selectedAssets.map((asset) => asset.id)}
         thumbSize={size}
-        sceneId={scene?.id ?? null}
-        stageIndex={scene?.items.length ?? 0}
         preferSource={entry.id === selectedIds[selectedIds.length - 1]}
         reveal={entry.id === selectedIds[0]}
         godotSlots={godotSlots.get(entry.id) ?? NO_SLOTS}
