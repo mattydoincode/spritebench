@@ -402,6 +402,14 @@ function SlotRow({
           >
             <p className="truncate text-[12px] text-slate-200">
               {slot.label}
+              {slot.origin === "godot" ? (
+                <span
+                  title="Named in Godot (a node or a set item); rename it there"
+                  className="ml-1.5 rounded bg-[var(--color-ink-600)] px-1 align-middle text-[9px] text-slate-400"
+                >
+                  from Godot
+                </span>
+              ) : null}
               {slot.finalAssetIds.length > 0 ? (
                 <span
                   title="This slot has final art"

@@ -441,7 +441,17 @@ export function EngineCollections({
       {collections.map((collection) => (
         <section key={collection.id}>
           <div className="mb-1 flex items-baseline justify-between gap-2">
-            <TableName collection={collection} canEdit={canEdit} />
+            <span className="flex min-w-0 items-baseline gap-1.5">
+              <TableName collection={collection} canEdit={canEdit} />
+              {collection.origin === "godot" ? (
+                <span
+                  title="Made in Godot: its columns and name are edited there. Rows and art sync both ways."
+                  className="shrink-0 rounded bg-[var(--color-ink-600)] px-1 text-[9px] text-slate-400"
+                >
+                  from Godot
+                </span>
+              ) : null}
+            </span>
             <span className="flex shrink-0 items-baseline gap-1 font-mono text-[10px] text-slate-500">
               {collection.records.length} records
               {canEdit ? (
