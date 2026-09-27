@@ -55,6 +55,25 @@ at the top of each section; tick things off rather than deleting them.
 - [ ] Commit `.uid` files in the addon repo (its `.gitignore` excludes them; Godot 4.4+
       expects them committed, especially for distributed addons).
 
+## Human in the loop (artist finals)
+
+The goal: AI output is the draft, a human artist signs off on the final. The last step
+of the pipeline should be a person, not a generation.
+
+- [ ] Favorites / picks: mark the good ones inside a batch (and hide the rejects), so a
+      batch of 12 candidates becomes "these 2 are worth finishing".
+- [ ] Asset groups: tie candidates, picks and the finished art for one thing (a sprite, a
+      building face) together, so it is clear which images are drafts of the same asset.
+- [ ] Artist upload as the final copy: an artist uploads their finished image straight into
+      the app against that asset (drag onto it, or "upload final" in the inspector), keeping
+      the AI candidates it came from as history.
+- [ ] Finals win downstream: Godot slots, downloads and the scene use the final when one
+      exists, and the library shows final vs draft at a glance (badge, like the Godot/saved
+      icons).
+- [ ] Open questions: who can upload finals (editors? a new "artist" role?), whether a final
+      can be re-processed (pixel art, palette) or is taken as-is, and whether a newer final
+      replaces the old one or versions it.
+
 ## Product
 
 - [ ] Redesign the marketing homepage.
