@@ -9,7 +9,8 @@ at the top of each section; tick things off rather than deleting them.
 - [x] Cap how many workers one user can hold at once (`WORKER_USER_CONCURRENCY`, default 2
       of `WORKER_CONCURRENCY` 4). Jobs are grouped by the user who pressed Generate;
       pg-boss skips a user at their cap, so big requests queue behind themselves.
-- [ ] Apply migrations `0005_provider_key_defaults`, `0006_feedback_admin` and `0007_share_links` in production
+- [ ] Apply migrations `0005` through `0011` in production (provider key defaults, feedback/admin,
+      share links, engine sync time, asset origin, final lane, web game assets)
       (`npm run db:migrate:prod`) with the deploy. Generation breaks without 0005.
 - [ ] Clear refresh tokens Google already issued:
       `update accounts set refresh_token = null, access_token = null where provider = 'google';`
@@ -78,6 +79,9 @@ of the pipeline should be a person, not a generation.
       batch of 12 candidates becomes "these 2 are worth finishing".
 - [ ] Asset groups: tie candidates, picks and the finished art for one thing (a sprite, a
       building face) together, so it is clear which images are drafts of the same asset.
+- [x] Uploads: library upload button or drop files on a folder; stored as-is, person icon.
+- [x] Prototype / Final lanes on every game-asset slot, a toggle in Game Assets for which you
+      edit, and the Godot plugin's Art setting for which the game pulls.
 - [ ] Artist upload as the final copy: an artist uploads their finished image straight into
       the app against that asset (drag onto it, or "upload final" in the inspector), keeping
       the AI candidates it came from as history.
@@ -87,6 +91,14 @@ of the pipeline should be a person, not a generation.
 - [ ] Open questions: who can upload finals (editors? a new "artist" role?), whether a final
       can be re-processed (pixel art, palette) or is taken as-is, and whether a newer final
       replaces the old one or versions it.
+
+## Game Assets (new, needs a real end-to-end test in Godot)
+
+- [ ] Test with the plugin: Art = final/prototype switching, web-made asset/list landing in
+      `assets.tres`, web table becoming `tables/<name>.tres` with rows and art.
+- [ ] A removed web table's `.tres` is left in Godot; decide whether the plugin deletes it.
+- [ ] Web-made "asset" is a still image only; add animations (sprite frames) if needed.
+- [ ] Release the plugin (see Godot addon) so people get the Art setting and web assets.
 
 ## Product
 
