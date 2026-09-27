@@ -967,10 +967,10 @@ export function GeneratePanel() {
           reset
         </TextButton>
       }
-      footer={prompt}
-      footerSize={{
+      pinned={{
+        content: prompt,
         height: promptHeight,
-        onDrag: (delta) => ui().setPaneSize("prompt", promptHeight - delta),
+        onResize: (height) => ui().setPaneSize("prompt", height),
         onReset: () => ui().setPaneSize("prompt", defaultPaneSize("prompt"))
       }}
     >

@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useActiveScene, useAsset, useSelectedAsset, useSelectedJob } from "@/client/stores/assets";
 import { useDoc } from "@/client/stores/doc";
 import { useServer } from "@/client/stores/server";
-import { DEFAULT_INSPECTOR_PREVIEW, useUi } from "@/client/stores/ui";
+import { defaultPaneSize, useUi } from "@/client/stores/ui";
 import { MAX_CHROMA_KEYS } from "@/core/settings";
 import { isoProjectionFromSource } from "@/core/isoMask";
 import { CUTOUT_LABELS, CUTOUT_MODES, DISTANCE_MODES, DITHER_MODES, ORIENTATIONS } from "@/core/types";
@@ -20,7 +20,6 @@ import { DownsampleControls } from "./DownsampleControls";
 import { ExportDialog } from "./ExportDialog";
 import { GenerationHistory } from "./GenerationHistory";
 import { JobInspector } from "./JobInspector";
-import { ResizeHandle } from "./ResizeHandle";
 import {
   Button,
   ColorInput,
@@ -29,6 +28,7 @@ import {
   Field,
   NumberInput,
   Panel,
+  PanelTab,
   Row,
   Select,
   Slider,
@@ -37,6 +37,33 @@ import {
 } from "./ui";
 
 type ViewMode = "processed" | "source" | "alpha";
+
+const VIEW_LABELS: Record<ViewMode, string> = {
+  processed: "Processed",
+  source: "Source",
+  alpha: "Alpha"
+};
+
+/** Live size of an element, for fitting a bitmap into whatever room it has. */
+function useBoxSize(): [(node: HTMLElement | null) => void, { width: number; height: number }] {
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  const observer = useRef<ResizeObserver | null>(null);
+
+  const ref = useCallback((node: HTMLElement | null) => {
+    observer.current?.disconnect();
+    if (!node) return;
+
+    observer.current = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      setSize((previous) =>
+        previous.width === width && previous.height === height ? previous : { width, height }
+      );
+    });
+    observer.current.observe(node);
+  }, []);
+
+  return [ref, size];
+}
 
 const EMPTY_SEQUENCES: Sequence[] = [];
 
@@ -54,8 +81,8 @@ export function InspectorPanel() {
   const asset = useSelectedAsset();
   const job = useSelectedJob();
   const activeSequenceId = useUi((state) => state.activeSequenceId);
-  const previewHeight = useUi((state) => state.inspectorPreview);
-  const panelWidth = useUi((state) => state.layout.right);
+  const previewHeight = useUi((state) => state.layout.preview);
+  const [boxRef, box] = useBoxSize();
   const projectId = useServer((state) => state.project?.id ?? null);
 
   const scenePalette = scene?.palette ?? "";
@@ -141,18 +168,135 @@ export function InspectorPanel() {
   const bitmapWidth = view === "source" ? preview?.sourceWidth ?? 0 : preview?.width ?? 0;
   const bitmapHeight = view === "source" ? preview?.sourceHeight ?? 0 : preview?.height ?? 0;
   const previewPad = 16;
-  const previewBoxW = Math.max(64, panelWidth - 36);
   const previewScale =
-    bitmapWidth > 0 && bitmapHeight > 0
-      ? Math.min(
-          (previewBoxW - previewPad) / bitmapWidth,
-          (previewHeight - previewPad) / bitmapHeight
-        )
+    bitmapWidth > 0 && bitmapHeight > 0 && box.width > 0 && box.height > 0
+      ? Math.min((box.width - previewPad) / bitmapWidth, (box.height - previewPad) / bitmapHeight)
       : 1;
+
+  // Pinned above the sections, like the prompt in the Generate panel: the
+  // thing the inspector is for, always in view, sized by dragging its edge.
+  const previewPinned = (
+    <>
+      <div className="mb-2 flex h-7 shrink-0 items-stretch gap-4 border-b border-[var(--color-edge)]">
+        <div role="tablist" aria-label="Preview" className="flex items-stretch gap-4">
+          {(["processed", "source", "alpha"] as ViewMode[]).map((mode) => (
+            <PanelTab key={mode} size="section" selected={view === mode} onClick={() => setView(mode)}>
+              {VIEW_LABELS[mode]}
+            </PanelTab>
+          ))}
+        </div>
+        <span className="flex-1" />
+        <div className="flex items-center gap-1 self-center">
+          {maskAvailable ? (
+            <label className="flex items-center gap-1 text-[10px] text-slate-400">
+              <input
+                type="checkbox"
+                checked={showMask}
+                onChange={(event) => setShowMask(event.target.checked)}
+                className="h-3 w-3 accent-[var(--color-accent)]"
+              />
+              mask
+            </label>
+          ) : null}
+          {sequence && sequence.frames.length > 0 ? (
+            <TextButton
+              title={playback.playing ? "Pause the animation" : "Play the animation"}
+              onClick={playback.toggle}
+            >
+              {playback.playing ? "pause" : "play"}
+            </TextButton>
+          ) : null}
+          <TextButton
+            title="Crop this image without touching the raw file, for every instance at once"
+            onClick={() => ui().openImageEditor(asset.id)}
+          >
+            {processing.edits.length > 0 ? `edit (${processing.edits.length})` : "edit"}
+          </TextButton>
+        </div>
+      </div>
+
+      {sequence && sequence.frames.length > 1 ? (
+        <Row className="mb-2 shrink-0">
+          <input
+            type="range"
+            className="flex-1"
+            min={0}
+            max={sequence.frames.length - 1}
+            step={1}
+            value={playback.index}
+            onChange={(event) => playback.seek(Number(event.target.value))}
+          />
+          <span className="w-12 shrink-0 text-right text-[10px] tabular-nums text-slate-400">
+            {playback.index + 1}/{sequence.frames.length}
+          </span>
+        </Row>
+      ) : null}
+
+      <div ref={boxRef} className="min-h-16 flex-1 overflow-hidden rounded">
+        <ExpandablePreview
+          title={`${asset.label} · ${bitmapWidth}×${bitmapHeight}`}
+          className="checkerboard flex h-full w-full items-center justify-center border-0 bg-transparent p-2"
+          expanded={
+            showBitmap ? (
+              <BitmapCanvas
+                bitmap={showBitmap}
+                width={bitmapWidth}
+                height={bitmapHeight}
+                showAlpha={view === "alpha"}
+                overlay={showMask ? maskOverlay : null}
+                pixelated
+                style={{
+                  width: Math.max(1, Math.round(bitmapWidth * lightboxScale(bitmapWidth, bitmapHeight))),
+                  height: Math.max(
+                    1,
+                    Math.round(bitmapHeight * lightboxScale(bitmapWidth, bitmapHeight))
+                  )
+                }}
+              />
+            ) : (
+              <span className="text-[11px] text-slate-400">{error ?? "no preview"}</span>
+            )
+          }
+        >
+          {error ? (
+            <span className="p-2 text-center text-[11px] text-rose-300">{error}</span>
+          ) : showBitmap ? (
+            <BitmapCanvas
+              bitmap={showBitmap}
+              width={bitmapWidth}
+              height={bitmapHeight}
+              showAlpha={view === "alpha"}
+              overlay={showMask ? maskOverlay : null}
+              pixelated={previewScale >= 1}
+              style={{
+                width: Math.max(1, Math.round(bitmapWidth * previewScale)),
+                height: Math.max(1, Math.round(bitmapHeight * previewScale))
+              }}
+            />
+          ) : (
+            <span className="text-[11px] text-slate-500">{loading ? "processing..." : ""}</span>
+          )}
+        </ExpandablePreview>
+      </div>
+
+      {preview ? (
+        <p className="mt-1.5 shrink-0 truncate text-[10px] text-slate-500">
+          source {preview.sourceWidth}x{preview.sourceHeight} to {preview.width}x{preview.height}
+          {preview.description ? <> &middot; {preview.description}</> : null}
+        </p>
+      ) : null}
+    </>
+  );
 
   return (
     <Panel
       title="Inspector"
+      pinned={{
+        content: previewPinned,
+        height: previewHeight,
+        onResize: (height) => ui().setPaneSize("preview", height),
+        onReset: () => ui().setPaneSize("preview", defaultPaneSize("preview"))
+      }}
       actions={
         <Button
           variant="danger"
@@ -167,131 +311,6 @@ export function InspectorPanel() {
         </Button>
       }
     >
-      <Section id="inspector.preview" label="preview">
-        <Row className="mb-2">
-          {(["processed", "source", "alpha"] as ViewMode[]).map((mode) => (
-            <Button
-              key={mode}
-              variant={view === mode ? "primary" : "ghost"}
-              onClick={() => setView(mode)}
-            >
-              {mode}
-            </Button>
-          ))}
-
-          {maskAvailable ? (
-            <label className="flex items-center gap-1 text-[10px] text-slate-400">
-              <input
-                type="checkbox"
-                checked={showMask}
-                onChange={(event) => setShowMask(event.target.checked)}
-                className="h-3 w-3 accent-[var(--color-accent)]"
-              />
-              mask
-            </label>
-          ) : null}
-
-          <span className="flex-1" />
-
-          {sequence && sequence.frames.length > 0 ? (
-            <Button
-              variant={playback.playing ? "primary" : "default"}
-              title={playback.playing ? "Pause the animation" : "Play the animation"}
-              onClick={playback.toggle}
-            >
-              {playback.playing ? "pause" : "play"}
-            </Button>
-          ) : null}
-
-          <Button
-            variant={processing.edits.length > 0 ? "primary" : "default"}
-            title="Crop this image without touching the raw file, for every instance at once"
-            onClick={() => ui().openImageEditor(asset.id)}
-          >
-            {processing.edits.length > 0 ? `edit (${processing.edits.length})` : "edit"}
-          </Button>
-        </Row>
-
-        {sequence && sequence.frames.length > 1 ? (
-          <Row className="mb-2">
-            <input
-              type="range"
-              className="flex-1"
-              min={0}
-              max={sequence.frames.length - 1}
-              step={1}
-              value={playback.index}
-              onChange={(event) => playback.seek(Number(event.target.value))}
-            />
-            <span className="w-12 shrink-0 text-right text-[10px] tabular-nums text-slate-400">
-              {playback.index + 1}/{sequence.frames.length}
-            </span>
-          </Row>
-        ) : null}
-
-        <div className="mb-2">
-          <ExpandablePreview
-            title={`${asset.label} · ${bitmapWidth}×${bitmapHeight}`}
-            className="checkerboard flex w-full items-center justify-center rounded-t border-0 bg-transparent p-2"
-            style={{ height: previewHeight }}
-            expanded={
-              showBitmap ? (
-                <BitmapCanvas
-                  bitmap={showBitmap}
-                  width={bitmapWidth}
-                  height={bitmapHeight}
-                  showAlpha={view === "alpha"}
-                  overlay={showMask ? maskOverlay : null}
-                  pixelated
-                  style={{
-                    width: Math.max(1, Math.round(bitmapWidth * lightboxScale(bitmapWidth, bitmapHeight))),
-                    height: Math.max(
-                      1,
-                      Math.round(bitmapHeight * lightboxScale(bitmapWidth, bitmapHeight))
-                    )
-                  }}
-                />
-              ) : (
-                <span className="text-[11px] text-slate-400">{error ?? "no preview"}</span>
-              )
-            }
-          >
-            {error ? (
-              <span className="p-2 text-center text-[11px] text-rose-300">{error}</span>
-            ) : showBitmap ? (
-              <BitmapCanvas
-                bitmap={showBitmap}
-                width={bitmapWidth}
-                height={bitmapHeight}
-                showAlpha={view === "alpha"}
-                overlay={showMask ? maskOverlay : null}
-                pixelated={previewScale >= 1}
-                style={{
-                  width: Math.max(1, Math.round(bitmapWidth * previewScale)),
-                  height: Math.max(1, Math.round(bitmapHeight * previewScale))
-                }}
-              />
-            ) : (
-              <span className="text-[11px] text-slate-500">{loading ? "processing..." : ""}</span>
-            )}
-          </ExpandablePreview>
-          <ResizeHandle
-            orientation="horizontal"
-            onDrag={(delta) => ui().setInspectorPreview(previewHeight + delta)}
-            onReset={() => ui().setInspectorPreview(DEFAULT_INSPECTOR_PREVIEW)}
-          />
-        </div>
-
-        <p className="mb-3 text-[10px] leading-snug text-slate-500">
-          {preview ? (
-            <>
-              source {preview.sourceWidth}x{preview.sourceHeight} to {preview.width}x{preview.height}
-              {preview.description ? <> &middot; {preview.description}</> : null}
-            </>
-          ) : null}
-        </p>
-      </Section>
-
       <Section id="inspector.asset" label="asset">
         <Field label="Name" hint={`asset ${asset.seq}, blank to use the number`}>
           <input

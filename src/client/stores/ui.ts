@@ -181,13 +181,6 @@ interface Stored extends ProjectDraft {
    */
   layout: Layout;
   /**
-   * Height of the inspector bitmap preview, in pixels.
-   *
-   * The preview always fits the asset into this box, so raising it is how
-   * you zoom in on a 32-pixel sprite instead of staring at it at 1:1.
-   */
-  inspectorPreview: number;
-  /**
    * How many process workers this browser runs.
    *
    * Local: it is about this machine's cores, not the project. One worker is
@@ -220,7 +213,7 @@ export function sectionCollapsed(
   return stored[id] ?? defaults[id] ?? false;
 }
 
-export type Pane = "left" | "right" | "library" | "prompt";
+export type Pane = "left" | "right" | "library" | "prompt" | "preview";
 export type LeftTab = "generate" | "godot";
 export type SettingsTab = "project" | "account";
 
@@ -228,15 +221,18 @@ export interface Layout {
   left: number;
   right: number;
   library: number;
-  /** Height of the pinned prompt section at the bottom of the prompt panel. */
+  /** Height of the pinned prompt section at the top of the Generate panel. */
   prompt: number;
+  /** Height of the pinned preview at the top of the inspector. */
+  preview: number;
 }
 
 const PANE_LIMITS: Record<Pane, { min: number; max: number }> = {
   left: { min: 200, max: 900 },
   right: { min: 200, max: 900 },
   library: { min: 60, max: 1600 },
-  prompt: { min: 160, max: 1600 }
+  prompt: { min: 160, max: 1600 },
+  preview: { min: 160, max: 1600 }
 };
 
 function clampPane(pane: Pane, size: number): number {
@@ -247,18 +243,22 @@ function clampPane(pane: Pane, size: number): number {
 /**
  * Default sizes as shares of the window, so a first open or a double-click
  * reset fits the screen it is on: side panels a fifth of the width each, the
- * library about a third of the height, the prompt 40% of the left panel.
+ * library about a third of the height, the prompt and the inspector preview
+ * 40% of their panels.
  * Stored sizes stay in pixels -- dragging is in pixels.
  */
 const LAYOUT_SHARES: Record<Pane, number> = {
   left: 0.2,
   right: 0.2,
   library: 0.35,
-  prompt: 0.4
+  prompt: 0.4,
+  preview: 0.4
 };
 
 /** Project bar plus panel header, above the left panel's body. */
 const LEFT_CHROME = 80;
+/** Panel header, above the inspector's body. */
+const RIGHT_CHROME = 40;
 
 /** Stands in for the window where there is none, so server and first client render agree. */
 const FALLBACK_VIEWPORT = { width: 1600, height: 900 };
@@ -272,7 +272,8 @@ export function defaultLayout(
     left: clampPane("left", viewport.width * LAYOUT_SHARES.left),
     right: clampPane("right", viewport.width * LAYOUT_SHARES.right),
     library: clampPane("library", viewport.height * LAYOUT_SHARES.library),
-    prompt: clampPane("prompt", (viewport.height - LEFT_CHROME) * LAYOUT_SHARES.prompt)
+    prompt: clampPane("prompt", (viewport.height - LEFT_CHROME) * LAYOUT_SHARES.prompt),
+    preview: clampPane("preview", (viewport.height - RIGHT_CHROME) * LAYOUT_SHARES.preview)
   };
 }
 
@@ -280,14 +281,6 @@ export function defaultPaneSize(pane: Pane): number {
   return defaultLayout()[pane];
 }
 
-export const MIN_INSPECTOR_PREVIEW = 80;
-export const MAX_INSPECTOR_PREVIEW = 480;
-export const DEFAULT_INSPECTOR_PREVIEW = 180;
-
-function clampInspectorPreview(value: unknown): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_INSPECTOR_PREVIEW;
-  return Math.min(MAX_INSPECTOR_PREVIEW, Math.max(MIN_INSPECTOR_PREVIEW, Math.round(value)));
-}
 
 const KEY = "spritebench.ui";
 
@@ -594,7 +587,6 @@ const DEFAULTS: Stored = {
   collapsedSections: {},
   // Real window shares are applied in `hydrate`, before first paint.
   layout: defaultLayout(FALLBACK_VIEWPORT),
-  inspectorPreview: DEFAULT_INSPECTOR_PREVIEW,
   processWorkers: DEFAULT_PROCESS_WORKERS
 };
 
@@ -625,9 +617,9 @@ function read(): Stored {
         left: stored.layout?.left ?? defaultPaneSize("left"),
         right: stored.layout?.right ?? defaultPaneSize("right"),
         library: stored.layout?.library ?? defaultPaneSize("library"),
-        prompt: stored.layout?.prompt ?? defaultPaneSize("prompt")
+        prompt: stored.layout?.prompt ?? defaultPaneSize("prompt"),
+        preview: stored.layout?.preview ?? defaultPaneSize("preview")
       },
-      inspectorPreview: clampInspectorPreview(stored.inspectorPreview),
       processWorkers: clampProcessWorkers(stored.processWorkers),
       engineThumbSize: clampEngineThumbSize(stored.engineThumbSize),
       sceneView: readSceneView(stored.sceneView)
@@ -663,7 +655,6 @@ function persist(state: Stored): void {
           collapsedBatches: state.collapsedBatches,
           collapsedSections: state.collapsedSections,
           layout: state.layout,
-          inspectorPreview: state.inspectorPreview,
           processWorkers: state.processWorkers
         })
       );
@@ -741,7 +732,6 @@ interface UiState extends Stored {
   toggleSection: (id: string) => void;
   setPaneSize: (pane: Pane, size: number) => void;
   setLeftTab: (tab: LeftTab) => void;
-  setInspectorPreview: (size: number) => void;
   setProcessWorkers: (count: number) => void;
 
 
@@ -1046,11 +1036,6 @@ export const useUi = create<UiState>((set, get) => {
 
     setPaneSize(pane, size) {
       set({ layout: { ...get().layout, [pane]: clampPane(pane, size) } });
-      save();
-    },
-
-    setInspectorPreview(size) {
-      set({ inspectorPreview: clampInspectorPreview(size) });
       save();
     },
 

@@ -392,19 +392,23 @@ export function Panel({
   count,
   children,
   actions,
-  footer,
-  footerSize,
+  pinned,
   className = ""
 }: {
   title?: string;
   /**
-   * Pinned under the scrolling body, for the thing the panel exists to do
-   * (the prompt and Create). A flex column, so one child can take `flex-1`
-   * and absorb the height. Scrolls on its own if its content outgrows it.
+   * Pinned under the header, above the scrolling sections, for the thing the
+   * panel exists for (the prompt, the preview). A flex column, so one child
+   * can take `flex-1` and absorb the height; it scrolls on its own if its
+   * content outgrows it. Its height is dragged from a handle along its
+   * bottom edge.
    */
-  footer?: ReactNode;
-  /** Makes the footer a fixed height with a drag handle along its top edge. */
-  footerSize?: { height: number; onDrag: (delta: number) => void; onReset: () => void };
+  pinned?: {
+    content: ReactNode;
+    height: number;
+    onResize: (height: number) => void;
+    onReset: () => void;
+  };
   /** `PanelTab`s, for a panel that shares its slot. Replaces `title`. */
   tabs?: ReactNode;
   /** Shown after `title`. */
@@ -422,27 +426,23 @@ export function Panel({
 
         <div className="flex min-w-0 items-center gap-1">{actions}</div>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">{children}</div>
-      {footer ? (
+      {pinned ? (
         <>
-          {footerSize ? (
-            <ResizeHandle
-              orientation="horizontal"
-              onDrag={(delta) => footerSize.onDrag(delta)}
-              onReset={footerSize.onReset}
-            />
-          ) : null}
           <div
-            className={`flex shrink-0 flex-col overflow-y-auto bg-[var(--color-ink-800)] p-3 ${
-              footerSize ? "" : "max-h-[70%] border-t border-[var(--color-edge)]"
-            }`}
-            // Leaves a strip of the body showing however far the handle goes.
-            style={footerSize ? { height: footerSize.height, maxHeight: "calc(100% - 80px)" } : undefined}
+            className="flex shrink-0 flex-col overflow-y-auto bg-[var(--color-ink-800)] p-3"
+            // Leaves a strip of the sections showing however far the handle goes.
+            style={{ height: pinned.height, maxHeight: "calc(100% - 80px)" }}
           >
-            {footer}
+            {pinned.content}
           </div>
+          <ResizeHandle
+            orientation="horizontal"
+            onDrag={(delta) => pinned.onResize(pinned.height + delta)}
+            onReset={pinned.onReset}
+          />
         </>
       ) : null}
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">{children}</div>
     </section>
   );
 }
