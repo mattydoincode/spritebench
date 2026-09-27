@@ -13,7 +13,6 @@ import { keyForJob } from "@/db/repo/providerKeys";
 import { recordUsage } from "@/db/repo/usage";
 import { providerForModel } from "@/providers";
 import { isRetryable, type ProviderResult } from "@/providers/types";
-import { assetRetentionDays } from "@/server/config";
 import { readPngSize } from "@/server/png";
 import { editInputsForJob, jobUsesEdit } from "@/server/template";
 import { buildThumbnail } from "@/server/thumbnails";
@@ -121,7 +120,6 @@ export async function runJob(jobId: string, attemptsLeft = 0): Promise<{ retry: 
         elapsedSeconds: result.elapsedSeconds
       });
 
-      const expiresAt = new Date(Date.now() + assetRetentionDays() * 86_400_000);
       let firstAssetId: string | null = null;
 
       for (const bytes of result.images) {
@@ -169,8 +167,7 @@ export async function runJob(jobId: string, attemptsLeft = 0): Promise<{ retry: 
           inputs: job.inputs,
           sequencePlan: job.sequencePlan,
           usage: result.usage,
-          elapsedSeconds: result.elapsedSeconds,
-          expiresAt
+          elapsedSeconds: result.elapsedSeconds
         });
 
         await appendAssetId(jobId, asset.id);

@@ -1,6 +1,6 @@
 /**
  * Exercises the asset lifecycle against a scratch database and data directory:
- * migrations from empty, source roll-off, and metering.
+ * migrations from empty, asset rows, soft delete, and metering.
  *
  * Point DATABASE_URL at a throwaway database -- it writes and deletes rows:
  *
@@ -9,13 +9,7 @@
  */
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { closeDb, db } from "@/db";
-import {
-  clearSource,
-  countAssets,
-  insertAsset,
-  listExpiredSources,
-  softDeleteAsset
-} from "@/db/repo/assets";
+import { countAssets, insertAsset, softDeleteAsset } from "@/db/repo/assets";
 import { createProject } from "@/db/repo/projects";
 import { users } from "@/db/schema";
 import { recordUsage, usageSince } from "@/db/repo/usage";
@@ -23,7 +17,6 @@ import { DEFAULT_PROCESSING } from "@/core/settings";
 import { DEFAULT_GENERATION } from "@/shared/model";
 import { sourceKey, thumbKey } from "@/storage/keys";
 import { storage } from "@/storage";
-import { pruneExpiredSources } from "@/worker/prune";
 
 const PNG = Buffer.from("fake png bytes");
 const WEBP = Buffer.from("fake webp");
@@ -90,33 +83,13 @@ async function main(): Promise<void> {
   check("scratch user and project exist", Boolean(userId && projectId));
   check("starts with no assets", (await countAssets(projectId)) === 0);
 
-  // --- roll-off ---------------------------------------------------------
-  const yesterday = new Date(Date.now() - 86_400_000);
-  const nextMonth = new Date(Date.now() + 30 * 86_400_000);
-
-  const expired = await seedAsset(projectId, userId, "expired", yesterday);
-  const fresh = await seedAsset(projectId, userId, "fresh", nextMonth);
-  const forever = await seedAsset(projectId, userId, "no-expiry", null);
-
-  const due = await listExpiredSources(500);
-  check("only the past-due asset is listed", due.length === 1 && due[0].id === expired.id, `${due.length} due`);
-
-  const pruned = await pruneExpiredSources();
-  check("prune reports one roll-off", pruned === 1, `pruned ${pruned}`);
-  check("expired source object is gone", !(await storage().exists(expired.source)));
-  check("expired thumbnail is kept", await storage().exists(expired.thumb));
-  check("fresh source is untouched", await storage().exists(fresh.source));
-  check("source with no expiry is untouched", await storage().exists(forever.source));
-
-  check("rolled-off row survives", (await countAssets(projectId)) === 3);
-
-  const rolled = await listExpiredSources(500);
-  check("a second run finds nothing", rolled.length === 0);
-  check("prune is idempotent", (await pruneExpiredSources()) === 0);
+  const fresh = await seedAsset(projectId, userId, "fresh", null);
+  const kept = await seedAsset(projectId, userId, "kept", null);
+  check("seeded assets are counted", (await countAssets(projectId)) === 2);
 
   // --- soft delete ------------------------------------------------------
   await softDeleteAsset(projectId, fresh.id);
-  check("a deleted asset is gone", (await countAssets(projectId)) === 2);
+  check("a deleted asset is gone", (await countAssets(projectId)) === 1);
 
   // --- metering ---------------------------------------------------------
   await recordUsage({
@@ -152,8 +125,7 @@ async function main(): Promise<void> {
   check("usage tokens are summed", totals.totalTokens === 450, `${totals.totalTokens} tokens`);
 
   // --- cleanup ----------------------------------------------------------
-  await clearSource(fresh.id);
-  for (const key of [fresh.source, fresh.thumb, forever.source, forever.thumb, expired.thumb]) {
+  for (const key of [fresh.source, fresh.thumb, kept.source, kept.thumb]) {
     await storage().delete(key);
   }
 

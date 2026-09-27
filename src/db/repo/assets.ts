@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, isNotNull, isNull, lt, sum } from "drizzle-orm";
+import { and, asc, count, desc, eq, isNotNull, isNull, sum } from "drizzle-orm";
 import { withDefaults } from "@/core/settings";
 import { DEFAULT_GENERATION, type AssetRecord } from "@/shared/model";
 import { db, type Transaction } from "../index";
@@ -185,30 +185,6 @@ export async function listSourceKeys(projectId: string): Promise<string[]> {
     .where(and(eq(assets.projectId, projectId), isNotNull(assets.sourceKey)));
 
   return rows.map((row) => row.sourceKey).filter((key): key is string => key !== null);
-}
-
-/** Assets whose full-resolution source is past its retention window. */
-export async function listExpiredSources(
-  limit: number
-): Promise<Array<{ id: string; sourceKey: string }>> {
-  const rows = await db()
-    .select({ id: assets.id, sourceKey: assets.sourceKey })
-    .from(assets)
-    .where(
-      and(isNotNull(assets.sourceKey), isNotNull(assets.expiresAt), lt(assets.expiresAt, new Date()))
-    )
-    .orderBy(asc(assets.expiresAt))
-    .limit(limit);
-
-  return rows.flatMap((row) => (row.sourceKey ? [{ id: row.id, sourceKey: row.sourceKey }] : []));
-}
-
-/** Drops the source key and its byte count, keeping the row and thumbnail. */
-export async function clearSource(id: string): Promise<void> {
-  await db()
-    .update(assets)
-    .set({ sourceKey: null, byteSize: 0, expiresAt: null, updatedAt: new Date() })
-    .where(eq(assets.id, id));
 }
 
 export async function listDeletedAssets(

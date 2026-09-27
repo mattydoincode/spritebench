@@ -10,7 +10,7 @@ import {
 } from "@/queue/boss";
 import type { GenerateJobPayload } from "@/queue/dispatch";
 import { configProblems, workerConcurrency, workerUserConcurrency } from "@/server/config";
-import { compactProjectDocs, pruneExpiredSources } from "./prune";
+import { compactProjectDocs } from "./prune";
 import { runJob } from "./runJob";
 
 /** Nightly, at 04:00 UTC. */
@@ -86,9 +86,6 @@ async function main(): Promise<void> {
   );
 
   await instance.work(PRUNE_QUEUE, { batchSize: 1 }, async () => {
-    const pruned = await pruneExpiredSources();
-    if (pruned > 0) console.log(`[worker] rolled off ${pruned} source(s)`);
-
     const compacted = await compactProjectDocs();
     if (compacted > 0) console.log(`[worker] compacted ${compacted} project document(s)`);
   });

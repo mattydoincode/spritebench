@@ -21,10 +21,12 @@ at the top of each section; tick things off rather than deleting them.
 
 ## Costs and abuse (you pay storage and worker time; users pay generation)
 
-- [x] Keep originals for 10 years (`ASSET_RETENTION_DAYS=3650`, was 30). R2 is ~$0.015/GB-month
-      and originals average ~4 MB: ~$3.50/mo after a year at 10 users, ~$36 at 100, ~$360 at 1,000
-      (at ~500 images/user/month). When trimming is needed, roll off rejected or untouched drafts
-      only, never favourites/finals, or store originals as lossless WebP.
+- [x] Removed the nightly roll-off of originals (was: delete after 30 days). Originals now stay
+      until something deliberately deletes them. R2 is ~$0.015/GB-month and originals average
+      ~4 MB: ~$3.50/mo after a year at 10 users, ~$36 at 100, ~$360 at 1,000 (at ~500
+      images/user/month). If trimming is ever needed, build it fresh: rejected or untouched drafts
+      only, never favourites/finals, or store originals as lossless WebP. The unused
+      `assets.expires_at` column can go in a later migration.
 - [x] Per-user usage on /admin: projects, jobs, failed jobs, images, stored bytes, last
       generation, joined; plus total stored and its rough R2 cost.
 

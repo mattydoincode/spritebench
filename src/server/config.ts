@@ -23,11 +23,6 @@ export function workerUserConcurrency(): number {
   return count("WORKER_USER_CONCURRENCY");
 }
 
-/** Days a full-resolution source is kept before roll-off. */
-export function assetRetentionDays(): number {
-  return count("ASSET_RETENTION_DAYS");
-}
-
 /** Hard ceiling on batches x imageCount for one generate request. */
 export function maxImagesPerRequest(): number {
   return count("MAX_IMAGES_PER_REQUEST");
