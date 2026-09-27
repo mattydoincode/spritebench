@@ -22,6 +22,21 @@ export function GenerationHistory({ asset }: { asset: ResolvedAsset }) {
     ? (keys.find((entry) => entry.id === job.providerKeyId) ?? null)
     : null;
 
+  // An upload never went to a model: say where it came from instead of
+  // showing an empty prompt.
+  if (asset.origin === "uploaded") {
+    return (
+      <div className="text-[11px] leading-relaxed text-slate-400">
+        <p className="text-slate-200">Uploaded, not generated.</p>
+        <p>
+          {asset.prompt.body ? <>From {asset.prompt.body}, </> : null}
+          {asset.sourceWidth}×{asset.sourceHeight}, added{" "}
+          {new Date(asset.createdAt).toLocaleString()}.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <RequestAudit
       input={input}

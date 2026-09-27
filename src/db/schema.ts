@@ -118,6 +118,7 @@ export const userSettings = pgTable("user_settings", {
 // ---------------------------------------------------------------------------
 
 export type ProjectRole = "owner" | "editor" | "viewer";
+export type AssetOrigin = "generated" | "uploaded";
 
 export const projects = pgTable("projects", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -321,6 +322,8 @@ export const assets = pgTable("assets", {
   thumbKey: text("thumb_key"),
   sourceWidth: integer("source_width").notNull(),
   sourceHeight: integer("source_height").notNull(),
+  /** "generated" by a job, or "uploaded" by a person (an artist's own work). */
+  origin: text("origin").$type<AssetOrigin>().notNull().default("generated"),
   byteSize: integer("byte_size").notNull().default(0),
 
   prompt: jsonb("prompt").$type<PromptSpec>().notNull(),

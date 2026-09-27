@@ -52,7 +52,9 @@ const THUMB_ICONS = {
   // A cloud: a processed copy is stored server-side.
   saved: "M5 12.5h6.5a2.5 2.5 0 0 0 .3-5A3.5 3.5 0 0 0 5 6.6a3 3 0 0 0 0 5.9Z",
   // Circling arrow: generated again from an earlier image.
-  rerun: "M12.5 8a4.5 4.5 0 1 1-1.3-3.2M12.5 3v2.5H10"
+  rerun: "M12.5 8a4.5 4.5 0 1 1-1.3-3.2M12.5 3v2.5H10",
+  // A person: someone's own image, uploaded rather than generated.
+  uploaded: "M8 7.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM3 13.5c.6-2.3 2.6-3.8 5-3.8s4.4 1.5 5 3.8"
 } as const;
 
 /** A small icon over a thumb's corner. Hover says what it means. */
@@ -129,8 +131,11 @@ function LibraryThumb({
       <div className="relative">
         <AssetThumb asset={asset} size={thumbSize} variant={preferSource ? "source" : "thumb"} />
         {/* On the image, like the frame count, so every thumb is the same height. */}
-        {godotSlots.length > 0 || asset.exportPath || asset.rerunOf ? (
+        {godotSlots.length > 0 || asset.exportPath || asset.rerunOf || asset.origin === "uploaded" ? (
           <span className="absolute top-0.5 left-0.5 flex gap-0.5">
+            {asset.origin === "uploaded" ? (
+              <ThumbIcon icon="uploaded" tone="text-amber-200" title="Uploaded by a person, not generated" />
+            ) : null}
             {godotSlots.length > 0 ? (
               <ThumbIcon
                 icon="godot"
@@ -386,7 +391,7 @@ function FolderSection({
   return (
     <section
       onDragOver={(event) => {
-        if (!isAssetDrag(event)) return;
+        if (!isAssetDrag(event) && !event.dataTransfer.types.includes("Files")) return;
         event.preventDefault();
         event.dataTransfer.dropEffect = "copy";
         setOver(true);
@@ -396,6 +401,13 @@ function FolderSection({
       }}
       onDrop={(event) => {
         setOver(false);
+        // Files from the computer: upload them straight into this folder.
+        const files = [...event.dataTransfer.files];
+        if (files.length > 0) {
+          event.preventDefault();
+          void useServer.getState().uploadImages(files, real ? id : "");
+          return;
+        }
         const ids = readAssetDrag(event);
         if (ids.length === 0) return;
         event.preventDefault();
@@ -471,6 +483,34 @@ function FolderSection({
         </div>
       )}
     </section>
+  );
+}
+
+/** Picks image files from the computer and uploads them into the folder in view. */
+function UploadButton({ folderId }: { folderId: string }) {
+  const input = useRef<HTMLInputElement | null>(null);
+
+  return (
+    <>
+      <TextButton
+        title="Upload your own images (or drop files onto a folder)"
+        onClick={() => input.current?.click()}
+      >
+        upload
+      </TextButton>
+      <input
+        ref={input}
+        type="file"
+        accept="image/*"
+        multiple
+        hidden
+        onChange={(event) => {
+          const files = [...(event.target.files ?? [])];
+          event.target.value = "";
+          void useServer.getState().uploadImages(files, folderId);
+        }}
+      />
+    </>
   );
 }
 
@@ -659,6 +699,7 @@ export function LibraryPanel() {
         <option value={UNFILED}>No Folder</option>
       </select>
       <NewFolderButton />
+      <UploadButton folderId={activeFilter && activeFilter !== UNFILED ? activeFilter : ""} />
     </>
   );
 

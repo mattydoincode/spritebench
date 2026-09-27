@@ -16,6 +16,7 @@ function asset(
     tags: [],
     createdAt: "2026-09-05T00:00:00.000Z",
     createdByUserId: null,
+    origin: "generated",
     hasSource: true,
     sourceWidth: 1024,
     sourceHeight: 1024,

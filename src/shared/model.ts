@@ -253,6 +253,8 @@ export interface AssetRecord {
   seq: number;
   createdAt: string;
   createdByUserId: string | null;
+  /** "uploaded" is a person's own image (an artist's final, say); "generated" came from a job. */
+  origin: "generated" | "uploaded";
   sourceWidth: number;
   sourceHeight: number;
   prompt: PromptSpec;

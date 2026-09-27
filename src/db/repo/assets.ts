@@ -16,6 +16,7 @@ export function toAssetRecord(row: AssetRow): AssetRecord {
     seq: row.seq,
     createdAt: row.createdAt.toISOString(),
     createdByUserId: row.createdByUserId,
+    origin: row.origin,
     sourceWidth: row.sourceWidth,
     sourceHeight: row.sourceHeight,
     prompt: row.prompt,
@@ -80,6 +81,7 @@ export interface NewAsset {
   usage?: AssetRecord["usage"];
   elapsedSeconds?: number | null;
   expiresAt?: Date | null;
+  origin?: "generated" | "uploaded";
 }
 
 /**
@@ -118,7 +120,8 @@ export async function insertAsset(
       sequencePlan: input.sequencePlan ?? null,
       usage: input.usage ?? null,
       elapsedSeconds: input.elapsedSeconds ?? null,
-      expiresAt: input.expiresAt ?? null
+      expiresAt: input.expiresAt ?? null,
+      origin: input.origin ?? "generated"
     })
     .returning();
 

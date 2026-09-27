@@ -151,6 +151,8 @@ interface ServerState {
   deleteProject: (projectId: string) => Promise<void>;
 
   refreshAssets: () => Promise<void>;
+  /** Uploads a person's own images, into `folderId` ("" for no folder). */
+  uploadImages: (files: File[], folderId: string) => Promise<void>;
   refreshJobs: () => Promise<void>;
   refreshTemplates: () => Promise<void>;
   refreshPalettes: () => Promise<void>;
@@ -489,6 +491,41 @@ export const useServer = create<ServerState>((set, get) => {
         batches: batchesByJobId(get().jobs),
         jobs: get().jobs
       });
+    },
+
+    async uploadImages(files, folderId) {
+      const images = files.filter((file) => file.type.startsWith("image/"));
+      if (images.length === 0) return;
+
+      const form = new FormData();
+      for (const file of images) form.append("files", file);
+
+      useUi.getState().setBusy("uploading");
+      try {
+        const { assetIds, skipped } = await projectApi<{ assetIds: string[]; skipped: string[] }>(
+          projectId(),
+          "/assets/upload",
+          { method: "POST", body: form }
+        );
+
+        // Seeds each new image's editable half, which moveToFolder writes to.
+        await get().refreshAssets();
+        if (folderId && assetIds.length > 0) useDoc.getState().moveToFolder(assetIds, folderId);
+
+        useUi
+          .getState()
+          .setNotice(
+            [
+              `uploaded ${assetIds.length} image${assetIds.length === 1 ? "" : "s"}`,
+              ...skipped
+            ].join(" · ")
+          );
+        if (assetIds.length > 0) useUi.getState().selectMany(assetIds);
+      } catch (error) {
+        fail(error);
+      } finally {
+        useUi.getState().setBusy(null);
+      }
     },
 
     async refreshJobs() {

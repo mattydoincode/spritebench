@@ -10,6 +10,7 @@ function asset(id: string, sequences: Sequence[]): ResolvedAsset {
     seq: 1,
     createdAt: "",
     createdByUserId: null,
+    origin: "generated",
     sourceWidth: 64,
     sourceHeight: 64,
     prompt: { prefix: "", body: "", suffix: "" },

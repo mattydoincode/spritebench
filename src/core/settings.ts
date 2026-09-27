@@ -89,6 +89,19 @@ export const DEFAULT_PROCESSING: ProcessingSettings = {
   distanceMode: "oklab"
 };
 
+/**
+ * For an image a person uploads: taken as-is. No background cutout, trim,
+ * alpha snapping or pixel-art downsample -- an artist's final should arrive
+ * untouched. Every step can still be switched on in the inspector.
+ */
+export const UPLOAD_PROCESSING: ProcessingSettings = {
+  ...DEFAULT_PROCESSING,
+  cutout: "none",
+  trimToContent: false,
+  snapAlpha: false,
+  downsample: false
+};
+
 export function withDefaults(partial?: Partial<ProcessingSettings> | null): ProcessingSettings {
   const from = partial ?? {};
   const merged = { ...DEFAULT_PROCESSING, ...from };
