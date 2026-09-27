@@ -386,7 +386,7 @@ export function InspectorPanel() {
         />
       ) : null}
 
-      <Section id="inspector.size" label="size">
+      <Section id="inspector.size" label="pixel art">
         <DownsampleControls processing={processing} onChange={update} />
       </Section>
 

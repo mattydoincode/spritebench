@@ -1011,7 +1011,7 @@ export function GeneratePanel() {
         <ItemGridMode />
       </Section>
 
-      <Section id="generate.size" label="size">
+      <Section id="generate.size" label="pixel art">
         <DownsampleControls
           processing={processing}
           onChange={(patch) => store().setDefaultProcessing(patch)}
