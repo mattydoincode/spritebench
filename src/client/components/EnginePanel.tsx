@@ -10,6 +10,12 @@ import { describeSlotActivity } from "@/shared/assignStream";
 import { faceId, setBadge } from "@/shared/assetSet";
 import { describeShipment } from "@/shared/engineBundle";
 import {
+  ENGINE_LANES,
+  laneAssetIds,
+  laneFingerprintKey,
+  laneKey,
+  laneRemoteHash,
+  parseLaneKey,
   type EngineSlotIntent,
   type EngineSlotRecord,
   type EngineSlotStatus
@@ -20,7 +26,7 @@ import type { SlotEdit } from "@/shared/slotEdits";
 import { AssetThumb } from "./AssetBitmap";
 import { EngineCollections } from "./EngineCollections";
 import { LeftTabs } from "./LeftTabs";
-import { Button, Panel, Skeleton, TextButton } from "./ui";
+import { Button, Panel, PanelTab, Skeleton, TextButton } from "./ui";
 
 const STATUS_LABEL: Record<EngineSlotStatus, string> = {
   empty: "empty",
@@ -63,7 +69,8 @@ function AssignedList({
 }) {
   const [open, setOpen] = useState(false);
   const thumb = useUi((state) => state.engineThumbSize);
-  const ids = slot.assignedAssetIds;
+  const lane = useUi((state) => state.gameAssetLane);
+  const ids = laneAssetIds(slot, lane);
   const array = slot.intent === "textures";
 
   const byId = new Map(assets.map((asset) => [asset.id, asset]));
@@ -74,7 +81,11 @@ function AssignedList({
 
   const summary =
     ids.length === 0
-      ? `no art assigned · will ship ${INTENT_LABEL[slot.intent ?? "texture"]}`
+      ? lane === "final"
+        ? slot.assignedAssetIds.length > 0
+          ? "no final yet · the prototype ships until there is one"
+          : "no final yet"
+        : `no prototype assigned · will ship ${INTENT_LABEL[slot.intent ?? "texture"]}`
       : ids.length === 1
         ? `assigned ${assignedLabel(byId.get(ids[0]), ids[0].slice(0, 8))} · ${shipment}`
         : `assigned ${ids.length} assets · ${shipment}`;
@@ -194,16 +205,23 @@ function useChangedSlots(slots: EngineSlotRecord[], canEdit: boolean): string[] 
   const docReady = useDoc((state) => state.ready);
   const loaded = useProjectLoaded();
 
+  // Every (slot, lane) with exported art: both lanes can fall behind.
   const live = useMemo(
-    () => slots.filter((slot) => slot.remoteHash && slot.assignedAssetIds.length > 0),
+    () =>
+      slots.flatMap((slot) =>
+        ENGINE_LANES.filter(
+          (lane) => laneRemoteHash(slot, lane) && laneAssetIds(slot, lane).length > 0
+        ).map((lane) => ({ slot, lane, ids: laneAssetIds(slot, lane) }))
+      ),
     [slots]
   );
 
   useEffect(() => {
     if (!canEdit || !docReady || !loaded) return;
-    for (const slot of live) {
-      if (exported[slot.id] === undefined) {
-        useDoc.getState().setSlotExport(slot.id, slotExportFingerprint(slot.assignedAssetIds, edits));
+    for (const { slot, lane, ids } of live) {
+      const key = laneFingerprintKey(slot.id, lane);
+      if (exported[key] === undefined) {
+        useDoc.getState().setSlotExport(key, slotExportFingerprint(ids, edits));
       }
     }
   }, [canEdit, docReady, edits, exported, live, loaded]);
@@ -211,11 +229,11 @@ function useChangedSlots(slots: EngineSlotRecord[], canEdit: boolean): string[] 
   return useMemo(
     () =>
       live
-        .filter((slot) => {
-          const recorded = exported[slot.id];
-          return recorded !== undefined && recorded !== slotExportFingerprint(slot.assignedAssetIds, edits);
+        .filter(({ slot, lane, ids }) => {
+          const recorded = exported[laneFingerprintKey(slot.id, lane)];
+          return recorded !== undefined && recorded !== slotExportFingerprint(ids, edits);
         })
-        .map((slot) => slot.id),
+        .map(({ slot, lane }) => laneKey(slot.id, lane)),
     [edits, exported, live]
   );
 }
@@ -234,9 +252,9 @@ function SyncBanner({ changed, canEdit }: { changed: string[]; canEdit: boolean 
 
     const server = useServer.getState();
     void Promise.all(
-      ids.map((id) =>
+      ids.map((key) =>
         server
-          .editSlot(id, { type: "refresh" })
+          .editSlot(parseLaneKey(key).slotId, { type: "refresh" }, parseLaneKey(key).lane)
           .finally(() => setRun((current) => (current ? { ...current, done: current.done + 1 } : current)))
       )
     ).finally(() => setRun(null));
@@ -304,7 +322,9 @@ function SlotRow({
   const queued = useUi((state) => state.assignQueued[slot.id] ?? 0);
   const active = Boolean(assigning) || queued > 0;
   const [dragOver, setDragOver] = useState(false);
-  const lit = slot.assignedAssetIds.some((id) => highlight.has(id));
+  const lane = useUi((state) => state.gameAssetLane);
+  const ids = laneAssetIds(slot, lane);
+  const lit = ids.some((id) => highlight.has(id));
 
   const accept = (event: DragEvent) => canEdit && isAssetDrag(event);
 
@@ -345,18 +365,28 @@ function SlotRow({
         <button
           type="button"
           title={
-            slot.assignedAssetIds.length > 0
+            ids.length > 0
               ? "Select this slot's art in the library"
               : "Drag library assets here to assign them"
           }
           onClick={() => {
-            if (slot.assignedAssetIds.length > 0) {
-              useUi.getState().selectMany([...slot.assignedAssetIds]);
+            if (ids.length > 0) {
+              useUi.getState().selectMany(ids);
             }
           }}
           className="min-w-0 text-left"
         >
-          <p className="truncate text-[12px] text-slate-200">{slot.label}</p>
+          <p className="truncate text-[12px] text-slate-200">
+            {slot.label}
+            {slot.finalAssetIds.length > 0 ? (
+              <span
+                title="This slot has final art"
+                className="ml-1.5 rounded bg-emerald-900/50 px-1 align-middle text-[9px] text-emerald-200"
+              >
+                final
+              </span>
+            ) : null}
+          </p>
           <p className="truncate font-mono text-[10px] text-slate-500">
             {INTENT_LABEL[slot.intent ?? "texture"]} · {slot.godotPath || slot.id}
           </p>
@@ -377,11 +407,11 @@ function SlotRow({
         >
           {active ? describeSlotActivity(assigning, queued) : changed ? "changed" : STATUS_LABEL[slot.status]}
         </span>
-        {canEdit && !active && slot.assignedAssetIds.length > 0 ? (
+        {canEdit && !active && ids.length > 0 ? (
           <TextButton
             className="shrink-0"
             title="Render this slot's images again from their current edits and send them to Godot"
-            onClick={() => void useServer.getState().syncSlots([slot.id])}
+            onClick={() => void useServer.getState().syncSlots([laneKey(slot.id, lane)])}
           >
             resend
           </TextButton>
@@ -457,6 +487,8 @@ export function EnginePanel() {
   const slots = allSlots.filter((slot) => slot.kind !== "record_field");
   const changed = useChangedSlots(allSlots, Boolean(canEdit));
   const changedSet = new Set(changed);
+  const lane = useUi((state) => state.gameAssetLane);
+  const gameLane = useServer((state) => state.gameLane);
 
   return (
     <Panel tabs={<LeftTabs />}>
@@ -475,6 +507,33 @@ export function EnginePanel() {
           <span className="font-mono select-all">{project?.id}</span>
         </p>
       ) : null}
+
+      {/* Which lane you are looking at and assigning to; the game picks its own. */}
+      <div className="mb-2 flex h-7 items-stretch gap-4 border-b border-[var(--color-edge)]">
+        <div role="tablist" aria-label="Art lane" className="flex items-stretch gap-4">
+          <PanelTab
+            size="section"
+            selected={lane === "prototype"}
+            onClick={() => useUi.getState().setGameAssetLane("prototype")}
+          >
+            Prototype
+          </PanelTab>
+          <PanelTab
+            size="section"
+            selected={lane === "final"}
+            onClick={() => useUi.getState().setGameAssetLane("final")}
+          >
+            Final
+          </PanelTab>
+        </div>
+        <span className="flex-1" />
+        <span
+          className="self-center text-[10px] text-slate-500"
+          title="Set in Godot: Project Settings → SpriteBench → Art"
+        >
+          {gameLane === "final" ? "game uses finals, else prototypes" : "game uses prototypes"}
+        </span>
+      </div>
 
       <SyncBanner changed={changed} canEdit={Boolean(canEdit)} />
 
@@ -523,7 +582,7 @@ export function EnginePanel() {
             <SlotRow
               key={slot.id}
               slot={slot}
-              changed={changedSet.has(slot.id)}
+              changed={changedSet.has(laneKey(slot.id, lane))}
               highlight={highlight}
               canEdit={Boolean(canEdit)}
               assets={assets}

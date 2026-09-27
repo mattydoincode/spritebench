@@ -2,6 +2,7 @@ import { applyPipeline } from "@/core/pipeline";
 import type { ProcessingSettings } from "@/core/settings";
 import { getAssetRow, listAssets, toAssetRecord } from "@/db/repo/assets";
 import { readDoc } from "@/db/repo/projectDoc";
+import { laneAssetIds, laneRemoteHash, laneStorageId } from "@/shared/engineSlot";
 import { hashExportBytes } from "@/server/apiToken";
 import { ApproveError, approveAsset } from "@/server/approve";
 import { loadPalette } from "@/server/palettes";
@@ -121,21 +122,36 @@ export async function exportSlotAssignment(
   return exported;
 }
 
-/** Sign the files assign already wrote. Re-render only if they are gone. */
+/**
+ * Sign the files assign already wrote, for the lane Godot is served. Re-render
+ * only if they are gone. Each lane's files live under their own storage id,
+ * so the export helpers below never need to know which lane they serve.
+ */
 export async function slotExportForPull(
   projectId: string,
-  slot: Pick<EngineSlotRecord, "id" | "assignedAssetIds" | "intent" | "remoteHash">
+  slot: Pick<
+    EngineSlotRecord,
+    "id" | "assignedAssetIds" | "finalAssetIds" | "intent" | "remoteHash" | "finalRemoteHash" | "lane"
+  >
 ): Promise<SlotExport> {
-  const cached = await readSlotExport(projectId, slot.id);
-  if (cached && (!slot.remoteHash || cached.remoteHash === slot.remoteHash)) {
+  const storageId = laneStorageId(slot.id, slot.lane);
+  const view = {
+    id: storageId,
+    assignedAssetIds: laneAssetIds(slot, slot.lane),
+    intent: slot.intent,
+    remoteHash: laneRemoteHash(slot, slot.lane)
+  };
+
+  const cached = await readSlotExport(projectId, storageId);
+  if (cached && (!view.remoteHash || cached.remoteHash === view.remoteHash)) {
     return cached;
   }
-  const recovered = await recoverSlotExport(projectId, slot);
+  const recovered = await recoverSlotExport(projectId, view);
   if (recovered) {
-    await persistSlotExport(projectId, slot.id, recovered);
+    await persistSlotExport(projectId, storageId, recovered);
     return recovered;
   }
-  return exportSlotAssignment(projectId, slot.id, slot.assignedAssetIds, slot.intent);
+  return exportSlotAssignment(projectId, storageId, view.assignedAssetIds, view.intent);
 }
 
 export async function persistSlotExport(

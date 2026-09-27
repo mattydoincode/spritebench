@@ -4,6 +4,15 @@ export type EngineSlotKind = (typeof ENGINE_SLOT_KINDS)[number];
 export const ENGINE_SLOT_INTENTS = ["texture", "sprite_frames", "textures"] as const;
 export type EngineSlotIntent = (typeof ENGINE_SLOT_INTENTS)[number];
 
+/**
+ * Every slot holds two sets of art: the AI prototype and the artist's final.
+ * SpriteBench stores both; the game decides which it pulls (a project-wide
+ * plugin setting), taking a slot's final when it has one and falling back to
+ * its prototype otherwise.
+ */
+export const ENGINE_LANES = ["prototype", "final"] as const;
+export type EngineLane = (typeof ENGINE_LANES)[number];
+
 export const ENGINE_SLOT_STATUSES = [
   "empty",
   "in_sync",
@@ -19,10 +28,18 @@ export interface EngineSlotRecord {
   intent: EngineSlotIntent;
   label: string;
   godotPath: string;
+  /** The prototype lane's art. */
   assignedAssetIds: string[];
+  /** The final lane's art. */
+  finalAssetIds: string[];
   localHash: string | null;
   lastPushedHash: string | null;
+  /** Export hash of the prototype lane. */
   remoteHash: string | null;
+  /** Export hash of the final lane. */
+  finalRemoteHash: string | null;
+  /** The lane Godot is pulling for this slot; `status` is measured against it. */
+  lane: EngineLane;
   status: EngineSlotStatus;
   lastSeenAt: string;
   tombstonedAt: string | null;
@@ -114,4 +131,49 @@ export function deriveSlotStatus(input: {
   if (localMatchesLast && !remoteMatchesLast) return "pull_available";
   if (!localMatchesLast && remoteMatchesLast) return "edited_in_godot";
   return "conflict";
+}
+
+/** The lane Godot gets: final where the slot has one, when the game wants finals. */
+export function servedLane(
+  slot: { finalAssetIds: readonly string[] },
+  gameLane: EngineLane
+): EngineLane {
+  return gameLane === "final" && slot.finalAssetIds.length > 0 ? "final" : "prototype";
+}
+
+export function laneAssetIds(
+  slot: { assignedAssetIds: readonly string[]; finalAssetIds: readonly string[] },
+  lane: EngineLane
+): string[] {
+  return [...(lane === "final" ? slot.finalAssetIds : slot.assignedAssetIds)];
+}
+
+export function laneRemoteHash(
+  slot: { remoteHash: string | null; finalRemoteHash: string | null },
+  lane: EngineLane
+): string | null {
+  return lane === "final" ? slot.finalRemoteHash : slot.remoteHash;
+}
+
+/** Where a lane's exported files live, so the two lanes never overwrite each other. */
+export function laneStorageId(slotId: string, lane: EngineLane): string {
+  return lane === "final" ? `${slotId}-final` : slotId;
+}
+
+/** A (slot, lane) pair as one string: the edit queue's key and the sync banner's item. */
+export function laneKey(slotId: string, lane: EngineLane): string {
+  return `${slotId}|${lane}`;
+}
+
+export function parseLaneKey(key: string): { slotId: string; lane: EngineLane } {
+  const [slotId, lane] = key.split("|");
+  return { slotId, lane: lane === "final" ? "final" : "prototype" };
+}
+
+/**
+ * Where a lane's export fingerprint is recorded. The prototype lane keeps the
+ * bare slot id it always had.
+ */
+export function laneFingerprintKey(slotId: string, lane: EngineLane): string {
+  return lane === "final" ? `${slotId}|final` : slotId;
 }

@@ -574,8 +574,12 @@ export function LibraryPanel() {
   const godotSlots = useMemo(() => {
     const byAsset = new Map<string, string[]>();
     for (const slot of slots) {
+      // Either lane: an image is "in Godot" as a prototype or as a final.
       for (const id of slot.assignedAssetIds) {
-        byAsset.set(id, [...(byAsset.get(id) ?? []), slot.label || "a slot"]);
+        byAsset.set(id, [...(byAsset.get(id) ?? []), `${slot.label || "a slot"} (prototype)`]);
+      }
+      for (const id of slot.finalAssetIds) {
+        byAsset.set(id, [...(byAsset.get(id) ?? []), `${slot.label || "a slot"} (final)`]);
       }
     }
     return byAsset;

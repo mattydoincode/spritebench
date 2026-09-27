@@ -137,6 +137,8 @@ export const projects = pgTable("projects", {
   keyDefaults: jsonb("key_defaults").$type<Record<string, string>>().notNull().default({}),
   /** Last time the Godot plugin synced its catalog here. Null: never, so the studio offers the plugin. */
   engineSyncedAt: timestamp("engine_synced_at", { withTimezone: true }),
+  /** Which lane the game pulls, as the Godot plugin last reported. */
+  engineLane: text("engine_lane").$type<"prototype" | "final">().notNull().default("final"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp("deleted_at", { withTimezone: true })
 }, (table) => [index("projects_owner_idx").on(table.ownerUserId)]);
@@ -451,10 +453,14 @@ export const engineSlots = pgTable("engine_slots", {
   intent: text("intent").$type<EngineSlotIntent>().notNull().default("texture"),
   label: text("label").notNull(),
   godotPath: text("godot_path").notNull().default(""),
+  /** The prototype lane. */
   assignedAssetIds: jsonb("assigned_asset_ids").$type<string[]>().notNull().default([]),
+  /** The final lane: an artist's finished art for this slot. */
+  finalAssetIds: jsonb("final_asset_ids").$type<string[]>().notNull().default([]),
   localHash: text("local_hash"),
   lastPushedHash: text("last_pushed_hash"),
   remoteHash: text("remote_hash"),
+  finalRemoteHash: text("final_remote_hash"),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
   tombstonedAt: timestamp("tombstoned_at", { withTimezone: true }),
   /** Set for `record_field` slots: which record and which of its fields. */

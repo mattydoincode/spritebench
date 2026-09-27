@@ -4,7 +4,14 @@ import {
   dropSlotAssignment,
   mergeSlotAssignment,
   moveSlotAssignment,
-  replaceSlotAssignment
+  replaceSlotAssignment,
+  laneAssetIds,
+  laneFingerprintKey,
+  laneKey,
+  laneRemoteHash,
+  laneStorageId,
+  parseLaneKey,
+  servedLane
 } from "@/shared/engineSlot";
 import { hashApiToken, mintApiToken } from "@/server/apiToken";
 
@@ -150,5 +157,33 @@ describe("moveSlotAssignment", () => {
   it("clamps at the ends and ignores bad indexes", () => {
     expect(moveSlotAssignment(["a", "b"], 0, -1)).toEqual(["a", "b"]);
     expect(moveSlotAssignment(["a", "b"], 5, 1)).toEqual(["a", "b"]);
+  });
+});
+
+describe("prototype and final lanes", () => {
+  const slot = {
+    assignedAssetIds: ["p"],
+    finalAssetIds: ["f"],
+    remoteHash: "proto-hash",
+    finalRemoteHash: "final-hash"
+  };
+
+  it("serves the final when the game wants finals and the slot has one", () => {
+    expect(servedLane(slot, "final")).toBe("final");
+    expect(servedLane({ finalAssetIds: [] }, "final")).toBe("prototype");
+    expect(servedLane(slot, "prototype")).toBe("prototype");
+  });
+
+  it("reads each lane's art and hash, and keeps their files apart", () => {
+    expect(laneAssetIds(slot, "final")).toEqual(["f"]);
+    expect(laneAssetIds(slot, "prototype")).toEqual(["p"]);
+    expect(laneRemoteHash(slot, "final")).toBe("final-hash");
+    expect(laneStorageId("abc", "final")).toBe("abc-final");
+    expect(laneStorageId("abc", "prototype")).toBe("abc");
+  });
+
+  it("round-trips a lane key", () => {
+    expect(parseLaneKey(laneKey("abc", "final"))).toEqual({ slotId: "abc", lane: "final" });
+    expect(laneFingerprintKey("abc", "prototype")).toBe("abc");
   });
 });

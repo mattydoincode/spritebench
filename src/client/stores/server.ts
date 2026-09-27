@@ -34,7 +34,15 @@ import {
   consumeAssignEvents,
   emptyAssignProgress
 } from "@/shared/assignStream";
-import type { EngineSlotRecord } from "@/shared/engineSlot";
+import {
+  laneAssetIds,
+  laneFingerprintKey,
+  laneKey,
+  laneRemoteHash,
+  parseLaneKey,
+  type EngineLane,
+  type EngineSlotRecord
+} from "@/shared/engineSlot";
 import { applySlotEdits, sameAssignment, type SlotEdit } from "@/shared/slotEdits";
 import { slotExportFingerprint } from "@/shared/exportFingerprint";
 import { createSlotQueue } from "@/client/slotQueue";
@@ -136,6 +144,8 @@ interface ServerState {
   collections: EngineCollectionView[];
   /** When the Godot plugin last synced this project; null means never. */
   engineSyncedAt: string | null;
+  /** Which lane the game pulls, as the plugin last reported. */
+  gameLane: EngineLane;
 
   loadProjects: () => Promise<ProjectSummary[]>;
   /**
@@ -201,10 +211,11 @@ interface ServerState {
     assetIds: string[],
     options?: { replace?: boolean }
   ) => Promise<void>;
-  /** Re-exports these slots with their images' current edits. */
-  syncSlots: (slotIds: string[]) => Promise<void>;
+  /** Re-exports these (slot, lane) keys -- see `laneKey` -- with their images' current edits. */
+  syncSlots: (keys: string[]) => Promise<void>;
   /** Queues an edit; slots export in parallel, edits to one slot in order. */
-  editSlot: (slotId: string, edit: SlotEdit) => Promise<void>;
+  /** Queues an edit to one lane of a slot; the lane you are viewing unless given. */
+  editSlot: (slotId: string, edit: SlotEdit, lane?: EngineLane) => Promise<void>;
   createRecord: (collectionId: string, key: string, copyFrom?: string) => Promise<void>;
   renameRecord: (collectionId: string, recordId: string, key: string) => Promise<void>;
   deleteRecord: (collectionId: string, recordId: string) => Promise<void>;
@@ -241,13 +252,16 @@ export const useServer = create<ServerState>((set, get) => {
     useUi.getState().setError(error instanceof Error ? error.message : String(error));
   };
 
-  const runSlotEdits = async (slotId: string, edits: SlotEdit[]): Promise<void> => {
+  // Each (slot, lane) is its own queue lane: prototype and final edits to the
+  // same slot export independently.
+  const runSlotEdits = async (key: string, edits: SlotEdit[]): Promise<void> => {
+    const { slotId, lane } = parseLaneKey(key);
     const current = get().slots.find((entry) => entry.id === slotId);
     if (!current) return;
-    const existing = current.assignedAssetIds ?? [];
+    const existing = laneAssetIds(current, lane);
     const assetIds = applySlotEdits(current.intent ?? "texture", existing, edits);
     const refresh = edits.some((edit) => edit.type === "refresh");
-    if (!refresh && sameAssignment(assetIds, existing) && current.remoteHash) return;
+    if (!refresh && sameAssignment(assetIds, existing) && laneRemoteHash(current, lane)) return;
     // What these images look like as of this export, so the Godot panel can
     // flag the slot once they are edited again.
     const fingerprint = slotExportFingerprint(assetIds, useDoc.getState().edits);
@@ -263,7 +277,7 @@ export const useServer = create<ServerState>((set, get) => {
       const response = await fetch(`/api/v1/projects/${projectId()}/slots/${slotId}/assign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assetIds, replace: true })
+        body: JSON.stringify({ assetIds, replace: true, lane })
       });
       await rejectIfNotOk(response);
       if (!response.body) throw new Error("assign stream missing body");
@@ -276,7 +290,7 @@ export const useServer = create<ServerState>((set, get) => {
       set({
         slots: get().slots.map((entry) => (entry.id === slot.id ? slot : entry))
       });
-      useDoc.getState().setSlotExport(slot.id, fingerprint);
+      useDoc.getState().setSlotExport(laneFingerprintKey(slot.id, lane), fingerprint);
       void get().refreshAssets();
     } catch (error) {
       fail(error);
@@ -286,8 +300,8 @@ export const useServer = create<ServerState>((set, get) => {
     }
   };
 
-  const slotQueue = createSlotQueue<SlotEdit>(runSlotEdits, (slotId, queued) =>
-    useUi.getState().setAssignQueued(slotId, queued)
+  const slotQueue = createSlotQueue<SlotEdit>(runSlotEdits, (key, queued) =>
+    useUi.getState().setAssignQueued(parseLaneKey(key).slotId, queued)
   );
 
   // Your own keys changed. On a project you own they are also the keys it
@@ -326,6 +340,7 @@ export const useServer = create<ServerState>((set, get) => {
     slots: [],
     collections: [],
     engineSyncedAt: null,
+    gameLane: "final",
 
     async loadProjects() {
       try {
@@ -397,10 +412,12 @@ export const useServer = create<ServerState>((set, get) => {
             slots: EngineSlotRecord[];
             collections?: EngineCollectionView[];
             engineSyncedAt?: string | null;
+            gameLane?: EngineLane;
           }>(`/api/v1/projects/${id}/slots`).catch(() => ({
             slots: [] as EngineSlotRecord[],
             collections: [] as EngineCollectionView[],
-            engineSyncedAt: null
+            engineSyncedAt: null,
+            gameLane: "final" as EngineLane
           }))
         ]);
 
@@ -414,7 +431,8 @@ export const useServer = create<ServerState>((set, get) => {
           templates: templatesRes.templates,
           slots: slotsRes.slots,
           collections: slotsRes.collections ?? [],
-          engineSyncedAt: slotsRes.engineSyncedAt ?? null
+          engineSyncedAt: slotsRes.engineSyncedAt ?? null,
+          gameLane: slotsRes.gameLane ?? "final"
         });
 
         useDoc.getState().backfill(assetsRes.assets, {
@@ -1212,12 +1230,18 @@ export const useServer = create<ServerState>((set, get) => {
 
     async refreshSlots() {
       try {
-        const { slots, collections, engineSyncedAt } = await api<{
+        const { slots, collections, engineSyncedAt, gameLane } = await api<{
           slots: EngineSlotRecord[];
           collections?: EngineCollectionView[];
           engineSyncedAt?: string | null;
+          gameLane?: EngineLane;
         }>(`/api/v1/projects/${projectId()}/slots`);
-        set({ slots, collections: collections ?? [], engineSyncedAt: engineSyncedAt ?? null });
+        set({
+          slots,
+          collections: collections ?? [],
+          engineSyncedAt: engineSyncedAt ?? null,
+          gameLane: gameLane ?? "final"
+        });
       } catch {
         // Polling is best effort; the next tick recovers.
       }
@@ -1230,12 +1254,12 @@ export const useServer = create<ServerState>((set, get) => {
       });
     },
 
-    editSlot(slotId, edit) {
-      return slotQueue.enqueue(slotId, edit);
+    editSlot(slotId, edit, lane = useUi.getState().gameAssetLane) {
+      return slotQueue.enqueue(laneKey(slotId, lane), edit);
     },
 
-    syncSlots(slotIds) {
-      return Promise.all(slotIds.map((id) => slotQueue.enqueue(id, { type: "refresh" }))).then(
+    syncSlots(keys) {
+      return Promise.all(keys.map((key) => slotQueue.enqueue(key, { type: "refresh" }))).then(
         () => undefined
       );
     },

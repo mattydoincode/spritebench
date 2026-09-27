@@ -1,12 +1,15 @@
 import { and, asc, eq, isNull, ne, notInArray } from "drizzle-orm";
 import {
   deriveSlotStatus,
+  laneRemoteHash,
+  servedLane,
+  type EngineLane,
   type EngineSlotIntent,
   type EngineSlotKind,
   type EngineSlotRecord
 } from "@/shared/engineSlot";
 import { db } from "../index";
-import { engineSlots, type EngineSlotRow } from "../schema";
+import { engineSlots, projects, type EngineSlotRow } from "../schema";
 import { syncCatalogCollections, type CatalogCollection } from "./engineCollections";
 
 export interface CatalogSlot {
@@ -23,7 +26,24 @@ function normalizeIntent(kind: EngineSlotKind, intent?: EngineSlotIntent | null)
   return intent ?? "texture";
 }
 
-function toRecord(row: EngineSlotRow): EngineSlotRecord {
+/** Which lane the game pulls, as the plugin last reported. */
+export async function gameLane(projectId: string): Promise<EngineLane> {
+  const [row] = await db()
+    .select({ lane: projects.engineLane })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  return row?.lane === "prototype" ? "prototype" : "final";
+}
+
+export async function setGameLane(projectId: string, lane: EngineLane): Promise<void> {
+  await db().update(projects).set({ engineLane: lane }).where(eq(projects.id, projectId));
+}
+
+function toRecord(row: EngineSlotRow, game: EngineLane): EngineSlotRecord {
+  const finalAssetIds = row.finalAssetIds ?? [];
+  const lane = servedLane({ finalAssetIds }, game);
+  const remoteHash = laneRemoteHash(row, lane);
+
   return {
     id: row.id,
     kind: row.kind,
@@ -31,10 +51,14 @@ function toRecord(row: EngineSlotRow): EngineSlotRecord {
     label: row.label,
     godotPath: row.godotPath,
     assignedAssetIds: row.assignedAssetIds ?? [],
+    finalAssetIds,
     localHash: row.localHash,
     lastPushedHash: row.lastPushedHash,
     remoteHash: row.remoteHash,
-    status: deriveSlotStatus(row),
+    finalRemoteHash: row.finalRemoteHash,
+    lane,
+    // Measured against what Godot is actually served for this slot.
+    status: deriveSlotStatus({ ...row, remoteHash }),
     lastSeenAt: row.lastSeenAt.toISOString(),
     tombstonedAt: row.tombstonedAt?.toISOString() ?? null,
     recordId: row.recordId ?? null,
@@ -46,17 +70,20 @@ export async function listEngineSlots(
   projectId: string,
   options: { includeTombstoned?: boolean } = {}
 ): Promise<EngineSlotRecord[]> {
-  const rows = await db()
-    .select()
-    .from(engineSlots)
-    .where(
-      options.includeTombstoned
-        ? eq(engineSlots.projectId, projectId)
-        : and(eq(engineSlots.projectId, projectId), isNull(engineSlots.tombstonedAt))
-    )
-    .orderBy(asc(engineSlots.label), asc(engineSlots.id));
+  const [rows, game] = await Promise.all([
+    db()
+      .select()
+      .from(engineSlots)
+      .where(
+        options.includeTombstoned
+          ? eq(engineSlots.projectId, projectId)
+          : and(eq(engineSlots.projectId, projectId), isNull(engineSlots.tombstonedAt))
+      )
+      .orderBy(asc(engineSlots.label), asc(engineSlots.id)),
+    gameLane(projectId)
+  ]);
 
-  return rows.map(toRecord);
+  return rows.map((row) => toRecord(row, game));
 }
 
 export async function getEngineSlot(
@@ -88,12 +115,15 @@ export async function upsertCatalog(
 ): Promise<EngineSlotRecord[]> {
   const now = new Date();
   const ids = slots.map((slot) => slot.id);
+  const game = await gameLane(projectId);
 
   await db().transaction(async (tx) => {
     for (const slot of slots) {
       const [existing] = await tx
         .select({
           remoteHash: engineSlots.remoteHash,
+          finalRemoteHash: engineSlots.finalRemoteHash,
+          finalAssetIds: engineSlots.finalAssetIds,
           lastPushedHash: engineSlots.lastPushedHash,
           intent: engineSlots.intent
         })
@@ -103,9 +133,13 @@ export async function upsertCatalog(
 
       const intent = normalizeIntent(slot.kind, slot.intent);
       const intentChanged = Boolean(existing && (existing.intent ?? "texture") !== intent);
+      // Compared with the lane Godot is served, not always the prototype.
+      const served = existing
+        ? laneRemoteHash(existing, servedLane({ finalAssetIds: existing.finalAssetIds ?? [] }, game))
+        : null;
       const synced = intentChanged
         ? null
-        : slot.localHash && existing?.remoteHash && slot.localHash === existing.remoteHash
+        : slot.localHash && served && slot.localHash === served
           ? slot.localHash
           : (existing?.lastPushedHash ?? null);
 
@@ -164,29 +198,35 @@ export async function assignEngineSlot(
   projectId: string,
   slotId: string,
   assetIds: string[],
-  remoteHash: string | null
+  remoteHash: string | null,
+  lane: EngineLane = "prototype"
 ): Promise<EngineSlotRecord | null> {
   const [row] = await db()
     .update(engineSlots)
     .set({
-      assignedAssetIds: assetIds,
-      remoteHash,
+      ...(lane === "final"
+        ? { finalAssetIds: assetIds, finalRemoteHash: remoteHash }
+        : { assignedAssetIds: assetIds, remoteHash }),
       tombstonedAt: null,
       updatedAt: new Date()
     })
     .where(and(eq(engineSlots.projectId, projectId), eq(engineSlots.id, slotId)))
     .returning();
 
-  return row ? toRecord(row) : null;
+  return row ? toRecord(row, await gameLane(projectId)) : null;
 }
 
 export async function setSlotRemoteHash(
   projectId: string,
   slotId: string,
-  remoteHash: string
+  remoteHash: string,
+  lane: EngineLane = "prototype"
 ): Promise<void> {
   await db()
     .update(engineSlots)
-    .set({ remoteHash, updatedAt: new Date() })
+    .set({
+      ...(lane === "final" ? { finalRemoteHash: remoteHash } : { remoteHash }),
+      updatedAt: new Date()
+    })
     .where(and(eq(engineSlots.projectId, projectId), eq(engineSlots.id, slotId)));
 }

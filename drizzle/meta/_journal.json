@@ -71,6 +71,13 @@
       "when": 1791158400000,
       "tag": "0009_asset_origin",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791244800000,
+      "tag": "0010_final_lane",
+      "breakpoints": true
     }
   ]
 }

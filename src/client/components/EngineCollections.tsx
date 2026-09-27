@@ -10,7 +10,7 @@ import type {
   EngineCollectionView,
   EngineRecordView
 } from "@/shared/engineCollection";
-import type { EngineSlotRecord, EngineSlotStatus } from "@/shared/engineSlot";
+import { laneAssetIds, type EngineSlotRecord, type EngineSlotStatus } from "@/shared/engineSlot";
 import type { ResolvedAsset } from "@/shared/model";
 import { AssetThumb } from "./AssetBitmap";
 import { Button, TextButton } from "./ui";
@@ -42,7 +42,8 @@ function FieldCell({
   const active = Boolean(assigning) || queued > 0;
   const [dragOver, setDragOver] = useState(false);
   const array = field.intent === "textures";
-  const ids = slot?.assignedAssetIds ?? [];
+  const lane = useUi((state) => state.gameAssetLane);
+  const ids = slot ? laneAssetIds(slot, lane) : [];
   const first = ids.length > 0 ? assets.get(ids[0]) : undefined;
   const status = slot?.status ?? "empty";
 

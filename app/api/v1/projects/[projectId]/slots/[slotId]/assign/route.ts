@@ -10,7 +10,7 @@ import {
   encodeAssignEvent,
   type AssignStreamEvent
 } from "@/shared/assignStream";
-import { mergeSlotAssignment, replaceSlotAssignment } from "@/shared/engineSlot";
+import { laneStorageId, mergeSlotAssignment, replaceSlotAssignment } from "@/shared/engineSlot";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -29,9 +29,11 @@ export async function POST(request: Request, { params }: Params) {
     }
 
     const intent = existing.intent ?? "texture";
+    const lane = body.lane;
+    const current = (lane === "final" ? existing.finalAssetIds : existing.assignedAssetIds) ?? [];
     const assetIds = body.replace
       ? replaceSlotAssignment(intent, body.assetIds)
-      : mergeSlotAssignment(intent, existing.assignedAssetIds ?? [], body.assetIds);
+      : mergeSlotAssignment(intent, current, body.assetIds);
 
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
     const writer = writable.getWriter();
@@ -46,7 +48,7 @@ export async function POST(request: Request, { params }: Params) {
       try {
         await send({ type: "plan", assetIds });
         if (assetIds.length === 0 && intent !== "textures") {
-          const slot = await assignEngineSlot(projectId, slotId, [], null);
+          const slot = await assignEngineSlot(projectId, slotId, [], null, lane);
           if (!slot) {
             await send({ type: "error", error: "slot not found" });
             return;
@@ -56,12 +58,12 @@ export async function POST(request: Request, { params }: Params) {
         }
         const exported = await exportSlotAssignment(
           projectId,
-          slotId,
+          laneStorageId(slotId, lane),
           assetIds,
           intent,
           (assetId) => send({ type: "progress", assetId })
         );
-        const slot = await assignEngineSlot(projectId, slotId, assetIds, exported.remoteHash);
+        const slot = await assignEngineSlot(projectId, slotId, assetIds, exported.remoteHash, lane);
         if (!slot) {
           await send({ type: "error", error: "slot not found" });
           return;

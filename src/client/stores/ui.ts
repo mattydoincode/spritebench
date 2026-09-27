@@ -190,6 +190,8 @@ interface Stored extends ProjectDraft {
   processWorkers: number;
   /** The feedback panel was closed; a strip at the bottom of the column reopens it. */
   feedbackHidden: boolean;
+  /** Which lane of every game asset you are looking at and assigning to. */
+  gameAssetLane: "prototype" | "final";
 }
 
 export type BubbleId = "view" | "elements" | "scenes" | "tree";
@@ -598,7 +600,8 @@ const DEFAULTS: Stored = {
   // Real window shares are applied in `hydrate`, before first paint.
   layout: defaultLayout(FALLBACK_VIEWPORT),
   processWorkers: DEFAULT_PROCESS_WORKERS,
-  feedbackHidden: false
+  feedbackHidden: false,
+  gameAssetLane: "prototype"
 };
 
 function read(): Stored {
@@ -634,6 +637,7 @@ function read(): Stored {
       },
       processWorkers: clampProcessWorkers(stored.processWorkers),
       feedbackHidden: stored.feedbackHidden === true,
+      gameAssetLane: stored.gameAssetLane === "final" ? "final" : "prototype",
       engineThumbSize: clampEngineThumbSize(stored.engineThumbSize),
       sceneView: readSceneView(stored.sceneView)
     };
@@ -669,7 +673,8 @@ function persist(state: Stored): void {
           collapsedSections: state.collapsedSections,
           layout: state.layout,
           processWorkers: state.processWorkers,
-          feedbackHidden: state.feedbackHidden
+          feedbackHidden: state.feedbackHidden,
+          gameAssetLane: state.gameAssetLane
         })
       );
     } catch {
@@ -748,6 +753,7 @@ interface UiState extends Stored {
   setLeftTab: (tab: LeftTab) => void;
   setProcessWorkers: (count: number) => void;
   setFeedbackHidden: (hidden: boolean) => void;
+  setGameAssetLane: (lane: "prototype" | "final") => void;
 
 
   cameraFor: (sceneId: string) => Camera;
@@ -833,6 +839,11 @@ export const useUi = create<UiState>((set, get) => {
       const stored = read();
       set(stored);
       processor.setWorkers(stored.processWorkers);
+    },
+
+    setGameAssetLane(lane) {
+      set({ gameAssetLane: lane });
+      save();
     },
 
     setFeedbackHidden(hidden) {

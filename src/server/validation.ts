@@ -300,6 +300,8 @@ export const catalogBodySchema = z.object({
       })
     )
     .max(2000),
+  /** Which lane the game pulls (the plugin's project setting). Absent: leave as is. */
+  lane: z.enum(["prototype", "final"]).optional(),
   collections: z
     .array(
       z.object({
@@ -339,7 +341,9 @@ export const recordPatchBodySchema = z.object({
 export const assignSlotBodySchema = z
   .object({
     assetIds: z.array(z.string().uuid()).max(100).default([]),
-    replace: z.boolean().optional()
+    replace: z.boolean().optional(),
+    /** Which of the slot's two lanes this assigns. */
+    lane: z.enum(["prototype", "final"]).default("prototype")
   })
   .refine((body) => body.replace === true || body.assetIds.length > 0, {
     message: "assetIds required"

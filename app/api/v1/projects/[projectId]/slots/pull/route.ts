@@ -27,7 +27,7 @@ export async function GET(request: Request, { params }: Params) {
     for (const slot of pullable) {
       try {
         const exported = await slotExportForPull(projectId, slot);
-        await setSlotRemoteHash(projectId, slot.id, exported.remoteHash);
+        await setSlotRemoteHash(projectId, slot.id, exported.remoteHash, slot.lane);
 
         const base = {
           id: slot.id,
@@ -35,7 +35,9 @@ export async function GET(request: Request, { params }: Params) {
           intent: slot.intent,
           label: slot.label,
           godotPath: slot.godotPath,
-          remoteHash: exported.remoteHash
+          remoteHash: exported.remoteHash,
+          // Which art this is; the game asked for finals or prototypes.
+          lane: slot.lane
         };
 
         if (exported.intent === "texture") {
