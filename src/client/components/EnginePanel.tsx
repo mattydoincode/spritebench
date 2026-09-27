@@ -26,7 +26,7 @@ import type { SlotEdit } from "@/shared/slotEdits";
 import { archivePath } from "@/client/export";
 import { AssetThumb } from "./AssetBitmap";
 import { ExportDialog } from "./ExportDialog";
-import { EngineCollections } from "./EngineCollections";
+import { ColumnsEditor, EngineCollections, type Column } from "./EngineCollections";
 import { LeftTabs } from "./LeftTabs";
 import { Button, ConfirmTextButton, Panel, PanelTab, Skeleton, TextButton } from "./ui";
 
@@ -327,6 +327,13 @@ function SlotRow({
   const lane = useUi((state) => state.gameAssetLane);
   const ids = laneAssetIds(slot, lane);
   const lit = ids.some((id) => highlight.has(id));
+  const [renaming, setRenaming] = useState<string | null>(null);
+
+  const commitRename = () => {
+    const name = renaming?.trim();
+    if (name && name !== slot.label) void useServer.getState().renameGameAsset(slot.id, name, false);
+    setRenaming(null);
+  };
 
   const accept = (event: DragEvent) => canEdit && isAssetDrag(event);
 
@@ -364,36 +371,52 @@ function SlotRow({
       }`}
     >
       <div className="flex items-start justify-between gap-2">
-        <button
-          type="button"
-          title={
-            ids.length > 0
-              ? "Select this slot's art in the library"
-              : "Drag library assets here to assign them"
-          }
-          onClick={() => {
-            if (ids.length > 0) {
-              useUi.getState().selectMany(ids);
+        {renaming !== null ? (
+          <input
+            autoFocus
+            value={renaming}
+            spellCheck={false}
+            aria-label="Asset name"
+            className="min-w-0 flex-1 text-[12px]"
+            onChange={(event) => setRenaming(event.target.value)}
+            onBlur={commitRename}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") commitRename();
+              if (event.key === "Escape") setRenaming(null);
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            title={
+              ids.length > 0
+                ? "Select this slot's art in the library"
+                : "Drag library assets here to assign them"
             }
-          }}
-          className="min-w-0 text-left"
-        >
-          <p className="truncate text-[12px] text-slate-200">
-            {slot.label}
-            {slot.finalAssetIds.length > 0 ? (
-              <span
-                title="This slot has final art"
-                className="ml-1.5 rounded bg-emerald-900/50 px-1 align-middle text-[9px] text-emerald-200"
-              >
-                final
-              </span>
-            ) : null}
-          </p>
-          <p className="truncate font-mono text-[10px] text-slate-500">
-            {INTENT_LABEL[slot.intent ?? "texture"]} ·{" "}
-            {slot.godotPath || (slot.origin === "web" ? "made in SpriteBench" : slot.id)}
-          </p>
-        </button>
+            onClick={() => {
+              if (ids.length > 0) {
+                useUi.getState().selectMany(ids);
+              }
+            }}
+            className="min-w-0 text-left"
+          >
+            <p className="truncate text-[12px] text-slate-200">
+              {slot.label}
+              {slot.finalAssetIds.length > 0 ? (
+                <span
+                  title="This slot has final art"
+                  className="ml-1.5 rounded bg-emerald-900/50 px-1 align-middle text-[9px] text-emerald-200"
+                >
+                  final
+                </span>
+              ) : null}
+            </p>
+            <p className="truncate font-mono text-[10px] text-slate-500">
+              {INTENT_LABEL[slot.intent ?? "texture"]} ·{" "}
+              {slot.godotPath || (slot.origin === "web" ? "made in SpriteBench" : slot.id)}
+            </p>
+          </button>
+        )}
         <span
           title={
             changed && !active
@@ -410,10 +433,19 @@ function SlotRow({
         >
           {active ? describeSlotActivity(assigning, queued) : changed ? "changed" : STATUS_LABEL[slot.status]}
         </span>
-        {canEdit && slot.origin === "web" ? (
+        {canEdit && slot.origin === "web" && renaming === null ? (
+          <TextButton title="Rename this asset" onClick={() => setRenaming(slot.label)}>
+            rename
+          </TextButton>
+        ) : null}
+        {canEdit ? (
           <ConfirmTextButton
             confirmLabel="remove?"
-            title="Remove this asset (its art stays in the library)"
+            title={
+              slot.origin === "web"
+                ? "Remove this asset; Godot drops it on the next sync. Its art stays in the library."
+                : "Remove from SpriteBench. It stays removed; Godot keeps its last art."
+            }
             onConfirm={() => void useServer.getState().deleteGameAsset(slot.id, false)}
           >
             &times;
@@ -496,22 +528,16 @@ const NEW_KINDS = {
 function NewGameAsset({ onDone }: { onDone: () => void }) {
   const [kind, setKind] = useState<keyof typeof NEW_KINDS>("asset");
   const [name, setName] = useState("");
-  const [fields, setFields] = useState("front, back, variants[]");
+  const [columns, setColumns] = useState<Column[]>([
+    { key: "front", intent: "texture" },
+    { key: "back", intent: "texture" }
+  ]);
 
   const create = async () => {
     if (!name.trim()) return;
-    const parsed =
-      kind === "table"
-        ? fields
-            .split(",")
-            .map((entry) => entry.trim())
-            .filter(Boolean)
-            .map((entry) => ({
-              key: entry.replace(/\[\]$/, ""),
-              intent: entry.endsWith("[]") ? ("textures" as const) : ("texture" as const)
-            }))
-        : undefined;
-    if (await useServer.getState().createGameAsset(kind, name, parsed)) onDone();
+    if (await useServer.getState().createGameAsset(kind, name, kind === "table" ? columns : undefined)) {
+      onDone();
+    }
   };
 
   return (
@@ -542,14 +568,19 @@ function NewGameAsset({ onDone }: { onDone: () => void }) {
         }}
       />
       {kind === "table" ? (
-        <input
-          value={fields}
-          title="Fields, comma separated. End one with [] for a list of images."
-          spellCheck={false}
-          onChange={(event) => setFields(event.target.value)}
-        />
+        <div className="rounded border border-[var(--color-edge)] p-1.5">
+          <p className="mb-1 text-[10px] tracking-wider text-slate-500 uppercase">
+            columns: every row gets one of each
+          </p>
+          <ColumnsEditor columns={columns} onChange={(next) => setColumns(next)} />
+        </div>
       ) : null}
-      <Button variant="primary" className="self-start" disabled={!name.trim()} onClick={() => void create()}>
+      <Button
+        variant="primary"
+        className="self-start"
+        disabled={!name.trim() || (kind === "table" && columns.length === 0)}
+        onClick={() => void create()}
+      >
         create
       </Button>
     </div>

@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
-import { CollectionError, deleteWebTable, setWebTableFields } from "@/db/repo/engineCollections";
-import { deleteWebAsset, GameAssetError } from "@/db/repo/engineSlots";
+import {
+  CollectionError,
+  removeGameTable,
+  renameWebTable,
+  setWebTableFields
+} from "@/db/repo/engineCollections";
+import { GameAssetError, removeGameAsset, renameWebAsset } from "@/db/repo/engineSlots";
 import { projectContext } from "@/server/access";
-import { gameTableFieldsSchema, parseBody, withValidation } from "@/server/validation";
+import { gameAssetPatchSchema, parseBody, withValidation } from "@/server/validation";
 import { gameAssetKey } from "@/shared/engineCollection";
 
 export const dynamic = "force-dynamic";
@@ -16,18 +21,37 @@ function refused(error: unknown): NextResponse | null {
   return null;
 }
 
-/** A web table's fields. `?table=1`: `id` is a table, otherwise an asset or list. */
+function cleanFields(fields: Array<{ key: string; intent: "texture" | "textures" }>) {
+  return fields
+    .map((field) => ({ key: gameAssetKey(field.key), intent: field.intent }))
+    .filter((field, index, all) => field.key && all.findIndex((other) => other.key === field.key) === index);
+}
+
+/**
+ * Renames something made in SpriteBench, or replaces a web table's fields.
+ * `?table=1`: `id` is a table, otherwise an asset or list.
+ */
 export async function PATCH(request: Request, { params }: Params) {
   return withValidation(async () => {
     const { projectId } = await projectContext(params, "edit");
     const { id } = await params;
-    const body = await parseBody(request, gameTableFieldsSchema);
-    const fields = body.fields
-      .map((field) => ({ key: gameAssetKey(field.key), intent: field.intent }))
-      .filter((field, index, all) => field.key && all.findIndex((other) => other.key === field.key) === index);
+    const table = new URL(request.url).searchParams.get("table") === "1";
+    const body = await parseBody(request, gameAssetPatchSchema);
 
     try {
-      await setWebTableFields(projectId, id, fields);
+      if (body.name !== undefined) {
+        const key = gameAssetKey(body.name);
+        if (!key) return NextResponse.json({ error: "give it a name with letters or digits" }, { status: 400 });
+        if (table) await renameWebTable(projectId, id, key);
+        else await renameWebAsset(projectId, id, key);
+      }
+      if (body.fields !== undefined) {
+        const renames = (body.renames ?? []).map((rename) => ({
+          from: gameAssetKey(rename.from),
+          to: gameAssetKey(rename.to)
+        }));
+        await setWebTableFields(projectId, id, cleanFields(body.fields), renames);
+      }
       return NextResponse.json({ ok: true });
     } catch (error) {
       const response = refused(error);
@@ -37,7 +61,10 @@ export async function PATCH(request: Request, { params }: Params) {
   });
 }
 
-/** Removes something made in SpriteBench. Godot's own are removed in Godot. */
+/**
+ * Removes a game asset or table from SpriteBench. Anything Godot made stays
+ * removed even while Godot still lists it; Godot keeps its last art.
+ */
 export async function DELETE(request: Request, { params }: Params) {
   return withValidation(async () => {
     const { projectId } = await projectContext(params, "edit");
@@ -45,8 +72,8 @@ export async function DELETE(request: Request, { params }: Params) {
     const table = new URL(request.url).searchParams.get("table") === "1";
 
     try {
-      if (table) await deleteWebTable(projectId, id);
-      else await deleteWebAsset(projectId, id);
+      if (table) await removeGameTable(projectId, id);
+      else await removeGameAsset(projectId, id);
       return NextResponse.json({ ok: true });
     } catch (error) {
       const response = refused(error);

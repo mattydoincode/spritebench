@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { and, asc, eq, isNull, ne, notInArray } from "drizzle-orm";
+import { and, asc, eq, isNull, ne, notInArray, sql } from "drizzle-orm";
 import {
   deriveSlotStatus,
   laneRemoteHash,
@@ -170,7 +170,8 @@ export async function upsertCatalog(
             localHash: slot.localHash,
             lastPushedHash: synced,
             lastSeenAt: now,
-            tombstonedAt: null,
+            // Removed in SpriteBench: Godot listing it again does not bring it back.
+            tombstonedAt: sql`case when ${engineSlots.removedOnWeb} then ${engineSlots.tombstonedAt} else null end`,
             updatedAt: now
           }
         });
@@ -281,11 +282,51 @@ export async function createWebAsset(
   return id;
 }
 
-/** Removes a web asset. Godot's own slots are removed in Godot. */
-export async function deleteWebAsset(projectId: string, slotId: string): Promise<void> {
+/**
+ * Removes a game asset from SpriteBench. One made here goes from Godot on the
+ * next sync; one Godot made is marked removed so its listing never brings it
+ * back, and Godot keeps whatever art it last pulled.
+ */
+export async function removeGameAsset(projectId: string, slotId: string): Promise<void> {
+  const now = new Date();
   const [row] = await db()
     .update(engineSlots)
-    .set({ tombstonedAt: new Date(), updatedAt: new Date() })
+    .set({
+      tombstonedAt: now,
+      updatedAt: now,
+      removedOnWeb: sql`${engineSlots.origin} = 'godot'`
+    })
+    .where(
+      and(
+        eq(engineSlots.projectId, projectId),
+        eq(engineSlots.id, slotId),
+        ne(engineSlots.kind, "record_field")
+      )
+    )
+    .returning({ id: engineSlots.id });
+  if (!row) throw new GameAssetError("that game asset does not exist", 404);
+}
+
+/** Renames an asset or list made in SpriteBench; Godot's follow their node or item names. */
+export async function renameWebAsset(projectId: string, slotId: string, key: string): Promise<void> {
+  const [clash] = await db()
+    .select({ id: engineSlots.id })
+    .from(engineSlots)
+    .where(
+      and(
+        eq(engineSlots.projectId, projectId),
+        eq(engineSlots.origin, "web"),
+        eq(engineSlots.label, key),
+        isNull(engineSlots.tombstonedAt),
+        ne(engineSlots.id, slotId)
+      )
+    )
+    .limit(1);
+  if (clash) throw new GameAssetError(`there is already an asset called ${key}`, 409);
+
+  const [row] = await db()
+    .update(engineSlots)
+    .set({ label: key, updatedAt: new Date() })
     .where(
       and(
         eq(engineSlots.projectId, projectId),
@@ -294,5 +335,5 @@ export async function deleteWebAsset(projectId: string, slotId: string): Promise
       )
     )
     .returning({ id: engineSlots.id });
-  if (!row) throw new GameAssetError("only assets made in SpriteBench can be removed here", 409);
+  if (!row) throw new GameAssetError("rename this one in Godot", 409);
 }

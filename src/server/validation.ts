@@ -267,9 +267,20 @@ export const gameAssetBodySchema = z.discriminatedUnion("type", [
   })
 ]);
 
-export const gameTableFieldsSchema = z.object({
-  fields: z.array(gameAssetField).min(1).max(24)
-});
+/** Rename a SpriteBench-made asset or table, and/or replace a web table's fields. */
+export const gameAssetPatchSchema = z
+  .object({
+    name: z.string().trim().min(1).max(64).optional(),
+    fields: z.array(gameAssetField).min(1).max(24).optional(),
+    /** Field keys renamed in this change, so each row's art moves with them. */
+    renames: z
+      .array(z.object({ from: z.string().min(1).max(64), to: z.string().min(1).max(64) }))
+      .max(24)
+      .optional()
+  })
+  .refine((body) => body.name !== undefined || body.fields !== undefined, {
+    message: "name or fields required"
+  });
 
 export const feedbackBodySchema = z.object({
   body: z.string().trim().min(1).max(4000),

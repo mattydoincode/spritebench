@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { and, asc, eq, inArray, isNull, notInArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import {
   fieldSlotLabel,
   isLiveRecord,
@@ -172,6 +172,8 @@ export async function syncCatalogCollections(
   now: Date
 ): Promise<void> {
   const ids = collections.map((collection) => collection.id);
+  // Removed in SpriteBench: Godot listing it again does not bring it back.
+  const stayRemoved = sql`case when ${engineCollections.removedOnWeb} then ${engineCollections.tombstonedAt} else null end`;
 
   for (const incoming of collections) {
     const [prior] = await tx
@@ -198,13 +200,13 @@ export async function syncCatalogCollections(
       .onConflictDoUpdate({
         target: engineCollections.id,
         set: webOwned
-          ? { godotPath: incoming.path, lastSeenAt: now, tombstonedAt: null, updatedAt: now }
+          ? { godotPath: incoming.path, lastSeenAt: now, tombstonedAt: stayRemoved, updatedAt: now }
           : {
               label: incoming.label,
               godotPath: incoming.path,
               fields: incoming.fields,
               lastSeenAt: now,
-              tombstonedAt: null,
+              tombstonedAt: stayRemoved,
               updatedAt: now
             }
       })
@@ -430,11 +432,16 @@ export async function createWebTable(
   return id;
 }
 
-/** Replaces a web table's fields; its cells follow (new fields appear, removed ones go). */
+/**
+ * Replaces a web table's fields; its cells follow (new fields appear, removed
+ * ones go). `renames` carry each row's art, in both lanes, from an old field
+ * key to its new one, since a cell's slot id is derived from the key.
+ */
 export async function setWebTableFields(
   projectId: string,
   collectionId: string,
-  fields: EngineCollectionField[]
+  fields: EngineCollectionField[],
+  renames: Array<{ from: string; to: string }> = []
 ): Promise<void> {
   const now = new Date();
   await db().transaction(async (tx) => {
@@ -448,20 +455,74 @@ export async function setWebTableFields(
       .where(eq(engineCollections.id, collectionId))
       .returning();
     await syncFieldSlots(tx, projectId, updated, now);
+
+    const keys = new Set(fields.map((field) => field.key));
+    const records = (await recordsOf(tx, collectionId)).filter(isLiveRecord);
+    for (const rename of renames) {
+      if (!keys.has(rename.to)) continue;
+      for (const record of records) {
+        const [old] = await tx
+          .select()
+          .from(engineSlots)
+          .where(eq(engineSlots.id, fieldSlotId(record.id, rename.from)))
+          .limit(1);
+        if (!old) continue;
+        await tx
+          .update(engineSlots)
+          .set({
+            assignedAssetIds: old.assignedAssetIds,
+            remoteHash: old.remoteHash,
+            finalAssetIds: old.finalAssetIds,
+            finalRemoteHash: old.finalRemoteHash,
+            updatedAt: now
+          })
+          .where(eq(engineSlots.id, fieldSlotId(record.id, rename.to)));
+      }
+    }
   });
 }
 
-/** Removes a web table and its cells. Godot tables are removed in Godot. */
-export async function deleteWebTable(projectId: string, collectionId: string): Promise<void> {
+/** Renames a table made in SpriteBench; its cells' labels follow. */
+export async function renameWebTable(projectId: string, collectionId: string, label: string): Promise<void> {
   const now = new Date();
   await db().transaction(async (tx) => {
     const collection = await liveCollection(tx, projectId, collectionId);
-    if (collection.origin !== "web") {
-      throw new CollectionError("remove this table in Godot", 409);
+    if (collection.origin !== "web") throw new CollectionError("rename this table in Godot", 409);
+    const [clash] = await tx
+      .select({ id: engineCollections.id })
+      .from(engineCollections)
+      .where(
+        and(
+          eq(engineCollections.projectId, projectId),
+          eq(engineCollections.label, label),
+          isNull(engineCollections.tombstonedAt)
+        )
+      )
+      .limit(1);
+    if (clash && clash.id !== collectionId) {
+      throw new CollectionError(`there is already a table called ${label}`, 409);
     }
+    const [updated] = await tx
+      .update(engineCollections)
+      .set({ label, updatedAt: now })
+      .where(eq(engineCollections.id, collectionId))
+      .returning();
+    await syncFieldSlots(tx, projectId, updated, now);
+  });
+}
+
+/**
+ * Removes a table and its cells from SpriteBench. One made here goes from
+ * Godot on the next sync; one Godot made is marked removed so its listing
+ * never brings it back, and Godot keeps its resource and art.
+ */
+export async function removeGameTable(projectId: string, collectionId: string): Promise<void> {
+  const now = new Date();
+  await db().transaction(async (tx) => {
+    const collection = await liveCollection(tx, projectId, collectionId);
     const [gone] = await tx
       .update(engineCollections)
-      .set({ tombstonedAt: now, updatedAt: now })
+      .set({ tombstonedAt: now, updatedAt: now, removedOnWeb: collection.origin === "godot" })
       .where(eq(engineCollections.id, collectionId))
       .returning();
     await syncFieldSlots(tx, projectId, gone, now);

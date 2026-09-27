@@ -197,17 +197,13 @@ function RecordCard({
             >
               copy
             </TextButton>
-            <TextButton
-              danger
-              title="Delete this record here and in Godot"
-              onClick={() => {
-                if (confirm(`Delete ${record.key} from ${collection.label}? Godot removes it on the next sync.`)) {
-                  void server().deleteRecord(collection.id, record.id);
-                }
-              }}
+            <ConfirmTextButton
+              confirmLabel="delete?"
+              title="Delete this row here and in Godot"
+              onConfirm={() => void server().deleteRecord(collection.id, record.id)}
             >
               delete
-            </TextButton>
+            </ConfirmTextButton>
           </span>
         ) : null}
       </div>
@@ -256,61 +252,171 @@ function AddRecord({ collection }: { collection: EngineCollectionView }) {
   );
 }
 
-/**
- * A web table's fields as chips, editable here: SpriteBench owns them. A field
- * ending in [] holds an ordered list of images instead of one.
- */
-function TableFields({ collection, canEdit }: { collection: EngineCollectionView; canEdit: boolean }) {
-  const [draft, setDraft] = useState("");
+export interface Column {
+  key: string;
+  intent: "texture" | "textures";
+}
 
-  const save = (fields: EngineCollectionView["fields"]) =>
-    void useServer.getState().setGameTableFields(collection.id, fields);
+const COLUMN_KINDS: Record<Column["intent"], string> = {
+  texture: "One image",
+  textures: "List of images"
+};
+
+/**
+ * A table's columns as rows: name, whether each cell holds one image or a
+ * list, and remove; then a row to add one. Used to build a new table and to
+ * edit one later. A rename reports its old and new key so art can follow.
+ */
+export function ColumnsEditor({
+  columns,
+  onChange,
+  disabled = false
+}: {
+  columns: Column[];
+  onChange: (next: Column[], rename?: { from: string; to: string }) => void;
+  disabled?: boolean;
+}) {
+  const [draft, setDraft] = useState("");
+  const [draftKind, setDraftKind] = useState<Column["intent"]>("texture");
 
   const add = () => {
-    const raw = draft.trim();
-    if (!raw) return;
-    const list = raw.endsWith("[]");
-    save([...collection.fields, { key: raw.replace(/\[\]$/, ""), intent: list ? "textures" : "texture" }]);
+    const key = draft.trim();
+    if (!key || columns.some((column) => column.key === key)) return;
+    onChange([...columns, { key, intent: draftKind }]);
     setDraft("");
   };
 
   return (
-    <div className="mb-1.5 flex flex-wrap items-center gap-1">
-      {collection.fields.map((field) => (
-        <span
-          key={field.key}
-          className="flex items-center gap-0.5 rounded bg-[var(--color-ink-600)] px-1 py-0.5 font-mono text-[10px] text-slate-200"
-        >
-          {field.key}
-          {field.intent === "textures" ? "[]" : ""}
-          {canEdit && collection.fields.length > 1 ? (
-            <button
-              type="button"
-              title={`Remove the ${field.key} field`}
-              className="text-slate-500 hover:text-white"
-              onClick={() => save(collection.fields.filter((other) => other.key !== field.key))}
+    <div className="flex flex-col gap-1">
+      {columns.map((column, index) => (
+        <div key={`${column.key}-${index}`} className="flex items-center gap-1.5">
+          <input
+            defaultValue={column.key}
+            disabled={disabled}
+            aria-label="Column name"
+            spellCheck={false}
+            className="min-w-0 flex-1 font-mono text-[11px]"
+            onBlur={(event) => {
+              const key = event.target.value.trim();
+              if (!key || key === column.key) {
+                event.target.value = column.key;
+                return;
+              }
+              onChange(
+                columns.map((other, at) => (at === index ? { ...other, key } : other)),
+                { from: column.key, to: key }
+              );
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+            }}
+          />
+          <select
+            value={column.intent}
+            disabled={disabled}
+            aria-label="Column holds"
+            style={{ width: "auto" }}
+            className="text-[11px]"
+            onChange={(event) =>
+              onChange(
+                columns.map((other, at) =>
+                  at === index ? { ...other, intent: event.target.value as Column["intent"] } : other
+                )
+              )
+            }
+          >
+            {(Object.keys(COLUMN_KINDS) as Column["intent"][]).map((kind) => (
+              <option key={kind} value={kind}>
+                {COLUMN_KINDS[kind]}
+              </option>
+            ))}
+          </select>
+          {!disabled && columns.length > 1 ? (
+            <ConfirmTextButton
+              confirmLabel="remove?"
+              title="Remove this column (its art assignments go with it)"
+              onConfirm={() => onChange(columns.filter((_, at) => at !== index))}
             >
-              ×
-            </button>
-          ) : null}
-        </span>
+              &times;
+            </ConfirmTextButton>
+          ) : (
+            <span className="w-4" />
+          )}
+        </div>
       ))}
-      {canEdit ? (
-        <input
-          value={draft}
-          placeholder="+ field"
-          title="Add a field. End it with [] for a list of images."
-          spellCheck={false}
-          style={{ width: "5.5rem" }}
-          className="text-[10px]"
-          onChange={(event) => setDraft(event.target.value)}
-          onBlur={add}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") add();
-          }}
-        />
+      {!disabled ? (
+        <div className="flex items-center gap-1.5">
+          <input
+            value={draft}
+            placeholder="new column"
+            spellCheck={false}
+            className="min-w-0 flex-1 font-mono text-[11px]"
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") add();
+            }}
+          />
+          <select
+            value={draftKind}
+            aria-label="New column holds"
+            style={{ width: "auto" }}
+            className="text-[11px]"
+            onChange={(event) => setDraftKind(event.target.value as Column["intent"])}
+          >
+            {(Object.keys(COLUMN_KINDS) as Column["intent"][]).map((kind) => (
+              <option key={kind} value={kind}>
+                {COLUMN_KINDS[kind]}
+              </option>
+            ))}
+          </select>
+          <TextButton disabled={!draft.trim()} title="Add this column" onClick={add}>
+            + add
+          </TextButton>
+        </div>
       ) : null}
     </div>
+  );
+}
+
+/** A table's name, click to rename when SpriteBench made it. */
+function TableName({ collection, canEdit }: { collection: EngineCollectionView; canEdit: boolean }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const editable = canEdit && collection.origin === "web";
+
+  if (draft !== null) {
+    const commit = () => {
+      const name = draft.trim();
+      if (name && name !== collection.label) {
+        void useServer.getState().renameGameAsset(collection.id, name, true);
+      }
+      setDraft(null);
+    };
+    return (
+      <input
+        autoFocus
+        value={draft}
+        spellCheck={false}
+        className="min-w-0 flex-1 text-[12px]"
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") commit();
+          if (event.key === "Escape") setDraft(null);
+        }}
+      />
+    );
+  }
+
+  return (
+    <h3
+      className={`truncate text-[12px] text-slate-200 ${editable ? "cursor-text hover:underline" : ""}`}
+      title={editable ? "Click to rename" : "Made in Godot: rename it there"}
+      onClick={() => {
+        if (editable) setDraft(collection.label);
+      }}
+    >
+      {collection.label}
+    </h3>
   );
 }
 
@@ -335,13 +441,17 @@ export function EngineCollections({
       {collections.map((collection) => (
         <section key={collection.id}>
           <div className="mb-1 flex items-baseline justify-between gap-2">
-            <h3 className="truncate text-[12px] text-slate-200">{collection.label}</h3>
+            <TableName collection={collection} canEdit={canEdit} />
             <span className="flex shrink-0 items-baseline gap-1 font-mono text-[10px] text-slate-500">
               {collection.records.length} records
-              {canEdit && collection.origin === "web" ? (
+              {canEdit ? (
                 <ConfirmTextButton
                   confirmLabel="remove?"
-                  title="Remove this table and its rows' art assignments"
+                  title={
+                    collection.origin === "web"
+                      ? "Remove this table; Godot drops it on the next sync"
+                      : "Remove from SpriteBench. It stays removed; Godot keeps its file and last art."
+                  }
                   onConfirm={() => void useServer.getState().deleteGameAsset(collection.id, true)}
                 >
                   &times;
@@ -353,7 +463,22 @@ export function EngineCollections({
             {collection.godotPath || "made in SpriteBench"}
           </p>
           {collection.origin === "web" ? (
-            <TableFields collection={collection} canEdit={canEdit} />
+            <details className="mb-1.5" open={collection.records.length === 0}>
+              <summary className="cursor-pointer text-[10px] tracking-wider text-slate-500 uppercase">
+                columns ({collection.fields.length})
+              </summary>
+              <div className="mt-1">
+                <ColumnsEditor
+                  columns={collection.fields}
+                  disabled={!canEdit}
+                  onChange={(next, rename) =>
+                    void useServer
+                      .getState()
+                      .setGameTableFields(collection.id, next, rename ? [rename] : undefined)
+                  }
+                />
+              </div>
+            </details>
           ) : null}
           <ul className="flex flex-col gap-1.5">
             {collection.records.map((record) => (

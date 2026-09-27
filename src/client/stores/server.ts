@@ -220,8 +220,11 @@ interface ServerState {
   deleteGameAsset: (id: string, table: boolean) => Promise<void>;
   setGameTableFields: (
     id: string,
-    fields: Array<{ key: string; intent: "texture" | "textures" }>
+    fields: Array<{ key: string; intent: "texture" | "textures" }>,
+    renames?: Array<{ from: string; to: string }>
   ) => Promise<void>;
+  /** Renames an asset, list or table made in SpriteBench. */
+  renameGameAsset: (id: string, name: string, table: boolean) => Promise<void>;
   /** Re-exports these (slot, lane) keys -- see `laneKey` -- with their images' current edits. */
   syncSlots: (keys: string[]) => Promise<void>;
   /** Queues an edit; slots export in parallel, edits to one slot in order. */
@@ -1294,11 +1297,23 @@ export const useServer = create<ServerState>((set, get) => {
       }
     },
 
-    async setGameTableFields(id, fields) {
+    async setGameTableFields(id, fields, renames) {
       try {
-        await projectApi(projectId(), `/game-assets/${id}`, {
+        await projectApi(projectId(), `/game-assets/${id}?table=1`, {
           method: "PATCH",
-          body: JSON.stringify({ fields })
+          body: JSON.stringify({ fields, renames })
+        });
+        await get().refreshSlots();
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    async renameGameAsset(id, name, table) {
+      try {
+        await projectApi(projectId(), `/game-assets/${id}${table ? "?table=1" : ""}`, {
+          method: "PATCH",
+          body: JSON.stringify({ name })
         });
         await get().refreshSlots();
       } catch (error) {

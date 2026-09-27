@@ -464,6 +464,11 @@ export const engineSlots = pgTable("engine_slots", {
   remoteHash: text("remote_hash"),
   finalRemoteHash: text("final_remote_hash"),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  /**
+   * Removed in SpriteBench although Godot still lists it: stays removed on
+   * every sync, and Godot keeps whatever art it last had.
+   */
+  removedOnWeb: boolean("removed_on_web").notNull().default(false),
   tombstonedAt: timestamp("tombstoned_at", { withTimezone: true }),
   /** Set for `record_field` slots: which record and which of its fields. */
   recordId: uuid("record_id"),
@@ -490,6 +495,11 @@ export const engineCollections = pgTable("engine_collections", {
   godotPath: text("godot_path").notNull().default(""),
   fields: jsonb("fields").$type<EngineCollectionField[]>().notNull().default([]),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  /**
+   * Removed in SpriteBench although Godot still lists it: stays removed on
+   * every sync, and Godot keeps whatever art it last had.
+   */
+  removedOnWeb: boolean("removed_on_web").notNull().default(false),
   tombstonedAt: timestamp("tombstoned_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
