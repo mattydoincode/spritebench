@@ -103,12 +103,33 @@ function LibraryThumb({
           : "border-[var(--color-edge)] hover:border-slate-500"
       }`}
     >
-      <AssetThumb asset={asset} size={thumbSize} variant={preferSource ? "source" : "thumb"} />
+      <div className="relative">
+        <AssetThumb asset={asset} size={thumbSize} variant={preferSource ? "source" : "thumb"} />
+        {/* On the image, like the frame count, so every thumb is the same height. */}
+        {asset.exportPath || asset.rerunOf ? (
+          <span className="pointer-events-none absolute top-0.5 left-0.5 flex gap-0.5">
+            {asset.exportPath ? (
+              <span
+                title={`Server-side copy saved: ${asset.exportPath}`}
+                className="rounded bg-black/70 px-1 text-[9px] leading-tight text-emerald-300"
+              >
+                saved
+              </span>
+            ) : null}
+            {asset.rerunOf ? (
+              <span
+                title="A rerun of an earlier image"
+                className="rounded bg-black/70 px-1 text-[9px] leading-tight text-sky-300"
+              >
+                rerun
+              </span>
+            ) : null}
+          </span>
+        ) : null}
+      </div>
       <div className="truncate px-1 py-0.5 text-[10px] text-slate-400">
         {asset.set && faceId(asset.set) === asset.id ? `${asset.label} · ${setBadge(asset.set)}` : asset.label}
       </div>
-      {asset.exportPath ? <div className="truncate px-1 text-[9px] text-emerald-400">exported</div> : null}
-      {asset.rerunOf ? <div className="truncate px-1 text-[9px] text-sky-400">rerun</div> : null}
     </button>
   );
 }
