@@ -444,7 +444,7 @@ function FolderSection({
       }`}
     >
       <div
-        className={`group sticky top-0 z-10 flex h-8 items-center gap-2 px-3 transition-colors ${
+        className={`group sticky -top-3 z-10 flex h-8 items-center gap-2 px-3 transition-colors ${
           over ? "bg-[var(--color-accent-dim)]/60" : "bg-[var(--color-ink-800)]"
         }`}
       >

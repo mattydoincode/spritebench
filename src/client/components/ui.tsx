@@ -850,6 +850,10 @@ export function Divider({ label }: { label?: string }) {
  * The heading is a full-width bar -- the panel body's padding is undone so it
  * runs edge to edge -- and sticks to the top while its section scrolls under
  * it, so you can always see which section you are in and fold it from there.
+ *
+ * It sticks at -12px, not 0: sticky offsets count from inside the scroll
+ * area's padding, so `top-0` would hold the bar 12px down, floating over its
+ * own first row with no scroll position that settles it.
  */
 export function Section({
   id,
@@ -869,7 +873,7 @@ export function Section({
         onClick={() => useUi.getState().toggleSection(id)}
         aria-expanded={!collapsed}
         title={collapsed ? `Show ${label}` : `Hide ${label}`}
-        className="group sticky top-0 z-10 flex h-8 w-full items-center gap-2 bg-[var(--color-ink-800)] px-3 transition-colors hover:bg-[var(--color-ink-700)]"
+        className="group sticky -top-3 z-10 flex h-8 w-full items-center gap-2 bg-[var(--color-ink-800)] px-3 transition-colors hover:bg-[var(--color-ink-700)]"
       >
         <svg
           aria-hidden
