@@ -38,6 +38,8 @@ RUN apt-get update \
 COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/.next ./.next
 COPY --from=build --chown=node:node /app/dist ./dist
+# `next start` serves public/ from disk; it is not part of .next.
+COPY --from=build --chown=node:node /app/public ./public
 # Migrations are read from disk at release time, so they ship with the image.
 COPY --from=build --chown=node:node /app/drizzle ./drizzle
 # Declares every variable the app reads, and holds no credentials -- the panel
