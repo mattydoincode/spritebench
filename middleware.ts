@@ -11,9 +11,15 @@ import type { NextRequest } from "next/server";
  * session table. A forged cookie gets you a page shell and a 401 from every
  * request it makes.
  */
-// `/branding` is the logo and other static brand images: the signed-out
-// pages show them, so they cannot sit behind sign-in.
-const PUBLIC_PREFIXES = ["/sign-in", "/api/auth", "/api/health", "/branding/"];
+const PUBLIC_PREFIXES = ["/sign-in", "/api/auth", "/api/health"];
+
+/**
+ * A file in `public/`. Next serves that folder from the site root, so there
+ * is no `/public` prefix to match; what marks those requests is the file
+ * extension, which no page or route in this app has. They are public by
+ * definition, and the signed-out pages need them (the logo).
+ */
+const STATIC_FILE = /\.[a-z0-9]+$/i;
 
 /**
  * Public pages, matched exactly rather than by prefix -- `/` as a prefix
@@ -26,6 +32,8 @@ export function middleware(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;
 
   if (PUBLIC_PAGES.has(pathname)) return NextResponse.next();
+
+  if (!pathname.startsWith("/api/") && STATIC_FILE.test(pathname)) return NextResponse.next();
 
   if (PUBLIC_PREFIXES.some((path) => pathname.startsWith(path))) {
     return NextResponse.next();
