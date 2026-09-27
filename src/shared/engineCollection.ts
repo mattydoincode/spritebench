@@ -49,6 +49,8 @@ export interface EngineRecordView {
 
 export interface EngineCollectionView {
   id: string;
+  /** "web": a table made in SpriteBench, which owns its fields. */
+  origin: "godot" | "web";
   label: string;
   godotPath: string;
   fields: EngineCollectionField[];
@@ -154,4 +156,17 @@ export function uniqueRecordKey(wanted: string, taken: Iterable<string>): string
     const next = `${base}_${n}`;
     if (!used.has(next)) return next;
   }
+}
+
+/**
+ * A name made into a key Godot can use as a StringName and a file name:
+ * lowercase letters, digits and underscores, not starting with a digit.
+ */
+export function gameAssetKey(name: string): string {
+  const key = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return /^[0-9]/.test(key) ? `_${key}` : key;
 }

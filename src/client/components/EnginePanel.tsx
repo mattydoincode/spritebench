@@ -26,7 +26,7 @@ import type { SlotEdit } from "@/shared/slotEdits";
 import { AssetThumb } from "./AssetBitmap";
 import { EngineCollections } from "./EngineCollections";
 import { LeftTabs } from "./LeftTabs";
-import { Button, Panel, PanelTab, Skeleton, TextButton } from "./ui";
+import { Button, ConfirmTextButton, Panel, PanelTab, Skeleton, TextButton } from "./ui";
 
 const STATUS_LABEL: Record<EngineSlotStatus, string> = {
   empty: "empty",
@@ -388,7 +388,8 @@ function SlotRow({
             ) : null}
           </p>
           <p className="truncate font-mono text-[10px] text-slate-500">
-            {INTENT_LABEL[slot.intent ?? "texture"]} · {slot.godotPath || slot.id}
+            {INTENT_LABEL[slot.intent ?? "texture"]} ·{" "}
+            {slot.godotPath || (slot.origin === "web" ? "made in SpriteBench" : slot.id)}
           </p>
         </button>
         <span
@@ -407,6 +408,15 @@ function SlotRow({
         >
           {active ? describeSlotActivity(assigning, queued) : changed ? "changed" : STATUS_LABEL[slot.status]}
         </span>
+        {canEdit && slot.origin === "web" ? (
+          <ConfirmTextButton
+            confirmLabel="remove?"
+            title="Remove this asset (its art stays in the library)"
+            onConfirm={() => void useServer.getState().deleteGameAsset(slot.id, false)}
+          >
+            &times;
+          </ConfirmTextButton>
+        ) : null}
         {canEdit && !active && ids.length > 0 ? (
           <TextButton
             className="shrink-0"
@@ -471,6 +481,79 @@ function useHighlightedAssets(): ReadonlySet<string> {
   }, [selectedIds, selectedItemIds, activeItemId, scene]);
 }
 
+const NEW_KINDS = {
+  asset: { label: "Asset", hint: "one image, looked up by name" },
+  list: { label: "List", hint: "an ordered list of images" },
+  table: { label: "Table", hint: "rows, each with named fields" }
+} as const;
+
+/**
+ * Makes a game asset in SpriteBench: one image, a list, or a table with
+ * fields (a field ending in [] holds a list). Godot gets it on its next sync.
+ */
+function NewGameAsset({ onDone }: { onDone: () => void }) {
+  const [kind, setKind] = useState<keyof typeof NEW_KINDS>("asset");
+  const [name, setName] = useState("");
+  const [fields, setFields] = useState("front, back, variants[]");
+
+  const create = async () => {
+    if (!name.trim()) return;
+    const parsed =
+      kind === "table"
+        ? fields
+            .split(",")
+            .map((entry) => entry.trim())
+            .filter(Boolean)
+            .map((entry) => ({
+              key: entry.replace(/\[\]$/, ""),
+              intent: entry.endsWith("[]") ? ("textures" as const) : ("texture" as const)
+            }))
+        : undefined;
+    if (await useServer.getState().createGameAsset(kind, name, parsed)) onDone();
+  };
+
+  return (
+    <div className="mb-3 flex flex-col gap-1.5 rounded border border-[var(--color-edge)] bg-[var(--color-ink-800)] p-2">
+      <div className="flex flex-wrap gap-3">
+        {(Object.keys(NEW_KINDS) as Array<keyof typeof NEW_KINDS>).map((option) => (
+          <label key={option} className="flex items-baseline gap-1.5 text-[11px]" title={NEW_KINDS[option].hint}>
+            <input
+              type="radio"
+              name="new-game-asset"
+              checked={kind === option}
+              onChange={() => setKind(option)}
+              className="h-3 w-3 translate-y-0.5 accent-[var(--color-accent)]"
+            />
+            <span className="text-slate-200">{NEW_KINDS[option].label}</span>
+          </label>
+        ))}
+      </div>
+      <p className="text-[10px] text-slate-500">{NEW_KINDS[kind].hint}</p>
+      <input
+        autoFocus
+        value={name}
+        placeholder={kind === "table" ? "buildings" : "hero_idle"}
+        spellCheck={false}
+        onChange={(event) => setName(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") void create();
+        }}
+      />
+      {kind === "table" ? (
+        <input
+          value={fields}
+          title="Fields, comma separated. End one with [] for a list of images."
+          spellCheck={false}
+          onChange={(event) => setFields(event.target.value)}
+        />
+      ) : null}
+      <Button variant="primary" className="self-start" disabled={!name.trim()} onClick={() => void create()}>
+        create
+      </Button>
+    </div>
+  );
+}
+
 /** Until there is a release page, the addon's repository. */
 const GODOT_PLUGIN_URL = "https://github.com/mattydoincode/spritebench-godot";
 
@@ -489,9 +572,20 @@ export function EnginePanel() {
   const changedSet = new Set(changed);
   const lane = useUi((state) => state.gameAssetLane);
   const gameLane = useServer((state) => state.gameLane);
+  const [creating, setCreating] = useState(false);
 
   return (
-    <Panel tabs={<LeftTabs />}>
+    <Panel
+      tabs={<LeftTabs />}
+      actions={
+        canEdit ? (
+          <TextButton title="Add an asset, a list, or a table" onClick={() => setCreating(!creating)}>
+            {creating ? "cancel" : "+ new"}
+          </TextButton>
+        ) : null
+      }
+    >
+      {creating ? <NewGameAsset onDone={() => setCreating(false)} /> : null}
       {loaded && !engineSyncedAt ? (
         <p className="mb-2 text-[10px] leading-snug text-slate-500">
           Using Godot? The{" "}

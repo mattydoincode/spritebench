@@ -251,6 +251,26 @@ export const memberAccessSchema = z.object({
   canGenerate: z.boolean().default(false)
 });
 
+const gameAssetField = z.object({
+  key: z.string().trim().min(1).max(64),
+  intent: z.enum(["texture", "textures"])
+});
+
+/** New standalone asset, list, or table, made in SpriteBench. */
+export const gameAssetBodySchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("asset"), name: z.string().trim().min(1).max(64) }),
+  z.object({ type: z.literal("list"), name: z.string().trim().min(1).max(64) }),
+  z.object({
+    type: z.literal("table"),
+    name: z.string().trim().min(1).max(64),
+    fields: z.array(gameAssetField).min(1).max(24)
+  })
+]);
+
+export const gameTableFieldsSchema = z.object({
+  fields: z.array(gameAssetField).min(1).max(24)
+});
+
 export const feedbackBodySchema = z.object({
   body: z.string().trim().min(1).max(4000),
   /** The project open when it was sent. Kept only if the sender is a member. */

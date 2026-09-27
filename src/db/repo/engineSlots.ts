@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { and, asc, eq, isNull, ne, notInArray } from "drizzle-orm";
 import {
   deriveSlotStatus,
@@ -47,6 +48,7 @@ function toRecord(row: EngineSlotRow, game: EngineLane): EngineSlotRecord {
   return {
     id: row.id,
     kind: row.kind,
+    origin: row.origin,
     intent: row.intent ?? "texture",
     label: row.label,
     godotPath: row.godotPath,
@@ -182,6 +184,8 @@ export async function upsertCatalog(
           eq(engineSlots.projectId, projectId),
           isNull(engineSlots.tombstonedAt),
           ne(engineSlots.kind, "record_field"),
+          // SpriteBench's own assets are not Godot's to remove.
+          eq(engineSlots.origin, "godot"),
           ids.length > 0 ? notInArray(engineSlots.id, ids) : undefined
         )
       );
@@ -229,4 +233,66 @@ export async function setSlotRemoteHash(
       updatedAt: new Date()
     })
     .where(and(eq(engineSlots.projectId, projectId), eq(engineSlots.id, slotId)));
+}
+
+export class GameAssetError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message);
+    this.name = "GameAssetError";
+  }
+}
+
+/**
+ * A standalone asset (one image) or list (ordered images) made in SpriteBench.
+ * The plugin writes it into the project's `assets.tres` set under `key`.
+ */
+export async function createWebAsset(
+  projectId: string,
+  key: string,
+  list: boolean
+): Promise<string> {
+  const [clash] = await db()
+    .select({ id: engineSlots.id })
+    .from(engineSlots)
+    .where(
+      and(
+        eq(engineSlots.projectId, projectId),
+        eq(engineSlots.origin, "web"),
+        eq(engineSlots.label, key),
+        isNull(engineSlots.tombstonedAt)
+      )
+    )
+    .limit(1);
+  if (clash) throw new GameAssetError(`there is already an asset called ${key}`, 409);
+
+  const id = crypto.randomUUID();
+  await db().insert(engineSlots).values({
+    id,
+    projectId,
+    origin: "web",
+    kind: list ? "set_bag" : "set_item",
+    intent: list ? "textures" : "texture",
+    label: key,
+    godotPath: ""
+  });
+  return id;
+}
+
+/** Removes a web asset. Godot's own slots are removed in Godot. */
+export async function deleteWebAsset(projectId: string, slotId: string): Promise<void> {
+  const [row] = await db()
+    .update(engineSlots)
+    .set({ tombstonedAt: new Date(), updatedAt: new Date() })
+    .where(
+      and(
+        eq(engineSlots.projectId, projectId),
+        eq(engineSlots.id, slotId),
+        eq(engineSlots.origin, "web")
+      )
+    )
+    .returning({ id: engineSlots.id });
+  if (!row) throw new GameAssetError("only assets made in SpriteBench can be removed here", 409);
 }

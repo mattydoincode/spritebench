@@ -25,6 +25,8 @@ export type EngineSlotStatus = (typeof ENGINE_SLOT_STATUSES)[number];
 export interface EngineSlotRecord {
   id: string;
   kind: EngineSlotKind;
+  /** "web": created in SpriteBench (a standalone asset or list), which owns it. */
+  origin: "godot" | "web";
   intent: EngineSlotIntent;
   label: string;
   godotPath: string;

@@ -15,6 +15,7 @@ import type { EngineSlotRecord } from "@/shared/engineSlot";
 const slot: EngineSlotRecord = {
   id: "slot",
   kind: "set_bag",
+  origin: "godot",
   intent: "textures",
   label: "cars",
   godotPath: "res://cars",

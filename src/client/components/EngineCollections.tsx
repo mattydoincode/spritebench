@@ -13,7 +13,7 @@ import type {
 import { laneAssetIds, type EngineSlotRecord, type EngineSlotStatus } from "@/shared/engineSlot";
 import type { ResolvedAsset } from "@/shared/model";
 import { AssetThumb } from "./AssetBitmap";
-import { Button, TextButton } from "./ui";
+import { Button, TextButton, ConfirmTextButton } from "./ui";
 
 const STATUS_DOT: Record<EngineSlotStatus, string> = {
   empty: "bg-slate-600",
@@ -256,6 +256,64 @@ function AddRecord({ collection }: { collection: EngineCollectionView }) {
   );
 }
 
+/**
+ * A web table's fields as chips, editable here: SpriteBench owns them. A field
+ * ending in [] holds an ordered list of images instead of one.
+ */
+function TableFields({ collection, canEdit }: { collection: EngineCollectionView; canEdit: boolean }) {
+  const [draft, setDraft] = useState("");
+
+  const save = (fields: EngineCollectionView["fields"]) =>
+    void useServer.getState().setGameTableFields(collection.id, fields);
+
+  const add = () => {
+    const raw = draft.trim();
+    if (!raw) return;
+    const list = raw.endsWith("[]");
+    save([...collection.fields, { key: raw.replace(/\[\]$/, ""), intent: list ? "textures" : "texture" }]);
+    setDraft("");
+  };
+
+  return (
+    <div className="mb-1.5 flex flex-wrap items-center gap-1">
+      {collection.fields.map((field) => (
+        <span
+          key={field.key}
+          className="flex items-center gap-0.5 rounded bg-[var(--color-ink-600)] px-1 py-0.5 font-mono text-[10px] text-slate-200"
+        >
+          {field.key}
+          {field.intent === "textures" ? "[]" : ""}
+          {canEdit && collection.fields.length > 1 ? (
+            <button
+              type="button"
+              title={`Remove the ${field.key} field`}
+              className="text-slate-500 hover:text-white"
+              onClick={() => save(collection.fields.filter((other) => other.key !== field.key))}
+            >
+              ×
+            </button>
+          ) : null}
+        </span>
+      ))}
+      {canEdit ? (
+        <input
+          value={draft}
+          placeholder="+ field"
+          title="Add a field. End it with [] for a list of images."
+          spellCheck={false}
+          style={{ width: "5.5rem" }}
+          className="text-[10px]"
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={add}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") add();
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 export function EngineCollections({
   collections,
   slots,
@@ -278,13 +336,25 @@ export function EngineCollections({
         <section key={collection.id}>
           <div className="mb-1 flex items-baseline justify-between gap-2">
             <h3 className="truncate text-[12px] text-slate-200">{collection.label}</h3>
-            <span className="shrink-0 font-mono text-[10px] text-slate-500">
+            <span className="flex shrink-0 items-baseline gap-1 font-mono text-[10px] text-slate-500">
               {collection.records.length} records
+              {canEdit && collection.origin === "web" ? (
+                <ConfirmTextButton
+                  confirmLabel="remove?"
+                  title="Remove this table and its rows' art assignments"
+                  onConfirm={() => void useServer.getState().deleteGameAsset(collection.id, true)}
+                >
+                  &times;
+                </ConfirmTextButton>
+              ) : null}
             </span>
           </div>
           <p className="mb-1.5 truncate font-mono text-[10px] text-slate-600">
-            {collection.godotPath}
+            {collection.godotPath || "made in SpriteBench"}
           </p>
+          {collection.origin === "web" ? (
+            <TableFields collection={collection} canEdit={canEdit} />
+          ) : null}
           <ul className="flex flex-col gap-1.5">
             {collection.records.map((record) => (
               <RecordCard

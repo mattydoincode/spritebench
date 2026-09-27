@@ -211,6 +211,17 @@ interface ServerState {
     assetIds: string[],
     options?: { replace?: boolean }
   ) => Promise<void>;
+  /** A standalone asset, list, or table made in SpriteBench. Resolves false if refused. */
+  createGameAsset: (
+    type: "asset" | "list" | "table",
+    name: string,
+    fields?: Array<{ key: string; intent: "texture" | "textures" }>
+  ) => Promise<boolean>;
+  deleteGameAsset: (id: string, table: boolean) => Promise<void>;
+  setGameTableFields: (
+    id: string,
+    fields: Array<{ key: string; intent: "texture" | "textures" }>
+  ) => Promise<void>;
   /** Re-exports these (slot, lane) keys -- see `laneKey` -- with their images' current edits. */
   syncSlots: (keys: string[]) => Promise<void>;
   /** Queues an edit; slots export in parallel, edits to one slot in order. */
@@ -1256,6 +1267,43 @@ export const useServer = create<ServerState>((set, get) => {
 
     editSlot(slotId, edit, lane = useUi.getState().gameAssetLane) {
       return slotQueue.enqueue(laneKey(slotId, lane), edit);
+    },
+
+    async createGameAsset(type, name, fields) {
+      try {
+        await projectApi(projectId(), "/game-assets", {
+          method: "POST",
+          body: JSON.stringify(type === "table" ? { type, name, fields } : { type, name })
+        });
+        await get().refreshSlots();
+        return true;
+      } catch (error) {
+        fail(error);
+        return false;
+      }
+    },
+
+    async deleteGameAsset(id, table) {
+      try {
+        await projectApi(projectId(), `/game-assets/${id}${table ? "?table=1" : ""}`, {
+          method: "DELETE"
+        });
+        await get().refreshSlots();
+      } catch (error) {
+        fail(error);
+      }
+    },
+
+    async setGameTableFields(id, fields) {
+      try {
+        await projectApi(projectId(), `/game-assets/${id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ fields })
+        });
+        await get().refreshSlots();
+      } catch (error) {
+        fail(error);
+      }
     },
 
     syncSlots(keys) {

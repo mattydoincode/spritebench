@@ -451,6 +451,8 @@ export const engineSlots = pgTable("engine_slots", {
     .references(() => projects.id, { onDelete: "cascade" }),
   kind: text("kind").$type<EngineSlotKind>().notNull(),
   intent: text("intent").$type<EngineSlotIntent>().notNull().default("texture"),
+  /** "godot": listed by the plugin, removed when it stops listing it. "web": made in SpriteBench, which owns it. */
+  origin: text("origin").$type<"godot" | "web">().notNull().default("godot"),
   label: text("label").notNull(),
   godotPath: text("godot_path").notNull().default(""),
   /** The prototype lane. */
@@ -482,6 +484,8 @@ export const engineCollections = pgTable("engine_collections", {
   projectId: uuid("project_id")
     .notNull()
     .references(() => projects.id, { onDelete: "cascade" }),
+  /** "web" tables are made in SpriteBench, which owns their fields; the plugin writes them into Godot. */
+  origin: text("origin").$type<"godot" | "web">().notNull().default("godot"),
   label: text("label").notNull(),
   godotPath: text("godot_path").notNull().default(""),
   fields: jsonb("fields").$type<EngineCollectionField[]>().notNull().default([]),

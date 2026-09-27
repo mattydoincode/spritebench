@@ -174,6 +174,15 @@ export async function syncCatalogCollections(
   const ids = collections.map((collection) => collection.id);
 
   for (const incoming of collections) {
+    const [prior] = await tx
+      .select({ origin: engineCollections.origin })
+      .from(engineCollections)
+      .where(eq(engineCollections.id, incoming.id))
+      .limit(1);
+    // A table made in SpriteBench keeps its own name and fields: the plugin
+    // only mirrors them, so its copy never overrules the web's.
+    const webOwned = prior?.origin === "web";
+
     const [collection] = await tx
       .insert(engineCollections)
       .values({
@@ -188,14 +197,16 @@ export async function syncCatalogCollections(
       })
       .onConflictDoUpdate({
         target: engineCollections.id,
-        set: {
-          label: incoming.label,
-          godotPath: incoming.path,
-          fields: incoming.fields,
-          lastSeenAt: now,
-          tombstonedAt: null,
-          updatedAt: now
-        }
+        set: webOwned
+          ? { godotPath: incoming.path, lastSeenAt: now, tombstonedAt: null, updatedAt: now }
+          : {
+              label: incoming.label,
+              godotPath: incoming.path,
+              fields: incoming.fields,
+              lastSeenAt: now,
+              tombstonedAt: null,
+              updatedAt: now
+            }
       })
       .returning();
 
@@ -211,6 +222,8 @@ export async function syncCatalogCollections(
       and(
         eq(engineCollections.projectId, projectId),
         isNull(engineCollections.tombstonedAt),
+        // Only Godot's own tables go when Godot stops listing them.
+        eq(engineCollections.origin, "godot"),
         ids.length > 0 ? notInArray(engineCollections.id, ids) : undefined
       )
     )
@@ -245,6 +258,7 @@ export async function listEngineCollections(projectId: string): Promise<EngineCo
     const mine = records.filter((record) => record.collectionId === collection.id);
     return {
       id: collection.id,
+      origin: collection.origin,
       label: collection.label,
       godotPath: collection.godotPath,
       fields: collection.fields,
@@ -379,5 +393,77 @@ export async function deleteEngineRecord(
       .set({ removedBy: "web", pending: false, updatedAt: now })
       .where(eq(engineRecords.id, recordId));
     await syncFieldSlots(tx, projectId, collection, now);
+  });
+}
+
+/**
+ * A table made in SpriteBench: SpriteBench owns its name and fields, and the
+ * plugin writes it into Godot as a SpriteBenchCollection. Starts with no rows.
+ */
+export async function createWebTable(
+  projectId: string,
+  label: string,
+  fields: EngineCollectionField[]
+): Promise<string> {
+  const id = crypto.randomUUID();
+  const [clash] = await db()
+    .select({ id: engineCollections.id })
+    .from(engineCollections)
+    .where(
+      and(
+        eq(engineCollections.projectId, projectId),
+        eq(engineCollections.label, label),
+        isNull(engineCollections.tombstonedAt)
+      )
+    )
+    .limit(1);
+  if (clash) throw new CollectionError(`there is already a table called ${label}`, 409);
+
+  await db().insert(engineCollections).values({
+    id,
+    projectId,
+    origin: "web",
+    label,
+    godotPath: "",
+    fields
+  });
+  return id;
+}
+
+/** Replaces a web table's fields; its cells follow (new fields appear, removed ones go). */
+export async function setWebTableFields(
+  projectId: string,
+  collectionId: string,
+  fields: EngineCollectionField[]
+): Promise<void> {
+  const now = new Date();
+  await db().transaction(async (tx) => {
+    const collection = await liveCollection(tx, projectId, collectionId);
+    if (collection.origin !== "web") {
+      throw new CollectionError("this table's fields are set in Godot", 409);
+    }
+    const [updated] = await tx
+      .update(engineCollections)
+      .set({ fields, updatedAt: now })
+      .where(eq(engineCollections.id, collectionId))
+      .returning();
+    await syncFieldSlots(tx, projectId, updated, now);
+  });
+}
+
+/** Removes a web table and its cells. Godot tables are removed in Godot. */
+export async function deleteWebTable(projectId: string, collectionId: string): Promise<void> {
+  const now = new Date();
+  await db().transaction(async (tx) => {
+    const collection = await liveCollection(tx, projectId, collectionId);
+    if (collection.origin !== "web") {
+      throw new CollectionError("remove this table in Godot", 409);
+    }
+    const [gone] = await tx
+      .update(engineCollections)
+      .set({ tombstonedAt: now, updatedAt: now })
+      .where(eq(engineCollections.id, collectionId))
+      .returning();
+    await syncFieldSlots(tx, projectId, gone, now);
   });
 }
