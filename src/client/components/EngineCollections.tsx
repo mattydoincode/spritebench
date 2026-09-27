@@ -252,6 +252,26 @@ function AddRecord({ collection }: { collection: EngineCollectionView }) {
   );
 }
 
+/** Where a game asset or table was made, which decides where it is renamed and restructured. */
+export function OriginTag({
+  origin,
+  godotTitle,
+  webTitle
+}: {
+  origin: "godot" | "web";
+  godotTitle: string;
+  webTitle: string;
+}) {
+  return (
+    <span
+      title={origin === "godot" ? godotTitle : webTitle}
+      className="ml-1.5 shrink-0 rounded bg-[var(--color-ink-600)] px-1 align-middle text-[9px] text-slate-400"
+    >
+      {origin === "godot" ? "from Godot" : "from SpriteBench"}
+    </span>
+  );
+}
+
 export interface Column {
   key: string;
   intent: "texture" | "textures";
@@ -443,14 +463,11 @@ export function EngineCollections({
           <div className="mb-1 flex items-baseline justify-between gap-2">
             <span className="flex min-w-0 items-baseline gap-1.5">
               <TableName collection={collection} canEdit={canEdit} />
-              {collection.origin === "godot" ? (
-                <span
-                  title="Made in Godot: its columns and name are edited there. Rows and art sync both ways."
-                  className="shrink-0 rounded bg-[var(--color-ink-600)] px-1 text-[9px] text-slate-400"
-                >
-                  from Godot
-                </span>
-              ) : null}
+              <OriginTag
+                origin={collection.origin}
+                godotTitle="Made in Godot: its columns and name are edited there. Rows and art sync both ways."
+                webTitle="Made in SpriteBench: rename it and edit its columns here."
+              />
             </span>
             <span className="flex shrink-0 items-baseline gap-1 font-mono text-[10px] text-slate-500">
               {collection.records.length} records
@@ -469,9 +486,11 @@ export function EngineCollections({
               ) : null}
             </span>
           </div>
-          <p className="mb-1.5 truncate font-mono text-[10px] text-slate-600">
-            {collection.godotPath || "made in SpriteBench"}
-          </p>
+          {collection.godotPath ? (
+            <p className="mb-1.5 truncate font-mono text-[10px] text-slate-600">
+              {collection.godotPath}
+            </p>
+          ) : null}
           {collection.origin === "web" ? (
             <details className="mb-1.5" open={collection.records.length === 0}>
               <summary className="cursor-pointer text-[10px] tracking-wider text-slate-500 uppercase">

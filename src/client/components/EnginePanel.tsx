@@ -26,7 +26,7 @@ import type { SlotEdit } from "@/shared/slotEdits";
 import { archivePath } from "@/client/export";
 import { AssetThumb } from "./AssetBitmap";
 import { ExportDialog } from "./ExportDialog";
-import { ColumnsEditor, EngineCollections, type Column } from "./EngineCollections";
+import { ColumnsEditor, EngineCollections, OriginTag, type Column } from "./EngineCollections";
 import { LeftTabs } from "./LeftTabs";
 import { Button, ConfirmTextButton, Panel, PanelTab, Skeleton, TextButton } from "./ui";
 
@@ -402,14 +402,11 @@ function SlotRow({
           >
             <p className="truncate text-[12px] text-slate-200">
               {slot.label}
-              {slot.origin === "godot" ? (
-                <span
-                  title="Named in Godot (a node or a set item); rename it there"
-                  className="ml-1.5 rounded bg-[var(--color-ink-600)] px-1 align-middle text-[9px] text-slate-400"
-                >
-                  from Godot
-                </span>
-              ) : null}
+              <OriginTag
+                origin={slot.origin}
+                godotTitle="Named in Godot (a node or a set item); rename it there"
+                webTitle="Made in SpriteBench: rename or remove it here"
+              />
               {slot.finalAssetIds.length > 0 ? (
                 <span
                   title="This slot has final art"
@@ -420,8 +417,8 @@ function SlotRow({
               ) : null}
             </p>
             <p className="truncate font-mono text-[10px] text-slate-500">
-              {INTENT_LABEL[slot.intent ?? "texture"]} ·{" "}
-              {slot.godotPath || (slot.origin === "web" ? "made in SpriteBench" : slot.id)}
+              {INTENT_LABEL[slot.intent ?? "texture"]}
+              {slot.godotPath ? ` · ${slot.godotPath}` : ""}
             </p>
           </button>
         )}
