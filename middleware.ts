@@ -11,7 +11,9 @@ import type { NextRequest } from "next/server";
  * session table. A forged cookie gets you a page shell and a 401 from every
  * request it makes.
  */
-const PUBLIC_PREFIXES = ["/sign-in", "/api/auth", "/api/health"];
+// `/branding` is the logo and other static brand images: the signed-out
+// pages show them, so they cannot sit behind sign-in.
+const PUBLIC_PREFIXES = ["/sign-in", "/api/auth", "/api/health", "/branding/"];
 
 /**
  * Public pages, matched exactly rather than by prefix -- `/` as a prefix
