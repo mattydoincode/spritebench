@@ -26,8 +26,7 @@ import type { JobRecord, JobStatus, ResolvedAsset } from "@/shared/model";
 import { providerAttachmentPlan } from "@/shared/providerPrompt";
 import { isSetAsset } from "@/shared/repeaterMix";
 import { AssetThumb } from "./AssetBitmap";
-import { ExportDialog } from "./ExportDialog";
-import { Button, ConfirmTextButton, Panel, Row, Skeleton, TextButton } from "./ui";
+import { Button, ConfirmTextButton, Panel, Skeleton, TextButton } from "./ui";
 
 /**
  * A batch is a label row (16px plus a 2px gap) above a tinted box whose
@@ -555,7 +554,6 @@ export function LibraryPanel() {
   const folders = useDoc((state) => state.folders);
   const slots = useServer((state) => state.slots);
   const selectedIds = useUi((state) => state.selectedIds);
-  const busy = useUi((state) => state.busy);
   const filter = useUi((state) => state.libraryFolder);
   const collapsedBatches = useUi((state) => state.collapsedBatches);
   const scene = useActiveScene();
@@ -564,7 +562,6 @@ export function LibraryPanel() {
 
   const [search, setSearch] = useState("");
   const [thumbSize, setThumbSize] = useState(88);
-  const [exporting, setExporting] = useState(false);
 
   const visibleAssets = useMemo(
     () => assets.filter((asset) => isLibraryVisible(asset.id, asset.hidden, asset.set)),
@@ -631,8 +628,6 @@ export function LibraryPanel() {
     () => jobs.filter((job) => isFailedJob(job.status)),
     [jobs]
   );
-  const selectedJob =
-    selectedIds.length === 1 ? jobs.find((job) => job.id === selectedIds[0] && job.status !== "done") : undefined;
 
   const now = useNow(items.some((entry) => entry.kind === "job" && entry.job.status === "running"));
 
@@ -681,79 +676,83 @@ export function LibraryPanel() {
     );
 
   return (
-    <Panel
-      title="Library"
-      count={loaded ? items.length : undefined}
-      actions={
-        <>
-          {failedJobs.length > 0 ? (
-            <Button
-              variant="ghost"
-              title="Remove every failed or cancelled job from the library"
-              onClick={() => void store().clearFailedJobs()}
+    <div className="relative h-full">
+      <Panel
+        title="Library"
+        count={loaded ? items.length : undefined}
+        actions={
+          <>
+            {failedJobs.length > 0 ? (
+              <Button
+                variant="ghost"
+                title="Remove every failed or cancelled job from the library"
+                onClick={() => void store().clearFailedJobs()}
+              >
+                clear failed
+              </Button>
+            ) : null}
+            <input
+              type="text"
+              placeholder="search"
+              title="Search name, prompt, tag, error"
+              value={search}
+              style={{ width: "10rem" }}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+            <select
+              value={activeFilter}
+              title="Show one folder. New images go to the folder you are looking at."
+              style={{ width: "auto", maxWidth: "10rem" }}
+              onChange={(event) => ui().setLibraryFolder(event.target.value)}
             >
-              clear failed
-            </Button>
-          ) : null}
-          <Button
-            variant="ghost"
-            disabled={selectedIds.length !== 1 || busy !== null}
-            title="Load this item's prompt, model, templates, and modes into the generate panel"
-            onClick={() => {
-              const asset = selectedAssets[0];
-              if (asset) {
-                store().restoreFromAsset(asset);
-                return;
-              }
-              if (selectedJob) {
-                store().restoreFromAsset({
-                  prompt: selectedJob.prompt,
-                  generation: selectedJob.generation,
-                  generatedWith: selectedJob.processing,
-                  inputs: selectedJob.inputs,
-                  sequencePlan: selectedJob.sequencePlan,
-                  label: selectedJob.label
-                });
-              }
-            }}
-          >
-            use setup
-          </Button>
-          <Button
-            variant="primary"
-            disabled={selectedAssets.length === 0 || busy !== null}
-            title="Queue a fresh generation for each selected asset, reusing its stored prompt and inputs"
-            onClick={() => void store().rerunSelected()}
-          >
-            rerun {selectedAssets.length > 0 ? selectedAssets.length : ""}
-          </Button>
-        </>
-      }
-    >
-      <Row className="mb-2">
-        <input
-          type="text"
-          placeholder="search name, prompt, tag, error"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
-      </Row>
+              <option value="">All folders</option>
+              {folders.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {entry.name}
+                </option>
+              ))}
+              <option value={UNFILED}>No Folder</option>
+            </select>
+            <NewFolderButton />
+          </>
+        }
+      >
+        {!loaded ? (
+          <div className="flex flex-wrap items-start gap-2">
+            {Array.from({ length: 12 }, (_, index) => (
+              <Skeleton
+                key={index}
+                className="shrink-0"
+                style={{ width: thumbSize, height: thumbSize }}
+              />
+            ))}
+          </div>
+        ) : items.length === 0 && folders.length === 0 ? (
+          <p className="text-[11px] leading-snug text-slate-500">
+            Nothing here yet. Write a prompt and hit Generate.
+          </p>
+        ) : (
+          // Room under the last row for the floating zoom control.
+          <div className="pb-10">
+            {sections.map((section) => (
+              <FolderSection
+                key={section.id}
+                id={section.id}
+                name={section.name}
+                entries={section.entries}
+                thumb={thumb}
+                thumbSize={thumbSize}
+              />
+            ))}
+          </div>
+        )}
+    </Panel>
 
-      <Row className="mb-3">
-        <select
-          value={activeFilter}
-          title="Show one folder. New images go to the folder you are looking at."
-          onChange={(event) => ui().setLibraryFolder(event.target.value)}
-        >
-          <option value="">All folders</option>
-          {folders.map((entry) => (
-            <option key={entry.id} value={entry.id}>
-              {entry.name}
-            </option>
-          ))}
-          <option value={UNFILED}>No Folder</option>
-        </select>
-        <NewFolderButton />
+      {/* Floats over the corner of the library rather than taking a row. */}
+      <div className="absolute right-3 bottom-3 z-20 flex w-[30%] min-w-28 items-center gap-2 rounded border border-[var(--color-edge)] bg-[var(--color-ink-800)]/90 px-2 py-1 shadow-lg backdrop-blur">
+        <span aria-hidden className="text-[10px] text-slate-500">
+          −
+        </span>
         <input
           type="range"
           min={48}
@@ -763,74 +762,10 @@ export function LibraryPanel() {
           title="Thumbnail size"
           onChange={(event) => setThumbSize(Number.parseInt(event.target.value, 10))}
         />
-      </Row>
-
-      {selectedIds.length > 0 ? (
-        <Row className="mb-2">
-          <Button variant="ghost" onClick={() => ui().clearSelection()}>
-            clear selection
-          </Button>
-          <Button
-            disabled={!scene || selectedAssets.length === 0}
-            onClick={() => {
-              if (scene && selectedAssets.length > 0) {
-                stageMany(
-                  scene.id,
-                  selectedAssets.map((asset) => asset.id),
-                  scene.items.length
-                );
-              }
-            }}
-          >
-            stage {selectedAssets.length}
-          </Button>
-          <Button
-            variant="primary"
-            disabled={selectedAssets.length === 0}
-            title={
-              selectedAssets.length === 1
-                ? "Download this image"
-                : `Download all ${selectedAssets.length} as a zip, packaged in your browser`
-            }
-            onClick={() => setExporting(true)}
-          >
-            download {selectedAssets.length}
-          </Button>
-        </Row>
-      ) : null}
-
-      {exporting ? (
-        <ExportDialog assets={selectedAssets} onClose={() => setExporting(false)} />
-      ) : null}
-
-      {!loaded ? (
-        <div className="flex flex-wrap items-start gap-2">
-          {Array.from({ length: 12 }, (_, index) => (
-            <Skeleton
-              key={index}
-              className="shrink-0"
-              style={{ width: thumbSize, height: thumbSize }}
-            />
-          ))}
-        </div>
-      ) : items.length === 0 && folders.length === 0 ? (
-        <p className="text-[11px] leading-snug text-slate-500">
-          Nothing here yet. Write a prompt and hit Generate.
-        </p>
-      ) : (
-        <div>
-          {sections.map((section) => (
-            <FolderSection
-              key={section.id}
-              id={section.id}
-              name={section.name}
-              entries={section.entries}
-              thumb={thumb}
-              thumbSize={thumbSize}
-            />
-          ))}
-        </div>
-      )}
-    </Panel>
+        <span aria-hidden className="text-[10px] text-slate-500">
+          +
+        </span>
+      </div>
+    </div>
   );
 }
