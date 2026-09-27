@@ -31,6 +31,12 @@ import {
   pixelConstraintWindow
 } from "@/core/pixelMask";
 import { isBatch } from "@/shared/batch";
+import {
+  modelSummary,
+  modesSummary,
+  pixelArtSummary,
+  templateSummary
+} from "@/shared/sectionSummary";
 import { planAnimation, planItemGrid } from "@/shared/animationPrompt";
 import { activeFeaturePrompts } from "@/shared/featurePrompt";
 import { SuggestedPrompt } from "./SuggestedPrompt";
@@ -999,11 +1005,25 @@ export function GeneratePanel() {
         </p>
       ) : null}
 
-      <Section id="generate.model" label="model">
+      <Section
+        id="generate.model"
+        label="model"
+        summary={modelSummary(modelOrDefault(generation.model).label, generation)}
+      >
         <ModelAndSize />
       </Section>
 
-      <Section id="generate.modes" label="modes">
+      <Section
+        id="generate.modes"
+        label="modes"
+        summary={modesSummary({
+          animation: animation.enabled,
+          itemGrid: itemGrid.enabled && !animation.enabled ? itemGrid : null,
+          loopSteps: loop.enabled ? loop.steps : null,
+          chunk: chunk.enabled ? chunk : null,
+          each: each.enabled
+        })}
+      >
         <LoopMode canEdit={modelOrDefault(generation.model).supportsEdit} />
         <ChunkMode canEdit={modelOrDefault(generation.model).supportsEdit} />
         <EachMode canEdit={modelOrDefault(generation.model).supportsEdit} />
@@ -1011,7 +1031,7 @@ export function GeneratePanel() {
         <ItemGridMode />
       </Section>
 
-      <Section id="generate.size" label="pixel art">
+      <Section id="generate.size" label="pixel art" summary={pixelArtSummary(processing)}>
         <DownsampleControls
           processing={processing}
           onChange={(patch) => store().setDefaultProcessing(patch)}
@@ -1023,7 +1043,14 @@ export function GeneratePanel() {
         />
       </Section>
 
-      <Section id="generate.template" label="template">
+      <Section
+        id="generate.template"
+        label="template"
+        summary={templateSummary({
+          images: sheetOn ? 0 : bases.length,
+          mask: mask ? templateName(mask.source) : null
+        })}
+      >
         <TemplatePanel />
         <Toggle
           label="Clip result to iso diamond"

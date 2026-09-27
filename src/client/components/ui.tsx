@@ -858,10 +858,13 @@ export function Divider({ label }: { label?: string }) {
 export function Section({
   id,
   label,
+  summary,
   children
 }: {
   id: string;
   label: string;
+  /** Shown dimmed beside the label while collapsed: what the section is set to. */
+  summary?: string;
   children: ReactNode;
 }) {
   const collapsed = useUi((state) => sectionCollapsed(id, state.collapsedSections));
@@ -885,9 +888,12 @@ export function Section({
           <path d="M3 1.5 6.5 5 3 8.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
         </svg>
         {/* Type and colour on the span: the global button rule beats them on the button. */}
-        <span className="truncate text-[11px] font-semibold tracking-wider text-slate-300 uppercase group-hover:text-white">
+        <span className="shrink-0 text-[11px] font-semibold tracking-wider text-slate-300 uppercase group-hover:text-white">
           {label}
         </span>
+        {collapsed && summary ? (
+          <span className="min-w-0 truncate text-[11px] text-slate-500">{summary}</span>
+        ) : null}
       </button>
       {collapsed ? null : <div className="px-3 pt-2.5 pb-3">{children}</div>}
     </section>

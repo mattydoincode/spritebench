@@ -12,6 +12,12 @@ import { useMaskOverlay } from "@/client/maskOverlay";
 import { PROCESS_PRIORITY } from "@/client/processor";
 import { useSequenceFrames, useSequencePlayback } from "@/client/sequence";
 import { isSetAsset } from "@/shared/repeaterMix";
+import {
+  cleanupSummary,
+  paletteSummary,
+  pixelArtSummary,
+  transparencySummary
+} from "@/shared/sectionSummary";
 import { frameSettings, frameSourceAssetId, type Sequence } from "@/shared/sequence";
 import { AnimationBar } from "./AnimationBar";
 import { SetSection } from "./SetSection";
@@ -386,11 +392,15 @@ export function InspectorPanel() {
         />
       ) : null}
 
-      <Section id="inspector.size" label="pixel art">
+      <Section id="inspector.size" label="pixel art" summary={pixelArtSummary(processing)}>
         <DownsampleControls processing={processing} onChange={update} />
       </Section>
 
-      <Section id="inspector.transparency" label="transparency">
+      <Section
+        id="inspector.transparency"
+        label="transparency"
+        summary={transparencySummary(processing)}
+      >
 
       <Field label="Cutout">
         <Select
@@ -508,7 +518,11 @@ export function InspectorPanel() {
       />
       </Section>
 
-      <Section id="inspector.palette" label="palette">
+      <Section
+        id="inspector.palette"
+        label="palette"
+        summary={paletteSummary(processing, paletteName(processing.paletteId))}
+      >
         <Field label="Palette" hint={`${palette.length} colours`}>
           <select
             value={processing.paletteId}
@@ -575,7 +589,11 @@ export function InspectorPanel() {
         ) : null}
       </Section>
 
-      <Section id="inspector.cleanup" label="orientation and cleanup">
+      <Section
+        id="inspector.cleanup"
+        label="orientation and cleanup"
+        summary={cleanupSummary(processing)}
+      >
         <Field label="Rotate">
           <Select
             value={processing.orientation}

@@ -36,7 +36,7 @@ export function SetSection({
   const grid = set.view === "grid";
 
   return (
-    <Section id="inspector.sequence" label={grid ? "tileset" : "set"}>
+    <Section id="inspector.sequence" label={grid ? "tileset" : "set"} summary={setBadge(set)}>
       <p className="mb-2 text-[10px] leading-snug text-slate-500">
         {set.kind === "grid"
           ? "Chunk outputs, slotted back onto the source grid."
