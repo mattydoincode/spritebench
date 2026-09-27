@@ -284,6 +284,86 @@ function ModelAndSize() {
   );
 }
 
+type Automation = "none" | "loop" | "chunk" | "each" | "animation" | "itemGrid";
+
+const AUTOMATIONS: Array<{ id: Automation; label: string; hint: string; edits?: boolean }> = [
+  { id: "none", label: "None", hint: "one image per job" },
+  { id: "loop", label: "Loop", hint: "each result feeds the next step", edits: true },
+  { id: "chunk", label: "Chunk", hint: "split a start image into cells, redo each", edits: true },
+  { id: "each", label: "Each image", hint: "same prompt on every attached image", edits: true },
+  { id: "animation", label: "Animation sheet", hint: "actions as rows of frames" },
+  { id: "itemGrid", label: "Item grid", hint: "many separate items on one sheet" }
+];
+
+/**
+ * Which automation shapes this Generate. They are exclusive -- turning one on
+ * turns the rest off -- so they are a radio list with None as the default,
+ * and only the chosen one's settings show underneath.
+ */
+function AutomationPicker({ canEdit }: { canEdit: boolean }) {
+  const loop = useUi((state) => state.loop.enabled);
+  const chunk = useUi((state) => state.chunk.enabled);
+  const each = useUi((state) => state.each.enabled);
+  const animation = useUi((state) => state.animation.enabled);
+  const itemGrid = useUi((state) => state.itemGrid.enabled);
+  const ui = useUi.getState;
+
+  const current: Automation = loop
+    ? "loop"
+    : chunk
+      ? "chunk"
+      : each
+        ? "each"
+        : animation
+          ? "animation"
+          : itemGrid
+            ? "itemGrid"
+            : "none";
+
+  const choose = (next: Automation) => {
+    if (next === "loop") ui().setLoop({ enabled: true });
+    else if (next === "chunk") ui().setChunk({ enabled: true });
+    else if (next === "each") ui().setEach({ enabled: true });
+    else if (next === "animation") ui().setAnimation({ enabled: true });
+    else if (next === "itemGrid") ui().setItemGrid({ enabled: true });
+    else {
+      ui().setLoop({ enabled: false });
+      ui().setChunk({ enabled: false });
+      ui().setEach({ enabled: false });
+      ui().setAnimation({ enabled: false });
+      ui().setItemGrid({ enabled: false });
+    }
+  };
+
+  return (
+    <div role="radiogroup" aria-label="Automation" className="mb-2 flex flex-col">
+      {AUTOMATIONS.map((option) => {
+        const blocked = option.edits === true && !canEdit;
+        return (
+          <label
+            key={option.id}
+            title={blocked ? "This model cannot edit an existing image" : undefined}
+            className={`flex items-baseline gap-2 rounded px-1 py-0.5 ${
+              blocked ? "opacity-40" : "cursor-pointer hover:bg-[var(--color-ink-700)]"
+            }`}
+          >
+            <input
+              type="radio"
+              name="automation"
+              checked={current === option.id}
+              disabled={blocked}
+              onChange={() => choose(option.id)}
+              className="h-3 w-3 shrink-0 translate-y-0.5 accent-[var(--color-accent)]"
+            />
+            <span className="shrink-0 text-[11px] text-slate-200">{option.label}</span>
+            <span className="min-w-0 truncate text-[10px] text-slate-500">{option.hint}</span>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
 function ItemGridMode() {
   const itemGrid = useUi((state) => state.itemGrid);
   const mask = useUi((state) => state.mask);
@@ -301,14 +381,10 @@ function ItemGridMode() {
     cellSize: itemGrid.cellSize
   });
 
+  if (!itemGrid.enabled) return null;
+
   return (
     <div className="mb-2">
-      <Toggle
-        label="Item grid"
-        checked={itemGrid.enabled}
-        onChange={(enabled) => ui().setItemGrid({ enabled })}
-      />
-
       {itemGrid.enabled ? (
         <>
           <Row className="mb-2">
@@ -366,18 +442,14 @@ function ItemGridMode() {
   );
 }
 
-function LoopMode({ canEdit }: { canEdit: boolean }) {
+function LoopMode() {
   const loop = useUi((state) => state.loop);
   const ui = useUi.getState;
 
+  if (!loop.enabled) return null;
+
   return (
     <div className="mb-2">
-      <Toggle
-        label="Loop"
-        checked={loop.enabled}
-        disabled={!canEdit}
-        onChange={(enabled) => ui().setLoop({ enabled })}
-      />
       {loop.enabled ? (
         <>
           <Field label="Steps" hint="same prompt, each output feeds the next">
@@ -408,10 +480,6 @@ function LoopMode({ canEdit }: { canEdit: boolean }) {
             {loop.includeStart ? " The start is frame 1 of the finished loop." : ""}
           </p>
         </>
-      ) : !canEdit ? (
-        <p className="mb-2 text-[10px] leading-snug text-slate-500">
-          This model cannot edit an existing image.
-        </p>
       ) : null}
     </div>
   );
@@ -498,19 +566,14 @@ function EachImages() {
   );
 }
 
-function EachMode({ canEdit }: { canEdit: boolean }) {
+function EachMode() {
   const each = useUi((state) => state.each);
   const bases = useUi((state) => state.bases);
-  const ui = useUi.getState;
+
+  if (!each.enabled) return null;
 
   return (
     <div className="mb-2">
-      <Toggle
-        label="Each image"
-        checked={each.enabled}
-        disabled={!canEdit}
-        onChange={(enabled) => ui().setEach({ enabled })}
-      />
       {each.enabled ? (
         <>
           <EachImages />
@@ -519,28 +582,20 @@ function EachMode({ canEdit }: { canEdit: boolean }) {
             , then Generate. Lands as one batch, like variables.
           </p>
         </>
-      ) : !canEdit ? (
-        <p className="mb-2 text-[10px] leading-snug text-slate-500">
-          This model cannot edit an existing image.
-        </p>
       ) : null}
     </div>
   );
 }
 
-function ChunkMode({ canEdit }: { canEdit: boolean }) {
+function ChunkMode() {
   const chunk = useUi((state) => state.chunk);
   const ui = useUi.getState;
   const cells = chunk.columns * chunk.rows;
 
+  if (!chunk.enabled) return null;
+
   return (
     <div className="mb-2">
-      <Toggle
-        label="Chunk"
-        checked={chunk.enabled}
-        disabled={!canEdit}
-        onChange={(enabled) => ui().setChunk({ enabled })}
-      />
       {chunk.enabled ? (
         <>
           <Row className="mb-2">
@@ -571,10 +626,6 @@ function ChunkMode({ canEdit }: { canEdit: boolean }) {
             Slices the starting image into {cells} cells, one parallel edit each.
           </p>
         </>
-      ) : !canEdit ? (
-        <p className="mb-2 text-[10px] leading-snug text-slate-500">
-          This model cannot edit an existing image.
-        </p>
       ) : null}
     </div>
   );
@@ -602,14 +653,10 @@ function AnimationMode() {
     });
   };
 
+  if (!animation.enabled) return null;
+
   return (
     <div className="mb-2">
-      <Toggle
-        label="Animation sheet"
-        checked={animation.enabled}
-        onChange={(enabled) => ui().setAnimation({ enabled })}
-      />
-
       {animation.enabled ? (
         <>
           <div className="mb-2">
@@ -1015,7 +1062,7 @@ export function GeneratePanel() {
 
       <Section
         id="generate.modes"
-        label="modes"
+        label="automations"
         summary={modesSummary({
           animation: animation.enabled,
           itemGrid: itemGrid.enabled && !animation.enabled ? itemGrid : null,
@@ -1024,9 +1071,10 @@ export function GeneratePanel() {
           each: each.enabled
         })}
       >
-        <LoopMode canEdit={modelOrDefault(generation.model).supportsEdit} />
-        <ChunkMode canEdit={modelOrDefault(generation.model).supportsEdit} />
-        <EachMode canEdit={modelOrDefault(generation.model).supportsEdit} />
+        <AutomationPicker canEdit={modelOrDefault(generation.model).supportsEdit} />
+        <LoopMode />
+        <ChunkMode />
+        <EachMode />
         <AnimationMode />
         <ItemGridMode />
       </Section>
