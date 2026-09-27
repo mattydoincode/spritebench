@@ -381,7 +381,7 @@ export function ColumnsEditor({
 /** A table's name, click to rename when SpriteBench made it. */
 function TableName({ collection, canEdit }: { collection: EngineCollectionView; canEdit: boolean }) {
   const [draft, setDraft] = useState<string | null>(null);
-  const editable = canEdit;
+  const editable = canEdit && collection.origin === "web";
 
   if (draft !== null) {
     const commit = () => {
@@ -410,13 +410,7 @@ function TableName({ collection, canEdit }: { collection: EngineCollectionView; 
   return (
     <h3
       className={`truncate text-[12px] text-slate-200 ${editable ? "cursor-text hover:underline" : ""}`}
-      title={
-        !editable
-          ? undefined
-          : collection.origin === "web"
-            ? "Click to rename"
-            : "Click to rename. SpriteBench will manage this table's name and columns from then on."
-      }
+      title={editable ? "Click to rename" : "Made in Godot: rename it there"}
       onClick={() => {
         if (editable) setDraft(collection.label);
       }}
@@ -468,18 +462,12 @@ export function EngineCollections({
           <p className="mb-1.5 truncate font-mono text-[10px] text-slate-600">
             {collection.godotPath || "made in SpriteBench"}
           </p>
-          {canEdit || collection.origin === "web" ? (
+          {collection.origin === "web" ? (
             <details className="mb-1.5" open={collection.records.length === 0}>
               <summary className="cursor-pointer text-[10px] tracking-wider text-slate-500 uppercase">
                 columns ({collection.fields.length})
               </summary>
               <div className="mt-1">
-                {collection.origin === "godot" ? (
-                  <p className="mb-1 text-[10px] leading-snug text-slate-500">
-                    Made in Godot. Editing columns or the name here hands this table to SpriteBench;
-                    the plugin updates its .tres to match.
-                  </p>
-                ) : null}
                 <ColumnsEditor
                   columns={collection.fields}
                   disabled={!canEdit}
