@@ -57,6 +57,8 @@ interface DocState {
   sets: AssetSet[];
   snippets: Snippet[];
   folders: Folder[];
+  /** Godot slot id → fingerprint of its images at its last export. */
+  slotExports: Record<string, string>;
   settings: ProjectSettings;
   canUndo: boolean;
   canRedo: boolean;
@@ -128,6 +130,7 @@ interface DocState {
   /** Where a job's images land when they arrive. */
   setJobFolder: (jobId: string, folderId: string) => void;
   jobFolderOf: (jobId: string) => string;
+  setSlotExport: (slotId: string, fingerprint: string) => void;
   setTags: (assetId: string, tags: string[]) => void;
   patchProcessing: (assetId: string, patch: Partial<ProcessingSettings>) => void;
   applyProcessingToMany: (assetIds: string[], processing: ProcessingSettings) => void;
@@ -179,6 +182,7 @@ export const useDoc = create<DocState>((set, get) => {
       scenes: doc.listScenes(sync.doc),
       snippets: doc.listSnippets(sync.doc),
       folders: doc.listFolders(sync.doc),
+      slotExports: doc.listSlotExports(sync.doc),
       settings: doc.readProjectSettings(sync.doc),
       edits: Object.fromEntries(
         [...doc.assetEditsMap(sync.doc).keys()].flatMap((assetId) => {
@@ -201,6 +205,7 @@ export const useDoc = create<DocState>((set, get) => {
     sets: [],
     snippets: [],
     folders: [],
+    slotExports: {},
     settings: DEFAULT_PROJECT_SETTINGS,
     canUndo: false,
     canRedo: false,
@@ -223,6 +228,7 @@ export const useDoc = create<DocState>((set, get) => {
         sets: [],
         snippets: [],
         folders: [],
+        slotExports: {},
         settings: DEFAULT_PROJECT_SETTINGS
       });
       void sync.start();
@@ -238,6 +244,7 @@ export const useDoc = create<DocState>((set, get) => {
         sets: [],
         snippets: [],
         folders: [],
+        slotExports: {},
         settings: DEFAULT_PROJECT_SETTINGS
       });
     },
@@ -522,6 +529,11 @@ export const useDoc = create<DocState>((set, get) => {
     deleteFolder(id) {
       const { sync } = get();
       if (sync) doc.deleteFolder(sync.doc, id);
+    },
+
+    setSlotExport(slotId, fingerprint) {
+      const { sync } = get();
+      if (sync) doc.setSlotExport(sync.doc, slotId, fingerprint);
     },
 
     jobFolderOf(jobId) {

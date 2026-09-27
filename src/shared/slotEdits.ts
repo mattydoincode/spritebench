@@ -15,7 +15,9 @@ export type SlotEdit =
   | { type: "add"; assetIds: string[] }
   | { type: "replace"; assetIds: string[] }
   | { type: "drop"; assetIds: string[] }
-  | { type: "move"; assetId: string; delta: number };
+  | { type: "move"; assetId: string; delta: number }
+  /** Same images, exported again: picks up edits made since the last export. */
+  | { type: "refresh" };
 
 export function applySlotEdit(
   intent: EngineSlotIntent,
@@ -31,6 +33,8 @@ export function applySlotEdit(
       return dropSlotAssignment(current, edit.assetIds);
     case "move":
       return moveSlotAssignment(current, current.indexOf(edit.assetId), edit.delta);
+    case "refresh":
+      return [...current];
   }
 }
 

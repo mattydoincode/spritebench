@@ -36,6 +36,7 @@ import {
 } from "@/shared/assignStream";
 import type { EngineSlotRecord } from "@/shared/engineSlot";
 import { applySlotEdits, sameAssignment, type SlotEdit } from "@/shared/slotEdits";
+import { slotExportFingerprint } from "@/shared/exportFingerprint";
 import { createSlotQueue } from "@/client/slotQueue";
 import type { EngineCollectionView } from "@/shared/engineCollection";
 import type { StudioBootstrap } from "@/shared/studioBootstrap";
@@ -196,6 +197,8 @@ interface ServerState {
     assetIds: string[],
     options?: { replace?: boolean }
   ) => Promise<void>;
+  /** Re-exports these slots with their images' current edits. */
+  syncSlots: (slotIds: string[]) => Promise<void>;
   /** Queues an edit; slots export in parallel, edits to one slot in order. */
   editSlot: (slotId: string, edit: SlotEdit) => Promise<void>;
   createRecord: (collectionId: string, key: string, copyFrom?: string) => Promise<void>;
@@ -239,7 +242,11 @@ export const useServer = create<ServerState>((set, get) => {
     if (!current) return;
     const existing = current.assignedAssetIds ?? [];
     const assetIds = applySlotEdits(current.intent ?? "texture", existing, edits);
-    if (sameAssignment(assetIds, existing) && current.remoteHash) return;
+    const refresh = edits.some((edit) => edit.type === "refresh");
+    if (!refresh && sameAssignment(assetIds, existing) && current.remoteHash) return;
+    // What these images look like as of this export, so the Godot panel can
+    // flag the slot once they are edited again.
+    const fingerprint = slotExportFingerprint(assetIds, useDoc.getState().edits);
 
     const ui = useUi.getState();
     ui.setError(null);
@@ -262,6 +269,7 @@ export const useServer = create<ServerState>((set, get) => {
       set({
         slots: get().slots.map((entry) => (entry.id === slot.id ? slot : entry))
       });
+      useDoc.getState().setSlotExport(slot.id, fingerprint);
       void get().refreshAssets();
     } catch (error) {
       fail(error);
@@ -1175,6 +1183,12 @@ export const useServer = create<ServerState>((set, get) => {
 
     editSlot(slotId, edit) {
       return slotQueue.enqueue(slotId, edit);
+    },
+
+    syncSlots(slotIds) {
+      return Promise.all(slotIds.map((id) => slotQueue.enqueue(id, { type: "refresh" }))).then(
+        () => undefined
+      );
     },
 
     async createRecord(collectionId, key, copyFrom) {

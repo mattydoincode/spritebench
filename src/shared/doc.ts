@@ -75,6 +75,8 @@ const SNIPPETS = "snippets";
 const FOLDERS = "folders";
 /** Job id → folder id, written at Generate so the job's images land there. */
 const JOB_FOLDERS = "jobFolders";
+/** Godot slot id → `slotExportFingerprint` of its images when it last exported. */
+const SLOT_EXPORTS = "slotExports";
 const SETTINGS_CUTOUT = "settings.cutout";
 const SETTINGS_CUTOUT_FLOOD = "settings.cutout.edgeFloodFill";
 const SETTINGS_CUTOUT_CHROMA = "settings.cutout.chromaKey";
@@ -603,6 +605,19 @@ export function renameFolder(doc: Y.Doc, id: string, name: string): void {
 /** Its images stay; they read as unfiled once the id no longer resolves. */
 export function deleteFolder(doc: Y.Doc, id: string): void {
   transactLocal(doc, () => foldersMap(doc).delete(id));
+}
+
+function slotExportsMap(doc: Y.Doc): Y.Map<string> {
+  return doc.getMap<string>(SLOT_EXPORTS);
+}
+
+export function listSlotExports(doc: Y.Doc): Record<string, string> {
+  return Object.fromEntries(slotExportsMap(doc).entries());
+}
+
+export function setSlotExport(doc: Y.Doc, slotId: string, fingerprint: string): void {
+  if (slotExportsMap(doc).get(slotId) === fingerprint) return;
+  transactLocal(doc, () => slotExportsMap(doc).set(slotId, fingerprint));
 }
 
 export function setJobFolder(doc: Y.Doc, jobId: string, folderId: string): void {

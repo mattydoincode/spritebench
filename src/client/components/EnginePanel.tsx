@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useState, type DragEvent } from "react";
 import { isAssetDrag, readAssetDrag } from "@/client/dragAssets";
 import { useActiveScene, useAssets } from "@/client/stores/assets";
+import { useDoc } from "@/client/stores/doc";
 import { useProjectLoaded, useServer } from "@/client/stores/server";
 import { ENGINE_THUMB_MAX, ENGINE_THUMB_MIN, useUi } from "@/client/stores/ui";
 import { describeSlotActivity } from "@/shared/assignStream";
@@ -13,12 +14,13 @@ import {
   type EngineSlotRecord,
   type EngineSlotStatus
 } from "@/shared/engineSlot";
+import { slotExportFingerprint } from "@/shared/exportFingerprint";
 import type { ResolvedAsset } from "@/shared/model";
 import type { SlotEdit } from "@/shared/slotEdits";
 import { AssetThumb } from "./AssetBitmap";
 import { EngineCollections } from "./EngineCollections";
 import { LeftTabs } from "./LeftTabs";
-import { Panel, Skeleton, TextButton } from "./ui";
+import { Button, Panel, Skeleton, TextButton } from "./ui";
 
 const STATUS_LABEL: Record<EngineSlotStatus, string> = {
   empty: "empty",
@@ -179,13 +181,55 @@ function AssignedList({
   );
 }
 
+/**
+ * Slots whose images have been edited since they were last sent to Godot.
+ *
+ * A slot with no fingerprint on record (exported before fingerprints existed)
+ * is taken to match what its images look like now, and that is recorded, so
+ * edits from here on are caught.
+ */
+function useChangedSlots(slots: EngineSlotRecord[], canEdit: boolean): string[] {
+  const edits = useDoc((state) => state.edits);
+  const exported = useDoc((state) => state.slotExports);
+  const docReady = useDoc((state) => state.ready);
+  const loaded = useProjectLoaded();
+
+  const live = useMemo(
+    () => slots.filter((slot) => slot.remoteHash && slot.assignedAssetIds.length > 0),
+    [slots]
+  );
+
+  useEffect(() => {
+    if (!canEdit || !docReady || !loaded) return;
+    for (const slot of live) {
+      if (exported[slot.id] === undefined) {
+        useDoc.getState().setSlotExport(slot.id, slotExportFingerprint(slot.assignedAssetIds, edits));
+      }
+    }
+  }, [canEdit, docReady, edits, exported, live, loaded]);
+
+  return useMemo(
+    () =>
+      live
+        .filter((slot) => {
+          const recorded = exported[slot.id];
+          return recorded !== undefined && recorded !== slotExportFingerprint(slot.assignedAssetIds, edits);
+        })
+        .map((slot) => slot.id),
+    [edits, exported, live]
+  );
+}
+
 function SlotRow({
   slot,
   highlight,
   canEdit,
+  changed,
   assets
 }: {
   slot: EngineSlotRecord;
+  /** Its images were edited after it was last sent to Godot. */
+  changed: boolean;
   highlight: ReadonlySet<string>;
   canEdit: boolean;
   assets: ResolvedAsset[];
@@ -252,11 +296,20 @@ function SlotRow({
           </p>
         </button>
         <span
+          title={
+            changed && !active
+              ? "Edited in the studio since it was sent to Godot. Sync to send the new version."
+              : undefined
+          }
           className={`shrink-0 text-[10px] ${
-            active ? "text-sky-400" : `uppercase ${STATUS_TONE[slot.status]}`
+            active
+              ? "text-sky-400"
+              : changed
+                ? "text-amber-300 uppercase"
+                : `uppercase ${STATUS_TONE[slot.status]}`
           }`}
         >
-          {active ? describeSlotActivity(assigning, queued) : STATUS_LABEL[slot.status]}
+          {active ? describeSlotActivity(assigning, queued) : changed ? "changed" : STATUS_LABEL[slot.status]}
         </span>
       </div>
 
@@ -323,6 +376,8 @@ export function EnginePanel() {
   const highlight = useHighlightedAssets();
   const canEdit = project?.role !== "viewer";
   const slots = allSlots.filter((slot) => slot.kind !== "record_field");
+  const changed = useChangedSlots(allSlots, Boolean(canEdit));
+  const changedSet = new Set(changed);
 
   return (
     <Panel tabs={<LeftTabs />}>
@@ -330,6 +385,24 @@ export function EnginePanel() {
         <p className="mb-2 font-mono text-[10px] break-all text-slate-500">
           project {project.id}
         </p>
+      ) : null}
+
+      {changed.length > 0 ? (
+        <div className="mb-2 flex items-center gap-2 rounded border border-amber-700/60 bg-amber-950/30 px-2 py-1.5 text-[11px] text-amber-200">
+          <span className="min-w-0 flex-1">
+            {changed.length === 1 ? "1 slot has" : `${changed.length} slots have`} edits Godot does
+            not have yet
+          </span>
+          {canEdit ? (
+            <Button
+              variant="primary"
+              title="Send the latest version of every changed image to Godot"
+              onClick={() => void useServer.getState().syncSlots(changed)}
+            >
+              sync
+            </Button>
+          ) : null}
+        </div>
       ) : null}
 
       {allSlots.length > 0 || collections.length > 0 ? (
@@ -378,6 +451,7 @@ export function EnginePanel() {
             <SlotRow
               key={slot.id}
               slot={slot}
+              changed={changedSet.has(slot.id)}
               highlight={highlight}
               canEdit={Boolean(canEdit)}
               assets={assets}
