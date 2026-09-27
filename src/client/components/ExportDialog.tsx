@@ -23,9 +23,16 @@ import { Button, Field, Modal, Row, Select } from "./ui";
  */
 export function ExportDialog({
   assets,
+  names,
+  filename,
+  title,
   onClose
 }: {
   assets: ResolvedAsset[];
+  /** Per-asset paths in the zip (see `archivePath`); defaults to each image's name. */
+  names?: ReadonlyMap<string, string>;
+  filename?: string;
+  title?: string;
   onClose: () => void;
 }) {
   const project = useServer((state) => state.project);
@@ -60,7 +67,7 @@ export function ExportDialog({
 
     try {
       if (single && !wantsSequence) {
-        await downloadAsset(context, assets[0], kind, lookup);
+        await downloadAsset(context, assets[0], kind, lookup, names?.get(assets[0].id));
         onClose();
         return;
       }
@@ -70,8 +77,10 @@ export function ExportDialog({
         assets,
         kind,
         lookup,
-        zipFilename(assets.length, kind),
-        setProgress
+        filename ?? zipFilename(assets.length, kind),
+        setProgress,
+        undefined,
+        names
       );
 
       if (result.failures.length === 0) {
@@ -94,7 +103,7 @@ export function ExportDialog({
 
   return (
     <Modal
-      title={single ? "Download image" : `Download ${assets.length} images`}
+      title={title ?? (single ? "Download image" : `Download ${assets.length} images`)}
       onClose={onClose}
       width={460}
     >

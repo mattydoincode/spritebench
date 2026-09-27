@@ -23,7 +23,9 @@ import {
 import { slotExportFingerprint } from "@/shared/exportFingerprint";
 import type { ResolvedAsset } from "@/shared/model";
 import type { SlotEdit } from "@/shared/slotEdits";
+import { archivePath } from "@/client/export";
 import { AssetThumb } from "./AssetBitmap";
+import { ExportDialog } from "./ExportDialog";
 import { EngineCollections } from "./EngineCollections";
 import { LeftTabs } from "./LeftTabs";
 import { Button, ConfirmTextButton, Panel, PanelTab, Skeleton, TextButton } from "./ui";
@@ -573,6 +575,26 @@ export function EnginePanel() {
   const lane = useUi((state) => state.gameAssetLane);
   const gameLane = useServer((state) => state.gameLane);
   const [creating, setCreating] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  // Every image in the lane you are viewing, named by the slot it fills: a
+  // still keeps the slot's name, a list numbers its images inside a folder.
+  const laneArt = useMemo(() => {
+    const byId = new Map(assets.map((asset) => [asset.id, asset]));
+    const names = new Map<string, string>();
+    const picked: ResolvedAsset[] = [];
+    for (const slot of allSlots) {
+      const ids = laneAssetIds(slot, lane);
+      ids.forEach((id, index) => {
+        const asset = byId.get(id);
+        if (!asset || names.has(id)) return;
+        const base = archivePath(slot.label) || id.slice(0, 8);
+        names.set(id, slot.intent === "textures" ? `${base}/${index + 1}` : base);
+        picked.push(asset);
+      });
+    }
+    return { assets: picked, names };
+  }, [allSlots, assets, lane]);
 
   return (
     <Panel
@@ -586,6 +608,15 @@ export function EnginePanel() {
       }
     >
       {creating ? <NewGameAsset onDone={() => setCreating(false)} /> : null}
+      {downloading ? (
+        <ExportDialog
+          assets={laneArt.assets}
+          names={laneArt.names}
+          title={`Download all ${lane} art`}
+          filename={`${archivePath(project?.name ?? "game") || "game"}-${lane}.zip`}
+          onClose={() => setDownloading(false)}
+        />
+      ) : null}
       {loaded && !engineSyncedAt ? (
         <p className="mb-2 text-[10px] leading-snug text-slate-500">
           Using Godot? The{" "}
@@ -621,6 +652,15 @@ export function EnginePanel() {
           </PanelTab>
         </div>
         <span className="flex-1" />
+        {laneArt.assets.length > 0 ? (
+          <TextButton
+            className="self-center"
+            title={`Download every ${lane} image as one zip, named by slot. Built in your browser.`}
+            onClick={() => setDownloading(true)}
+          >
+            download {laneArt.assets.length}
+          </TextButton>
+        ) : null}
         <span
           className="self-center text-[10px] text-slate-500"
           title="Set in Godot: Project Settings → SpriteBench → Art"

@@ -151,7 +151,9 @@ export function planZipEntries(
   context: ExportContext,
   assets: ResolvedAsset[],
   kind: ExportKind,
-  nameOverride?: string
+  nameOverride?: string,
+  /** Per-asset path in the archive, without extension; may hold folders ("buildings/front"). */
+  stems?: ReadonlyMap<string, string>
 ): PlannedEntry[] {
   const nameFor = uniqueNamer();
   const wantOriginal = kind === "original" || kind === "both";
@@ -164,7 +166,8 @@ export function planZipEntries(
   for (const asset of assets) {
     // An override only makes sense for a single asset; across a batch every
     // entry would collide and get suffixed into nonsense.
-    const stem = baseName(context, asset, assets.length === 1 ? nameOverride : undefined);
+    const stem =
+      stems?.get(asset.id) ?? baseName(context, asset, assets.length === 1 ? nameOverride : undefined);
 
     if (wantOriginal) {
       planned.push({
@@ -507,11 +510,12 @@ export async function downloadZip(
   lookup: PaletteLookup,
   filename = "spritebench-export.zip",
   onProgress?: (progress: ExportProgress) => void,
-  nameOverride?: string
+  nameOverride?: string,
+  stems?: ReadonlyMap<string, string>
 ): Promise<{ entries: number; failures: string[] }> {
   if (assets.length === 0) throw new Error("nothing selected to export");
 
-  const plan = planZipEntries(context, assets, kind, nameOverride);
+  const plan = planZipEntries(context, assets, kind, nameOverride, stems);
 
   if (plan.length === 0) {
     throw new Error(
@@ -608,4 +612,17 @@ export function zipFilename(count: number, kind: ExportKind): string {
   };
 
   return `spritebench-${count}-image${count === 1 ? "" : "s"}${suffix[kind]}-${day}.zip`;
+}
+
+/**
+ * A path usable inside a zip from a slot label: each folder level cleaned to
+ * letters, digits, dots, dashes and underscores, with no empty or dot-only
+ * levels, so nothing can climb out of the archive.
+ */
+export function archivePath(label: string): string {
+  return label
+    .split("/")
+    .map((part) => part.trim().replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^\.+/, ""))
+    .filter((part) => part.length > 0)
+    .join("/");
 }

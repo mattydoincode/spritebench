@@ -1,6 +1,6 @@
 import { unzipSync } from "fflate";
 import { describe, expect, it } from "vitest";
-import { buildArchive, planZipEntries, zipFilename, type PlannedEntry } from "@/client/export";
+import { archivePath, buildArchive, planZipEntries, zipFilename, type PlannedEntry } from "@/client/export";
 import { DEFAULT_PROCESSING } from "@/core/settings";
 import type { ResolvedAsset } from "@/shared/model";
 
@@ -325,5 +325,28 @@ describe("zipFilename", () => {
     expect(zipFilename(1, "processed")).toContain("-1-image-");
     expect(zipFilename(3, "original")).toContain("-originals-");
     expect(zipFilename(3, "both")).toContain("-both-");
+  });
+});
+
+describe("naming zip entries by slot", () => {
+  it("uses the given paths, folders included", () => {
+    const names = new Map([
+      ["a", "hero_idle"],
+      ["b", "rock_variants/1"]
+    ]);
+    const plan = planZipEntries(
+      CONTEXT,
+      [asset({ id: "a", seq: 1 }), asset({ id: "b", seq: 2 })],
+      "processed",
+      undefined,
+      names
+    );
+    expect(plan.map((entry) => entry.path)).toEqual(["hero_idle.png", "rock_variants/1.png"]);
+  });
+
+  it("cleans slot labels into safe archive paths", () => {
+    expect(archivePath("buildings/brownstone.front")).toBe("buildings/brownstone.front");
+    expect(archivePath("../../etc/pass wd")).toBe("etc/pass_wd");
+    expect(archivePath("Main Menu / Logo!")).toBe("Main_Menu/Logo_");
   });
 });
