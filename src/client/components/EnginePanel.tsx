@@ -596,135 +596,152 @@ export function EnginePanel() {
     return { assets: picked, names };
   }, [allSlots, assets, lane]);
 
+  const hasArt = allSlots.length > 0 || collections.length > 0;
+
   return (
-    <Panel
-      tabs={<LeftTabs />}
-      actions={
-        canEdit ? (
-          <TextButton title="Add an asset, a list, or a table" onClick={() => setCreating(!creating)}>
-            {creating ? "cancel" : "+ new"}
-          </TextButton>
-        ) : null
-      }
-    >
-      {creating ? <NewGameAsset onDone={() => setCreating(false)} /> : null}
-      {downloading ? (
-        <ExportDialog
-          assets={laneArt.assets}
-          names={laneArt.names}
-          title={`Download all ${lane} art`}
-          filename={`${archivePath(project?.name ?? "game") || "game"}-${lane}.zip`}
-          onClose={() => setDownloading(false)}
-        />
-      ) : null}
-      {loaded && !engineSyncedAt ? (
-        <p className="mb-2 text-[10px] leading-snug text-slate-500">
-          Using Godot? The{" "}
-          <a
-            href={GODOT_PLUGIN_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="underline hover:text-slate-300"
-          >
-            SpriteBench plugin
-          </a>{" "}
-          pulls these into your project. Project id{" "}
-          <span className="font-mono select-all">{project?.id}</span>
-        </p>
-      ) : null}
-
-      {/* Which lane you are looking at and assigning to; the game picks its own. */}
-      <div className="mb-2 flex h-7 items-stretch gap-4 border-b border-[var(--color-edge)]">
-        <div role="tablist" aria-label="Art lane" className="flex items-stretch gap-4">
-          <PanelTab
-            size="section"
-            selected={lane === "prototype"}
-            onClick={() => useUi.getState().setGameAssetLane("prototype")}
-          >
-            Prototype
-          </PanelTab>
-          <PanelTab
-            size="section"
-            selected={lane === "final"}
-            onClick={() => useUi.getState().setGameAssetLane("final")}
-          >
-            Final
-          </PanelTab>
-        </div>
-        <span className="flex-1" />
-        {laneArt.assets.length > 0 ? (
-          <TextButton
-            className="self-center"
-            title={`Download every ${lane} image as one zip, named by slot. Built in your browser.`}
-            onClick={() => setDownloading(true)}
-          >
-            download {laneArt.assets.length}
-          </TextButton>
+    <div className="relative h-full">
+      <Panel
+        tabs={<LeftTabs />}
+        actions={
+          canEdit ? (
+            <TextButton title="Add an asset, a list, or a table" onClick={() => setCreating(!creating)}>
+              {creating ? "cancel" : "+ new game asset"}
+            </TextButton>
+          ) : null
+        }
+      >
+        {creating ? <NewGameAsset onDone={() => setCreating(false)} /> : null}
+        {downloading ? (
+          <ExportDialog
+            assets={laneArt.assets}
+            names={laneArt.names}
+            title={`Download all ${lane} art`}
+            filename={`${archivePath(project?.name ?? "game") || "game"}-${lane}.zip`}
+            onClose={() => setDownloading(false)}
+          />
         ) : null}
-        <span
-          className="self-center text-[10px] text-slate-500"
-          title="Set in Godot: Project Settings → SpriteBench → Art"
-        >
-          {gameLane === "final" ? "game uses finals, else prototypes" : "game uses prototypes"}
-        </span>
-      </div>
+        {loaded && !engineSyncedAt ? (
+          <p className="mb-2 text-[10px] leading-snug text-slate-500">
+            Using Godot? The{" "}
+            <a
+              href={GODOT_PLUGIN_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="underline hover:text-slate-300"
+            >
+              SpriteBench plugin
+            </a>{" "}
+            pulls these into your project. Project id{" "}
+            <span className="font-mono select-all">{project?.id}</span>
+          </p>
+        ) : null}
 
-      <SyncBanner changed={changed} canEdit={Boolean(canEdit)} />
+        {/* Which lane you are looking at and assigning to; the game picks its own. */}
+        <div className="mb-2 flex h-7 items-stretch gap-4 border-b border-[var(--color-edge)]">
+          <div role="tablist" aria-label="Art lane" className="flex items-stretch gap-4">
+            <PanelTab
+              size="section"
+              selected={lane === "prototype"}
+              onClick={() => useUi.getState().setGameAssetLane("prototype")}
+            >
+              Prototype
+            </PanelTab>
+            <PanelTab
+              size="section"
+              selected={lane === "final"}
+              onClick={() => useUi.getState().setGameAssetLane("final")}
+            >
+              Final
+            </PanelTab>
+          </div>
+          <span className="flex-1" />
+          <span
+            className="self-center text-[10px] text-slate-500"
+            title="Set in Godot: Project Settings → SpriteBench → Art"
+          >
+            {gameLane === "final" ? "game uses finals, else prototypes" : "game uses prototypes"}
+          </span>
+        </div>
 
-      {allSlots.length > 0 || collections.length > 0 ? (
-        <label className="mb-2 flex items-center gap-2 text-[10px] text-slate-500">
-          image size
+        <SyncBanner changed={changed} canEdit={Boolean(canEdit)} />
+
+
+        {collections.length > 0 ? (
+          <div className="mb-3">
+            <EngineCollections
+              collections={collections}
+              slots={allSlots}
+              assets={assets}
+              highlight={highlight}
+              canEdit={Boolean(canEdit)}
+            />
+          </div>
+        ) : null}
+
+        {!loaded ? (
+          <div className="flex flex-col gap-2">
+            {Array.from({ length: 4 }, (_, index) => (
+              <Skeleton key={index} className="h-12 w-full" />
+            ))}
+          </div>
+        ) : slots.length === 0 && collections.length === 0 ? (
+          <p className="text-[11px] leading-snug text-slate-500">
+            No game assets yet.
+          </p>
+        ) : slots.length === 0 ? null : (
+          <ul className="flex flex-col gap-2">
+            {slots.map((slot) => (
+              <SlotRow
+                key={slot.id}
+                slot={slot}
+                changed={changedSet.has(laneKey(slot.id, lane))}
+                highlight={highlight}
+                canEdit={Boolean(canEdit)}
+                assets={assets}
+              />
+            ))}
+          </ul>
+        )}
+
+        {/* Room under everything for the floating size and download control. */}
+        {hasArt ? <div aria-hidden className="h-14" /> : null}
+      </Panel>
+
+      {hasArt ? (
+        // Floats over the corner, like the library's zoom; the list above
+        // leaves room at the bottom so the last rows can scroll clear of it.
+        <div className="absolute right-3 bottom-3 z-20 flex items-center gap-2 rounded border border-[var(--color-edge)] bg-[var(--color-ink-800)]/90 px-2 py-1 shadow-lg backdrop-blur">
+          <span aria-hidden className="text-[10px] text-slate-500">
+            −
+          </span>
           <input
             type="range"
             min={ENGINE_THUMB_MIN}
             max={ENGINE_THUMB_MAX}
             step={8}
             value={thumbSize}
+            title="Image size"
+            style={{ width: "6rem" }}
             onChange={(event) =>
               useUi.getState().setEngineThumbSize(Number.parseInt(event.target.value, 10))
             }
-            className="min-w-0 flex-1"
           />
-        </label>
-      ) : null}
-
-      {collections.length > 0 ? (
-        <div className="mb-3">
-          <EngineCollections
-            collections={collections}
-            slots={allSlots}
-            assets={assets}
-            highlight={highlight}
-            canEdit={Boolean(canEdit)}
-          />
+          <span aria-hidden className="text-[10px] text-slate-500">
+            +
+          </span>
+          {laneArt.assets.length > 0 ? (
+            <>
+              <span aria-hidden className="h-4 w-px bg-[var(--color-edge)]" />
+              <TextButton
+                title={`Download every ${lane} image as one zip, named by slot. Built in your browser.`}
+                onClick={() => setDownloading(true)}
+              >
+                download {laneArt.assets.length}
+              </TextButton>
+            </>
+          ) : null}
         </div>
       ) : null}
-
-      {!loaded ? (
-        <div className="flex flex-col gap-2">
-          {Array.from({ length: 4 }, (_, index) => (
-            <Skeleton key={index} className="h-12 w-full" />
-          ))}
-        </div>
-      ) : slots.length === 0 && collections.length === 0 ? (
-        <p className="text-[11px] leading-snug text-slate-500">
-          No game assets yet.
-        </p>
-      ) : slots.length === 0 ? null : (
-        <ul className="flex flex-col gap-2">
-          {slots.map((slot) => (
-            <SlotRow
-              key={slot.id}
-              slot={slot}
-              changed={changedSet.has(laneKey(slot.id, lane))}
-              highlight={highlight}
-              canEdit={Boolean(canEdit)}
-              assets={assets}
-            />
-          ))}
-        </ul>
-      )}
-
-    </Panel>
+    </div>
   );
 }
