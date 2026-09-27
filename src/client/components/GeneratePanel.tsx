@@ -52,7 +52,7 @@ import {
 } from "./ui";
 import { DropZone, TemplatePanel } from "./TemplatePanel";
 import { LeftTabs } from "./LeftTabs";
-import { PromptEditor } from "./PromptEditor";
+import { focusPrompt, PromptEditor } from "./PromptEditor";
 
 const BUILTIN_TEMPLATE_NAMES: Record<string, string> = {
   [ISO_DIAMOND_TEMPLATE_ID]: ISO_DIAMOND_TEMPLATE_NAME,
@@ -848,6 +848,17 @@ export function GeneratePanel() {
   return (
     <Panel
       tabs={<LeftTabs />}
+      actions={
+        <TextButton
+          title="Reset the whole Generate panel: prompt, variables, modes, templates, batches, quality and size (the model stays). Ctrl+Z in the prompt undoes it."
+          onClick={() => {
+            store().resetGenerateDefaults();
+            focusPrompt();
+          }}
+        >
+          reset
+        </TextButton>
+      }
       footer={prompt}
       footerSize={{
         height: promptHeight,

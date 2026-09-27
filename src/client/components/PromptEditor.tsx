@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { recordPrompt, redoPrompt, undoPrompt } from "@/client/promptHistory";
 import { useDoc } from "@/client/stores/doc";
@@ -32,6 +32,18 @@ import {
 import { ConfirmTextButton, PanelTab, TextButton } from "./ui";
 
 const LABEL = "text-[10px] tracking-widest text-slate-500 uppercase";
+
+/** Set while a prompt editor is mounted; see `focusPrompt`. */
+let focusHandler: (() => void) | null = null;
+
+/**
+ * Puts focus in the prompt box, on the Edit tab. For actions outside the
+ * editor, like reset, so the next Ctrl+Z lands on the prompt's undo rather
+ * than the scene's.
+ */
+export function focusPrompt(): void {
+  focusHandler?.();
+}
 
 /**
  * The pinned prompt: the text box, a preview of exactly what is sent, and the
@@ -66,6 +78,16 @@ export function PromptEditor({
   const orphan = useRef<string | null>(null);
 
   const resolved = (body: string) => expandSnippets(body, snippets);
+
+  useEffect(() => {
+    focusHandler = () => {
+      setTab("edit");
+      requestAnimationFrame(() => textarea.current?.focus());
+    };
+    return () => {
+      focusHandler = null;
+    };
+  }, []);
 
   const canEdit = useServer((state) => state.project?.role !== "viewer");
   const [suggest, setSuggest] = useState<Suggest | null>(null);
@@ -149,18 +171,6 @@ export function PromptEditor({
         </div>
         <span className="flex-1" />
         <span className="self-center text-[10px] text-slate-500">{promptBody.length} chars</span>
-        <TextButton
-          className="self-center"
-          title="Reset prompt, modes, templates, and batches. Keeps the current model."
-          onClick={() => {
-            useServer.getState().resetGenerateDefaults();
-            // So "reset, oops, Ctrl+Z" lands on the prompt's undo, not the scene's.
-            setTab("edit");
-            requestAnimationFrame(() => textarea.current?.focus());
-          }}
-        >
-          reset
-        </TextButton>
       </div>
 
       {tab === "edit" ? (
