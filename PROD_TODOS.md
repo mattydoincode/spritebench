@@ -21,7 +21,15 @@ at the top of each section; tick things off rather than deleting them.
 
 ## Costs and abuse (you pay storage and worker time; users pay generation)
 
-- [ ] Per-user storage or image cap. Nothing limits how many images a user keeps.
+- [x] Keep originals for 10 years (`ASSET_RETENTION_DAYS=3650`, was 30). R2 is ~$0.015/GB-month
+      and originals average ~4 MB: ~$3.50/mo after a year at 10 users, ~$36 at 100, ~$360 at 1,000
+      (at ~500 images/user/month). When trimming is needed, roll off rejected or untouched drafts
+      only, never favourites/finals, or store originals as lossless WebP.
+- [x] Per-user usage on /admin: projects, jobs, failed jobs, images, stored bytes, last
+      generation, joined; plus total stored and its rough R2 cost.
+
+- [ ] Per-user storage or image cap. Nothing limits how many images a user keeps (the /admin
+      usage table is the basis for one).
 - [ ] Clean up storage for soft-deleted projects (files stay in R2 forever today).
 - [ ] Rate limits on write endpoints: sign-up/bootstrap, project create, token create,
       feedback, generate.
