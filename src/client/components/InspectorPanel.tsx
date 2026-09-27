@@ -13,7 +13,7 @@ import { PROCESS_PRIORITY } from "@/client/processor";
 import { useSequenceFrames, useSequencePlayback } from "@/client/sequence";
 import { isSetAsset } from "@/shared/repeaterMix";
 import { frameSettings, frameSourceAssetId, type Sequence } from "@/shared/sequence";
-import { AnimationSection } from "./AnimationSection";
+import { AnimationBar, AnimationSection } from "./AnimationSection";
 import { SetSection } from "./SetSection";
 import { BitmapCanvas, useAssetPalette, useProcessed } from "./AssetBitmap";
 import { DownsampleControls } from "./DownsampleControls";
@@ -191,14 +191,6 @@ export function InspectorPanel() {
               mask
             </label>
           ) : null}
-          {sequence && sequence.frames.length > 0 ? (
-            <TextButton
-              title={playback.playing ? "Pause the animation" : "Play the animation"}
-              onClick={playback.toggle}
-            >
-              {playback.playing ? "pause" : "play"}
-            </TextButton>
-          ) : null}
           <TextButton
             title="Crop this image without touching the raw file, for every instance at once"
             onClick={() => ui().openImageEditor(asset.id)}
@@ -208,21 +200,8 @@ export function InspectorPanel() {
         </div>
       </div>
 
-      {sequence && sequence.frames.length > 1 ? (
-        <Row className="mb-2 shrink-0">
-          <input
-            type="range"
-            className="flex-1"
-            min={0}
-            max={sequence.frames.length - 1}
-            step={1}
-            value={playback.index}
-            onChange={(event) => playback.seek(Number(event.target.value))}
-          />
-          <span className="w-12 shrink-0 text-right text-[10px] tabular-nums text-slate-400">
-            {playback.index + 1}/{sequence.frames.length}
-          </span>
-        </Row>
+      {sequence && view !== "prompt" ? (
+        <AnimationBar asset={asset} sequence={sequence} playback={playback} frames={frames} />
       ) : null}
 
       {view === "prompt" ? (
@@ -398,13 +377,7 @@ export function InspectorPanel() {
           frames={frames}
         />
       ) : (
-        <AnimationSection
-          asset={asset}
-          sequence={sequence}
-          palette={palette}
-          playback={playback}
-          frames={frames}
-        />
+        <AnimationSection asset={asset} sequence={sequence} playback={playback} />
       )}
 
       <Section id="inspector.size" label="size">
