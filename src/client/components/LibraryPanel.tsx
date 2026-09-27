@@ -330,7 +330,7 @@ function FolderContents({
 
 /**
  * A folder across the full width of the library: a sticky heading bar, like
- * a panel section, that images and batches can be dropped on. Unfiled is the
+ * a panel section, that images and batches can be dropped on. No Folder is the
  * same thing without rename or delete.
  */
 function FolderSection({
@@ -431,7 +431,7 @@ function FolderSection({
         ) : null}
         {real && renaming === null ? (
           <ConfirmTextButton
-            title="Delete this folder. Its images move to Unfiled."
+            title="Delete this folder. Its images move to No Folder."
             onConfirm={() => useDoc.getState().deleteFolder(id)}
           >
             &times;
@@ -518,7 +518,7 @@ export function LibraryPanel() {
 
   const activeFilter = filter === UNFILED || known.has(filter) ? filter : "";
 
-  // Folder sections in name order, Unfiled last; only the filtered one when filtered.
+  // Folder sections in name order, No Folder last; only the filtered one when filtered.
   const sections = useMemo(() => {
     const byFolder = new Map<string, Entry[]>();
     for (const entry of items) {
@@ -528,10 +528,10 @@ export function LibraryPanel() {
 
     const all = [
       ...folders.map((entry) => ({ id: entry.id, name: entry.name, entries: byFolder.get(entry.id) ?? [] })),
-      { id: UNFILED, name: "Unfiled", entries: byFolder.get(UNFILED) ?? [] }
+      { id: UNFILED, name: "No Folder", entries: byFolder.get(UNFILED) ?? [] }
     ];
 
-    // Unfiled always shows, even empty, so there is somewhere to drag images back to.
+    // No Folder always shows, even empty, so there is somewhere to drag images back to.
     return activeFilter ? all.filter((section) => section.id === activeFilter) : all;
   }, [activeFilter, folders, items, known]);
 
@@ -673,7 +673,7 @@ export function LibraryPanel() {
               {entry.name}
             </option>
           ))}
-          <option value={UNFILED}>Unfiled</option>
+          <option value={UNFILED}>No Folder</option>
         </select>
         <NewFolderButton />
         <input

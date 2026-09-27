@@ -742,7 +742,7 @@ function Destination({ batching }: { batching: boolean }) {
               else ui().setGenerateFolder(event.target.value);
             }}
           >
-            <option value="">Unfiled</option>
+            <option value="">No Folder</option>
             {folders.map((entry) => (
               <option key={entry.id} value={entry.id}>
                 {entry.name}

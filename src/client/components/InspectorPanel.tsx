@@ -309,7 +309,7 @@ export function InspectorPanel() {
                 value={folders.some((entry) => entry.id === asset.folderId) ? asset.folderId : ""}
                 onChange={(event) => doc().moveToFolder([asset.id], event.target.value)}
               >
-                <option value="">Unfiled</option>
+                <option value="">No Folder</option>
                 {folders.map((entry) => (
                   <option key={entry.id} value={entry.id}>
                     {entry.name}
