@@ -705,6 +705,37 @@ function SheetSuggestion() {
   return <SuggestedPrompt text={sheet.defaultText} />;
 }
 
+/**
+ * Batch count. The default 1 is a placeholder, not a value, so clicking in
+ * and typing gives just the new number. A number you typed (even 1) stays
+ * shown; clearing the box goes back to the default.
+ */
+function BatchesInput() {
+  const batches = useUi((state) => state.batches);
+  const [typed, setTyped] = useState<string | null>(null);
+
+  // Changed from elsewhere (reset, undo): show the store, not the old typing.
+  const typedValue = typed === null ? null : Number.parseInt(typed, 10) || 1;
+  const shown = typed !== null && typedValue === batches ? typed : batches === 1 ? "" : String(batches);
+
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      value={shown}
+      placeholder="1"
+      title="How many jobs to run in parallel"
+      style={{ width: 44 }}
+      className="text-center normal-case tracking-normal"
+      onChange={(event) => {
+        const digits = event.target.value.replace(/[^0-9]/g, "").replace(/^0+/, "");
+        setTyped(digits || null);
+        useUi.getState().setBatches(Math.max(1, Number.parseInt(digits, 10) || 1));
+      }}
+    />
+  );
+}
+
 const NEW_FOLDER = "__new";
 
 /**
@@ -901,13 +932,7 @@ export function GeneratePanel() {
           title="Batches: how many jobs to run in parallel"
         >
           batches
-          <NumberInput
-            integer
-            value={batches}
-            min={1}
-            width={44}
-            onChange={(value) => ui().setBatches(value)}
-          />
+          <BatchesInput />
         </label>
       </div>
       {create.blocked ? (
