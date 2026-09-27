@@ -36,12 +36,13 @@ import {
   Toggle
 } from "./ui";
 
-type ViewMode = "processed" | "source" | "alpha";
+type ViewMode = "processed" | "source" | "alpha" | "prompt";
 
 const VIEW_LABELS: Record<ViewMode, string> = {
   processed: "Processed",
   source: "Source",
-  alpha: "Alpha"
+  alpha: "Alpha",
+  prompt: "Prompt"
 };
 
 /** Live size of an element, for fitting a bitmap into whatever room it has. */
@@ -171,7 +172,7 @@ export function InspectorPanel() {
     <>
       <div className="mb-2 flex h-7 shrink-0 items-stretch gap-4 border-b border-[var(--color-edge)]">
         <div role="tablist" aria-label="Preview" className="flex items-stretch gap-4">
-          {(["processed", "source", "alpha"] as ViewMode[]).map((mode) => (
+          {(["processed", "source", "alpha", "prompt"] as ViewMode[]).map((mode) => (
             <PanelTab key={mode} size="section" selected={view === mode} onClick={() => setView(mode)}>
               {VIEW_LABELS[mode]}
             </PanelTab>
@@ -179,7 +180,7 @@ export function InspectorPanel() {
         </div>
         <span className="flex-1" />
         <div className="flex items-center gap-1 self-center">
-          {maskAvailable ? (
+          {maskAvailable && view !== "prompt" ? (
             <label className="flex items-center gap-1 text-[10px] text-slate-400">
               <input
                 type="checkbox"
@@ -224,54 +225,62 @@ export function InspectorPanel() {
         </Row>
       ) : null}
 
-      <div ref={boxRef} className="min-h-16 flex-1 overflow-hidden rounded">
-        <ExpandablePreview
-          title={`${asset.label} · ${bitmapWidth}×${bitmapHeight}`}
-          className="checkerboard flex h-full w-full items-center justify-center border-0 bg-transparent p-2"
-          expanded={
-            showBitmap ? (
+      {view === "prompt" ? (
+        // What made this image: the exact prompt, what was attached, and how.
+        <div className="min-h-16 flex-1 overflow-y-auto">
+          <GenerationHistory asset={frameAsset ?? asset} />
+        </div>
+      ) : (
+        <div ref={boxRef} className="min-h-16 flex-1 overflow-hidden rounded">
+          <ExpandablePreview
+            title={`${asset.label} · ${bitmapWidth}×${bitmapHeight}`}
+            className="checkerboard flex h-full w-full items-center justify-center border-0 bg-transparent p-2"
+            expanded={
+              showBitmap ? (
+                <BitmapCanvas
+                  bitmap={showBitmap}
+                  width={bitmapWidth}
+                  height={bitmapHeight}
+                  showAlpha={view === "alpha"}
+                  overlay={showMask ? maskOverlay : null}
+                  pixelated
+                  style={{
+                    width: Math.max(1, Math.round(bitmapWidth * lightboxScale(bitmapWidth, bitmapHeight))),
+                    height: Math.max(
+                      1,
+                      Math.round(bitmapHeight * lightboxScale(bitmapWidth, bitmapHeight))
+                    )
+                  }}
+                />
+              ) : (
+                <span className="text-[11px] text-slate-400">{error ?? "no preview"}</span>
+              )
+            }
+          >
+            {error ? (
+              <span className="p-2 text-center text-[11px] text-rose-300">{error}</span>
+            ) : showBitmap ? (
               <BitmapCanvas
                 bitmap={showBitmap}
                 width={bitmapWidth}
                 height={bitmapHeight}
                 showAlpha={view === "alpha"}
                 overlay={showMask ? maskOverlay : null}
-                pixelated
+                pixelated={previewScale >= 1}
                 style={{
-                  width: Math.max(1, Math.round(bitmapWidth * lightboxScale(bitmapWidth, bitmapHeight))),
-                  height: Math.max(
-                    1,
-                    Math.round(bitmapHeight * lightboxScale(bitmapWidth, bitmapHeight))
-                  )
+                  width: Math.max(1, Math.round(bitmapWidth * previewScale)),
+                  height: Math.max(1, Math.round(bitmapHeight * previewScale))
                 }}
               />
             ) : (
-              <span className="text-[11px] text-slate-400">{error ?? "no preview"}</span>
-            )
-          }
-        >
-          {error ? (
-            <span className="p-2 text-center text-[11px] text-rose-300">{error}</span>
-          ) : showBitmap ? (
-            <BitmapCanvas
-              bitmap={showBitmap}
-              width={bitmapWidth}
-              height={bitmapHeight}
-              showAlpha={view === "alpha"}
-              overlay={showMask ? maskOverlay : null}
-              pixelated={previewScale >= 1}
-              style={{
-                width: Math.max(1, Math.round(bitmapWidth * previewScale)),
-                height: Math.max(1, Math.round(bitmapHeight * previewScale))
-              }}
-            />
-          ) : (
-            <span className="text-[11px] text-slate-500">{loading ? "processing..." : ""}</span>
-          )}
-        </ExpandablePreview>
-      </div>
+              <span className="text-[11px] text-slate-500">{loading ? "processing..." : ""}</span>
+            )}
+          </ExpandablePreview>
+        </div>
 
-      {preview ? (
+      )}
+
+      {preview && view !== "prompt" ? (
         <p className="mt-1.5 shrink-0 truncate text-[10px] text-slate-500">
           source {preview.sourceWidth}x{preview.sourceHeight} to {preview.width}x{preview.height}
           {preview.description ? <> &middot; {preview.description}</> : null}
@@ -657,9 +666,6 @@ export function InspectorPanel() {
         />
       </Section>
 
-      <Section id="inspector.history" label="history">
-        <GenerationHistory asset={frameAsset ?? asset} />
-      </Section>
 
       {exporting ? (
         <ExportDialog
