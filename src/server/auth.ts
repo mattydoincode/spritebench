@@ -22,15 +22,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     verificationTokensTable: verificationTokens
   }),
   session: { strategy: "database" },
-  providers: [
-    Google({
-      // Google refuses to re-issue a refresh token on a repeat consent unless
-      // asked, and we need one to keep the account linked over time.
-      authorization: {
-        params: { prompt: "consent", access_type: "offline", response_type: "code" }
-      }
-    })
-  ],
+  // Identity only (openid, email, profile). No offline access: nothing here
+  // calls Google on the user's behalf, so there is no refresh token to want,
+  // and asking for one means a heavier consent screen and a long-lived
+  // credential stored for every user.
+  providers: [Google],
   pages: { signIn: "/sign-in" },
   events: {
     /**
