@@ -126,8 +126,7 @@ describe("restoreGeneration", () => {
         },
         loop: { steps: 6, index: 3, sendStart: true, includeStart: true }
       },
-      sequencePlan: null,
-      folder: "loops"
+      sequencePlan: null
     });
 
     expect(restored.loop).toEqual({
@@ -137,7 +136,6 @@ describe("restoreGeneration", () => {
       includeStart: true
     });
     expect(restored.bases).toEqual([reference]);
-    expect(restored.folder).toBe("loops");
     expect(restored.processing.downsample).toBe(true);
     expect(restored.animation.enabled).toBe(false);
   });
@@ -148,13 +146,11 @@ describe("restoreGeneration", () => {
       generation: DEFAULT_GENERATION,
       generatedWith: DEFAULT_PROCESSING,
       inputs: { base: reference, each: true },
-      sequencePlan: null,
-      folder: "batch"
+      sequencePlan: null
     });
 
     expect(restored.each.enabled).toBe(true);
     expect(restored.bases).toEqual([reference]);
-    expect(restored.folder).toBe("batch");
     expect(restored.loop.enabled).toBe(false);
     expect(restored.chunk.enabled).toBe(false);
   });
@@ -185,7 +181,6 @@ describe("defaultGenerateSetup", () => {
     });
     expect(setup.processing).toEqual(DEFAULT_PROCESSING);
     expect(setup.promptBody).toBe("");
-    expect(setup.folder).toBe("");
     expect(setup.bases).toEqual([]);
     expect(setup.mask).toBeNull();
     expect(setup.animateExpansions).toBe(false);

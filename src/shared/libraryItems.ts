@@ -1,9 +1,10 @@
-import type { FolderGroup } from "./folder";
+import type { BatchGroup } from "./batch";
 import type { JobRecord, JobStatus } from "./model";
 
 export type LibraryAsset = {
   id: string;
-  folder: string;
+  batch: string;
+  folderId: string;
   createdAt: string;
   seq?: number;
   label: string;
@@ -12,15 +13,15 @@ export type LibraryAsset = {
 };
 
 export type LibraryEntry<A extends LibraryAsset = LibraryAsset> =
-  | { kind: "asset"; id: string; folder: string; createdAt: string; asset: A }
-  | { kind: "job"; id: string; folder: string; createdAt: string; job: JobRecord };
+  | { kind: "asset"; id: string; batch: string; folderId: string; createdAt: string; asset: A }
+  | { kind: "job"; id: string; batch: string; folderId: string; createdAt: string; job: JobRecord };
 
-/** Collapsed folders show this many thumbs, then a +N tile. */
-export const FOLDER_PEEK = 3;
+/** Collapsed batches show this many thumbs, then a +N tile. */
+export const BATCH_PEEK = 3;
 
-export type LibraryFolderCell = {
-  type: "folder";
-  folder: string;
+export type LibraryBatchCell = {
+  type: "batch";
+  batch: string;
   count: number;
   collapsed: boolean;
   overflow: boolean;
@@ -31,7 +32,7 @@ export type LibraryItemCell<T> = {
   item: T;
 };
 
-export type LibraryCell<T> = LibraryFolderCell | LibraryItemCell<T>;
+export type LibraryCell<T> = LibraryBatchCell | LibraryItemCell<T>;
 
 const FAILED: ReadonlySet<JobStatus> = new Set(["error", "cancelled"]);
 
@@ -45,11 +46,13 @@ export function isLibraryJob(job: Pick<JobRecord, "status">): boolean {
 
 /**
  * Assets plus in-flight / failed jobs. Done jobs disappear; their assets
- * take the slot.
+ * take the slot. `jobFolder` says which folder a job's images will land in,
+ * so a running job already shows in the right place.
  */
 export function libraryItems<A extends LibraryAsset>(
   assets: A[],
-  jobs: JobRecord[]
+  jobs: JobRecord[],
+  jobFolder: (jobId: string) => string = () => ""
 ): LibraryEntry<A>[] {
   const entries: LibraryEntry<A>[] = [];
 
@@ -57,7 +60,8 @@ export function libraryItems<A extends LibraryAsset>(
     entries.push({
       kind: "asset",
       id: asset.id,
-      folder: asset.folder.trim(),
+      batch: asset.batch.trim(),
+      folderId: asset.folderId,
       createdAt: asset.createdAt,
       asset
     });
@@ -68,7 +72,8 @@ export function libraryItems<A extends LibraryAsset>(
     entries.push({
       kind: "job",
       id: job.id,
-      folder: job.folder.trim(),
+      batch: job.folder.trim(),
+      folderId: jobFolder(job.id),
       createdAt: job.createdAt,
       job
     });
@@ -107,47 +112,47 @@ export function libraryItemMatches(entry: LibraryEntry, needle: string): boolean
 
 /**
  * How many fixed-size thumbs fit in `width`. Unmeasured (width 0) is treated
- * as infinite so folders do not collapse to one tile on the first paint.
+ * as infinite so batches do not collapse to one tile on the first paint.
  */
 export function columnCount(width: number, thumbSize: number, gap: number): number {
   if (width <= 0 || thumbSize <= 0) return Number.POSITIVE_INFINITY;
   return Math.max(1, Math.floor((width + gap) / (thumbSize + gap)));
 }
 
-/** Overflow folders start collapsed; a stored `false` means the user opened one. */
-export function folderIsCollapsed(
-  folder: string,
+/** Overflow batches start collapsed; a stored `false` means the user opened one. */
+export function batchIsCollapsed(
+  batch: string,
   itemCount: number,
   peek: number,
-  collapsedFolders: Record<string, boolean>
+  collapsedBatches: Record<string, boolean>
 ): boolean {
-  if (!folder || itemCount <= peek) return false;
-  return collapsedFolders[folder] !== false;
+  if (!batch || itemCount <= peek) return false;
+  return collapsedBatches[batch] !== false;
 }
 
 /**
- * One cell stream: folder chip, then that folder's visible thumbs, then the
+ * One cell stream: batch chip, then that batch's visible thumbs, then the
  * next group. Leftover cells on a row are just the next cells.
  */
 export function flattenLibrary<T>(
-  groups: FolderGroup<T>[],
-  collapsedFolders: Record<string, boolean>,
+  groups: BatchGroup<T>[],
+  collapsedBatches: Record<string, boolean>,
   peek: number
 ): LibraryCell<T>[] {
   const cells: LibraryCell<T>[] = [];
 
   for (const group of groups) {
-    if (group.folder) {
+    if (group.batch) {
       const overflow = group.items.length > peek;
-      const collapsed = folderIsCollapsed(
-        group.folder,
+      const collapsed = batchIsCollapsed(
+        group.batch,
         group.items.length,
         peek,
-        collapsedFolders
+        collapsedBatches
       );
       cells.push({
-        type: "folder",
-        folder: group.folder,
+        type: "batch",
+        batch: group.batch,
         count: group.items.length,
         collapsed,
         overflow

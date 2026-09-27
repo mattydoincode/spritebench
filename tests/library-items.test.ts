@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_PROCESSING } from "@/core/settings";
-import { groupByFolder } from "@/shared/folder";
+import { groupByBatch } from "@/shared/batch";
 import {
-  FOLDER_PEEK,
+  BATCH_PEEK,
   columnCount,
   flattenLibrary,
-  folderIsCollapsed,
+  batchIsCollapsed,
   isFailedJob,
   libraryItemMatches,
   libraryItems,
@@ -17,7 +17,8 @@ import { DEFAULT_GENERATION, type JobRecord } from "@/shared/model";
 function asset(overrides: Partial<LibraryAsset> = {}): LibraryAsset {
   return {
     id: "a1",
-    folder: "",
+    batch: "",
+    folderId: "",
     createdAt: "2026-09-19T12:00:00.000Z",
     seq: 1,
     label: "001",
@@ -124,54 +125,54 @@ describe("columnCount", () => {
   });
 });
 
-describe("folderIsCollapsed", () => {
+describe("batchIsCollapsed", () => {
   it("stays open when everything fits in the peek", () => {
-    expect(folderIsCollapsed("anim", FOLDER_PEEK, FOLDER_PEEK, {})).toBe(false);
+    expect(batchIsCollapsed("anim", BATCH_PEEK, BATCH_PEEK, {})).toBe(false);
   });
 
-  it("defaults overflow folders to collapsed unless explicitly opened", () => {
-    expect(folderIsCollapsed("anim", 10, FOLDER_PEEK, {})).toBe(true);
-    expect(folderIsCollapsed("anim", 10, FOLDER_PEEK, { anim: false })).toBe(false);
-    expect(folderIsCollapsed("anim", 10, FOLDER_PEEK, { anim: true })).toBe(true);
+  it("defaults overflow batches to collapsed unless explicitly opened", () => {
+    expect(batchIsCollapsed("anim", 10, BATCH_PEEK, {})).toBe(true);
+    expect(batchIsCollapsed("anim", 10, BATCH_PEEK, { anim: false })).toBe(false);
+    expect(batchIsCollapsed("anim", 10, BATCH_PEEK, { anim: true })).toBe(true);
   });
 });
 
 describe("flattenLibrary", () => {
   it("emits a chip then thumbs, and lets the next group continue", () => {
-    const groups = groupByFolder([
-      { id: "1", folder: "anim" },
-      { id: "2", folder: "anim" },
-      { id: "3", folder: "" }
+    const groups = groupByBatch([
+      { id: "1", batch: "anim" },
+      { id: "2", batch: "anim" },
+      { id: "3", batch: "" }
     ]);
 
     const cells = flattenLibrary(groups, { anim: false }, 4);
 
     expect(cells).toEqual([
-      { type: "folder", folder: "anim", count: 2, collapsed: false, overflow: false },
-      { type: "item", item: { id: "1", folder: "anim" } },
-      { type: "item", item: { id: "2", folder: "anim" } },
-      { type: "item", item: { id: "3", folder: "" } }
+      { type: "batch", batch: "anim", count: 2, collapsed: false, overflow: false },
+      { type: "item", item: { id: "1", batch: "anim" } },
+      { type: "item", item: { id: "2", batch: "anim" } },
+      { type: "item", item: { id: "3", batch: "" } }
     ]);
   });
 
-  it("peeks three thumbs of an overflow folder", () => {
-    const groups = groupByFolder([
-      { id: "1", folder: "batch" },
-      { id: "2", folder: "batch" },
-      { id: "3", folder: "batch" },
-      { id: "4", folder: "batch" },
-      { id: "5", folder: "batch" }
+  it("peeks three thumbs of an overflow batch", () => {
+    const groups = groupByBatch([
+      { id: "1", batch: "batch" },
+      { id: "2", batch: "batch" },
+      { id: "3", batch: "batch" },
+      { id: "4", batch: "batch" },
+      { id: "5", batch: "batch" }
     ]);
 
-    const cells = flattenLibrary(groups, {}, FOLDER_PEEK);
+    const cells = flattenLibrary(groups, {}, BATCH_PEEK);
 
-    expect(cells.map((cell) => (cell.type === "folder" ? cell.folder : cell.item.id))).toEqual([
+    expect(cells.map((cell) => (cell.type === "batch" ? cell.batch : cell.item.id))).toEqual([
       "batch",
       "1",
       "2",
       "3"
     ]);
-    expect(cells[0]).toMatchObject({ type: "folder", collapsed: true, overflow: true, count: 5 });
+    expect(cells[0]).toMatchObject({ type: "batch", collapsed: true, overflow: true, count: 5 });
   });
 });
 

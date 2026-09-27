@@ -120,7 +120,12 @@ export const DEFAULT_EACH: EachSettings = {
  */
 export interface ProjectDraft {
   promptBody: string;
-  folder: string;
+  /** Typed name for the next batch; empty takes the next `batch-NNN`. */
+  batchName: string;
+  /** Folder new images land in (a `Folder` id); empty means unfiled. */
+  folderId: string;
+  /** Library filter: "" for everything, "unfiled", or a folder id. */
+  libraryFolder: string;
   animation: AnimationRequestSettings;
   itemGrid: ItemGridSettings;
   loop: LoopSettings;
@@ -161,10 +166,10 @@ interface Stored extends ProjectDraft {
    */
   collapsedBubbles: Record<BubbleId, boolean>;
   /**
-   * Library folders rolled up to three thumbs. Missing keys collapse when
-   * the folder overflows; `false` means the user opened it.
+   * Library batches rolled up to three thumbs. Missing keys collapse when
+   * the batch overflows; `false` means the user opened it.
    */
-  collapsedFolders: Record<string, boolean>;
+  collapsedBatches: Record<string, boolean>;
   /**
    * Inspector / generate sections rolled up to their divider.
    *
@@ -323,7 +328,7 @@ function readItemGrid(stored?: Partial<ItemGridSettings>): ItemGridSettings {
   };
 }
 
-function readCollapsedFolders(value: unknown): Record<string, boolean> {
+function readCollapsedBatches(value: unknown): Record<string, boolean> {
   if (!value || typeof value !== "object") return {};
 
   const result: Record<string, boolean> = {};
@@ -446,7 +451,9 @@ function readBases(value: unknown): BaseSpec[] {
 
 export const DEFAULT_PROJECT_DRAFT: ProjectDraft = {
   promptBody: "",
-  folder: "",
+  batchName: "",
+  folderId: "",
+  libraryFolder: "",
   animation: DEFAULT_ANIMATION,
   itemGrid: DEFAULT_ITEM_GRID,
   loop: DEFAULT_LOOP,
@@ -461,7 +468,9 @@ export const DEFAULT_PROJECT_DRAFT: ProjectDraft = {
 export function cloneProjectDraft(draft: ProjectDraft): ProjectDraft {
   return {
     promptBody: draft.promptBody,
-    folder: draft.folder,
+    batchName: draft.batchName,
+    folderId: draft.folderId,
+    libraryFolder: draft.libraryFolder,
     animation: {
       ...draft.animation,
       actions: draft.animation.actions.map((entry) => ({ ...entry }))
@@ -488,7 +497,9 @@ export function readProjectDraft(stored?: Partial<ProjectDraft> | null): Project
 
   return {
     promptBody: typeof stored.promptBody === "string" ? stored.promptBody : "",
-    folder: typeof stored.folder === "string" ? stored.folder : "",
+    batchName: typeof stored.batchName === "string" ? stored.batchName : "",
+    folderId: typeof stored.folderId === "string" ? stored.folderId : "",
+    libraryFolder: typeof stored.libraryFolder === "string" ? stored.libraryFolder : "",
     animation: readAnimation(stored.animation),
     itemGrid: readItemGrid(stored.itemGrid),
     loop: readLoop(stored.loop),
@@ -579,7 +590,7 @@ const DEFAULTS: Stored = {
   camera: {},
   sceneView: {},
   collapsedBubbles: { view: true, elements: true, scenes: true, tree: true },
-  collapsedFolders: {},
+  collapsedBatches: {},
   collapsedSections: {},
   // Real window shares are applied in `hydrate`, before first paint.
   layout: defaultLayout(FALLBACK_VIEWPORT),
@@ -605,7 +616,10 @@ function read(): Stored {
       ...cloneProjectDraft(draft),
       drafts,
       collapsedBubbles: { ...DEFAULTS.collapsedBubbles, ...stored.collapsedBubbles },
-      collapsedFolders: readCollapsedFolders(stored.collapsedFolders),
+      // Stored as collapsedFolders before batches and folders split.
+      collapsedBatches: readCollapsedBatches(
+        stored.collapsedBatches ?? (stored as { collapsedFolders?: unknown }).collapsedFolders
+      ),
       collapsedSections: readCollapsedSections(stored.collapsedSections),
       layout: {
         left: stored.layout?.left ?? defaultPaneSize("left"),
@@ -646,7 +660,7 @@ function persist(state: Stored): void {
           camera: state.camera,
           sceneView: state.sceneView,
           collapsedBubbles: state.collapsedBubbles,
-          collapsedFolders: state.collapsedFolders,
+          collapsedBatches: state.collapsedBatches,
           collapsedSections: state.collapsedSections,
           layout: state.layout,
           inspectorPreview: state.inspectorPreview,
@@ -704,7 +718,10 @@ interface UiState extends Stored {
 
   setActiveProject: (projectId: string | null) => void;
   setPromptBody: (value: string) => void;
-  setFolder: (value: string) => void;
+  setBatchName: (value: string) => void;
+  setGenerateFolder: (folderId: string) => void;
+  /** Also points Generate at that folder, so what you look at is where new images go. */
+  setLibraryFolder: (filter: string) => void;
   applyGenerationSetup: (setup: RestoredGeneration) => void;
 
   activeScene: (projectId: string) => string | null;
@@ -720,7 +737,7 @@ interface UiState extends Stored {
   clearMessages: () => void;
 
   toggleBubble: (bubble: BubbleId) => void;
-  toggleFolder: (folder: string) => void;
+  toggleBatch: (batch: string) => void;
   toggleSection: (id: string) => void;
   setPaneSize: (pane: Pane, size: number) => void;
   setLeftTab: (tab: LeftTab) => void;
@@ -874,15 +891,29 @@ export const useUi = create<UiState>((set, get) => {
       save();
     },
 
-    setFolder(value) {
-      set({ folder: value });
+    setBatchName(value) {
+      set({ batchName: value });
+      save();
+    },
+
+    setGenerateFolder(folderId) {
+      set({ folderId });
+      save();
+    },
+
+    setLibraryFolder(filter) {
+      set(
+        filter && filter !== "unfiled"
+          ? { libraryFolder: filter, folderId: filter }
+          : { libraryFolder: filter }
+      );
       save();
     },
 
     applyGenerationSetup(setup) {
       set({
         promptBody: setup.promptBody,
-        folder: setup.folder,
+        batchName: "",
         animation: {
           ...setup.animation,
           actions: setup.animation.actions.map((entry) => ({ ...entry }))
@@ -1000,10 +1031,10 @@ export const useUi = create<UiState>((set, get) => {
       save();
     },
 
-    toggleFolder(folder) {
-      const current = get().collapsedFolders;
-      const collapsed = current[folder] !== false;
-      set({ collapsedFolders: { ...current, [folder]: !collapsed } });
+    toggleBatch(batch) {
+      const current = get().collapsedBatches;
+      const collapsed = current[batch] !== false;
+      set({ collapsedBatches: { ...current, [batch]: !collapsed } });
       save();
     },
 

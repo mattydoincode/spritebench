@@ -37,6 +37,7 @@ import {
   type AssetEdits,
   type AssetRecord,
   type Scene,
+  type Folder,
   type Snippet,
   type RepeatGroup,
   type ResolvedAsset,
@@ -71,6 +72,9 @@ const ASSET_EDITS = "assetEdits";
 const ASSET_SETS = "assetSets";
 // Not "promptSnippets": that held whole saved prompts, which were dropped.
 const SNIPPETS = "snippets";
+const FOLDERS = "folders";
+/** Job id → folder id, written at Generate so the job's images land there. */
+const JOB_FOLDERS = "jobFolders";
 const SETTINGS_CUTOUT = "settings.cutout";
 const SETTINGS_CUTOUT_FLOOD = "settings.cutout.edgeFloodFill";
 const SETTINGS_CUTOUT_CHROMA = "settings.cutout.chromaKey";
@@ -121,6 +125,14 @@ export function scenesMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
 
 export function assetEditsMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
   return doc.getMap<Y.Map<unknown>>(ASSET_EDITS);
+}
+
+export function foldersMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
+  return doc.getMap<Y.Map<unknown>>(FOLDERS);
+}
+
+function jobFoldersMap(doc: Y.Doc): Y.Map<string> {
+  return doc.getMap<string>(JOB_FOLDERS);
 }
 
 export function snippetsMap(doc: Y.Doc): Y.Map<Y.Map<unknown>> {
@@ -567,6 +579,40 @@ export function setAssetHidden(doc: Y.Doc, assetId: string, hidden: boolean): vo
   transactLocal(doc, () => map.set("hidden", hidden));
 }
 
+export function listFolders(doc: Y.Doc): Folder[] {
+  return [...foldersMap(doc).entries()]
+    .map(([id, map]) => ({ id, name: str(map, "name") }))
+    .filter((folder) => folder.name.length > 0)
+    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+}
+
+export function putFolder(doc: Y.Doc, folder: Folder): void {
+  transactLocal(doc, () => {
+    const map = new Y.Map<unknown>();
+    foldersMap(doc).set(folder.id, map);
+    map.set("name", folder.name);
+  });
+}
+
+export function renameFolder(doc: Y.Doc, id: string, name: string): void {
+  const map = foldersMap(doc).get(id);
+  if (!map) return;
+  transactLocal(doc, () => map.set("name", name));
+}
+
+/** Its images stay; they read as unfiled once the id no longer resolves. */
+export function deleteFolder(doc: Y.Doc, id: string): void {
+  transactLocal(doc, () => foldersMap(doc).delete(id));
+}
+
+export function setJobFolder(doc: Y.Doc, jobId: string, folderId: string): void {
+  transactLocal(doc, () => jobFoldersMap(doc).set(jobId, folderId));
+}
+
+export function jobFolder(doc: Y.Doc, jobId: string): string {
+  return jobFoldersMap(doc).get(jobId) ?? "";
+}
+
 export function setSnippetText(doc: Y.Doc, id: string, text: string): void {
   const map = snippetsMap(doc).get(id);
   if (!map) return;
@@ -665,7 +711,9 @@ export function readAssetEdits(doc: Y.Doc, assetId: string): AssetEdits | null {
 
   return {
     name: str(map, "name"),
-    folder: str(map, "folder"),
+    // Before real folders existed, the batch name was stored as "folder".
+    batch: map.has("batch") ? str(map, "batch") : str(map, "folder"),
+    folderId: str(map, "folderId"),
     tags: strings(map, "tags"),
     processing: readProcessing(nested(map, "processing")),
     sequences: readSequences(map),
@@ -685,7 +733,8 @@ export function resolveAsset(record: AssetRecord, edits: AssetEdits | null): Res
     ...record,
     label: displayName(record.seq, name),
     name,
-    folder: edits?.folder ?? "",
+    batch: edits?.batch ?? "",
+    folderId: edits?.folderId ?? "",
     tags: edits?.tags ?? [],
     processing: edits?.processing ?? withDefaults(record.generatedWith),
     sequences: Object.values(edits?.sequences ?? {}).sort((a, b) => a.name.localeCompare(b.name)),
@@ -1091,7 +1140,7 @@ export function removePaletteFromPool(doc: Y.Doc, sceneId: string, paletteId: st
 export function ensureAssetEdits(
   doc: Y.Doc,
   assetId: string,
-  seed: { folder: string; processing: ProcessingSettings; hidden?: boolean }
+  seed: { batch: string; folderId?: string; processing: ProcessingSettings; hidden?: boolean }
 ): void {
   const edits = assetEditsMap(doc);
   if (edits.has(assetId)) return;
@@ -1102,7 +1151,8 @@ export function ensureAssetEdits(
     const map = new Y.Map<unknown>();
     edits.set(assetId, map);
     map.set("name", "");
-    map.set("folder", seed.folder);
+    map.set("batch", seed.batch);
+    map.set("folderId", seed.folderId ?? "");
     map.set("hidden", seed.hidden === true);
     map.set("tags", new Y.Array<string>());
 
@@ -1117,7 +1167,7 @@ export function ensureAssetEdits(
 export function patchAssetEdits(
   doc: Y.Doc,
   assetId: string,
-  patch: Partial<Pick<AssetEdits, "name" | "folder">>
+  patch: Partial<Pick<AssetEdits, "name" | "batch" | "folderId">>
 ): void {
   const map = assetEditsMap(doc).get(assetId);
   if (!map) return;

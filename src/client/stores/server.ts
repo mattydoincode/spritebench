@@ -22,7 +22,7 @@ import {
 } from "@/shared/model";
 import { planAnimation, planItemGrid } from "@/shared/animationPrompt";
 import { normalizeLayoutGuideInputs } from "@/shared/featurePrompt";
-import { foldersByJobId, resolveJobFolder, suggestedFolder } from "@/shared/folder";
+import { batchesByJobId, isBatch, nextBatchName } from "@/shared/batch";
 import { remapSelection } from "@/shared/libraryItems";
 import { shouldRememberGeneration } from "@/shared/multistep";
 import { expandPrompt } from "@/shared/promptVars";
@@ -157,8 +157,10 @@ interface ServerState {
   setDefaultProcessing: (patch: Partial<ProcessingSettings>) => void;
 
   generate: () => Promise<void>;
-  restoreFromAsset: (asset: Pick<ResolvedAsset, "prompt" | "generation" | "generatedWith" | "inputs" | "sequencePlan" | "folder" | "label">) => void;
+  restoreFromAsset: (asset: Pick<ResolvedAsset, "prompt" | "generation" | "generatedWith" | "inputs" | "sequencePlan" | "label">) => void;
   resetGenerateDefaults: () => void;
+  /** The next unused `batch-NNN` in this project. */
+  nextBatch: () => string;
   rerunSelected: () => Promise<void>;
   retryJob: (id: string) => Promise<void>;
   cancelJob: (id: string) => Promise<void>;
@@ -396,7 +398,7 @@ export const useServer = create<ServerState>((set, get) => {
         });
 
         useDoc.getState().backfill(assetsRes.assets, {
-          folders: foldersByJobId(jobsRes.jobs),
+          batches: batchesByJobId(jobsRes.jobs),
           jobs: jobsRes.jobs
         });
       } catch (error) {
@@ -466,7 +468,7 @@ export const useServer = create<ServerState>((set, get) => {
       // from the settings it was generated under is what makes a brand new
       // image show up with the right crop and palette already applied.
       useDoc.getState().backfill(assets, {
-        folders: foldersByJobId(get().jobs),
+        batches: batchesByJobId(get().jobs),
         jobs: get().jobs
       });
     },
@@ -616,6 +618,19 @@ export const useServer = create<ServerState>((set, get) => {
               )
             : (sheet?.plan ?? null);
 
+      // Several images from one click are a batch: the typed name, or the
+      // next batch-NNN. A lone image or a loop/chunk set is not.
+      const batch = isBatch({
+        images: ui.batches * expansions.length * Math.max(1, exampleBases.length),
+        loop,
+        chunk
+      })
+        ? ui.batchName.trim() || get().nextBatch()
+        : "";
+      const folderId = useDoc.getState().folders.some((entry) => entry.id === ui.folderId)
+        ? ui.folderId
+        : "";
+
       try {
         const { jobs: created } = await projectApi<{ jobs: JobRecord[] }>(projectId(), "/generate", {
           method: "POST",
@@ -640,19 +655,8 @@ export const useServer = create<ServerState>((set, get) => {
                       : { width: cellSize, height: 0 }
                   }
                 : settings.processing,
-            folder: resolveJobFolder(
-              ui.folder,
-              suggestedFolder({
-                animation: Boolean(animation),
-                itemGrid: Boolean(itemGrid) && !animation,
-                many:
-                  !loop &&
-                  !chunk &&
-                  (ui.batches > 1 ||
-                    expansions.length > 1 ||
-                    exampleBases.length > 1)
-              })
-            ),
+            // The batch name; the jobs table calls it `folder`.
+            folder: batch,
             inputs:
               sheet && !sheetPixel && !sheetFrames
                 ? null
@@ -690,6 +694,9 @@ export const useServer = create<ServerState>((set, get) => {
           })
         });
 
+        for (const job of created) useDoc.getState().setJobFolder(job.id, folderId);
+        // A typed name is for the next batch only.
+        if (batch) ui.setBatchName("");
         adoptCreated(created);
         await get().refreshJobs();
       } catch (error) {
@@ -697,6 +704,14 @@ export const useServer = create<ServerState>((set, get) => {
       } finally {
         useUi.getState().setBusy(null);
       }
+    },
+
+    nextBatch() {
+      const names = [
+        ...Object.values(useDoc.getState().edits).map((entry) => entry.batch),
+        ...get().jobs.map((job) => job.folder)
+      ];
+      return nextBatchName(names);
     },
 
     resetGenerateDefaults() {
@@ -742,20 +757,19 @@ export const useServer = create<ServerState>((set, get) => {
 
       try {
         const edits = useDoc.getState().edits;
-        const folders = new Set(
-          assetIds
-            .map((id) => edits[id]?.folder.trim() ?? "")
-            .filter((folder) => folder.length > 0)
-        );
+        // Reruns land where their originals are, when those agree on a folder.
+        const folders = new Set(assetIds.map((id) => edits[id]?.folderId ?? ""));
 
         const { jobs: created } = await projectApi<{ jobs: JobRecord[] }>(projectId(), "/rerun", {
           method: "POST",
           body: JSON.stringify({
             assetIds,
-            folder: folders.size === 1 ? [...folders][0] : undefined
+            folder: isBatch({ images: assetIds.length }) ? get().nextBatch() : undefined
           })
         });
 
+        const folderId = folders.size === 1 ? [...folders][0] : "";
+        for (const job of created) useDoc.getState().setJobFolder(job.id, folderId);
         adoptCreated(created);
         await get().refreshJobs();
         useUi.getState().setNotice(`queued ${assetIds.length} rerun(s)`);
@@ -794,6 +808,8 @@ export const useServer = create<ServerState>((set, get) => {
           })
         });
 
+        const folderId = useDoc.getState().jobFolderOf(job.id);
+        for (const entry of created) useDoc.getState().setJobFolder(entry.id, folderId);
         adoptCreated(created);
         await get().refreshJobs();
         useUi.getState().setNotice(`requeued ${job.label}`);

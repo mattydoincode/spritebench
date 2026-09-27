@@ -394,12 +394,12 @@ describe("asset edits", () => {
     const target = doc.createDoc();
 
     doc.ensureAssetEdits(target, "asset_1", {
-      folder: "props",
+      batch: "props",
       processing: { ...DEFAULT_PROCESSING, erodePixels: 3 }
     });
 
     const edits = doc.readAssetEdits(target, "asset_1");
-    expect(edits?.folder).toBe("props");
+    expect(edits?.batch).toBe("props");
     expect(edits?.processing.erodePixels).toBe(3);
     expect(edits?.name).toBe("");
   });
@@ -411,20 +411,31 @@ describe("asset edits", () => {
   it("leaves an existing entry alone on a second backfill", () => {
     const target = doc.createDoc();
 
-    doc.ensureAssetEdits(target, "asset_1", { folder: "props", processing: DEFAULT_PROCESSING });
+    doc.ensureAssetEdits(target, "asset_1", { batch: "props", processing: DEFAULT_PROCESSING });
     doc.patchAssetEdits(target, "asset_1", { name: "hero idle" });
-    doc.ensureAssetEdits(target, "asset_1", { folder: "other", processing: DEFAULT_PROCESSING });
+    doc.ensureAssetEdits(target, "asset_1", { batch: "other", processing: DEFAULT_PROCESSING });
 
     const edits = doc.readAssetEdits(target, "asset_1");
     expect(edits?.name).toBe("hero idle");
-    expect(edits?.folder).toBe("props");
+    expect(edits?.batch).toBe("props");
+  });
+
+  it("reads a batch stored under the old folder key", () => {
+    const target = doc.createDoc();
+    const map = new Y.Map<unknown>();
+    map.set("name", "");
+    map.set("folder", "knights");
+    doc.assetEditsMap(target).set("legacy", map);
+
+    expect(doc.readAssetEdits(target, "legacy")?.batch).toBe("knights");
+    expect(doc.readAssetEdits(target, "legacy")?.folderId).toBe("");
   });
 
   it("patches processing field by field rather than replacing it", () => {
     const target = doc.createDoc();
 
     doc.ensureAssetEdits(target, "asset_1", {
-      folder: "",
+      batch: "",
       processing: { ...DEFAULT_PROCESSING, erodePixels: 3, trimPadding: 2 }
     });
 
@@ -438,8 +449,8 @@ describe("asset edits", () => {
   it("groups loop members on a set and hides them until extracted", () => {
     const target = doc.createDoc();
 
-    doc.ensureAssetEdits(target, "a", { folder: "", processing: DEFAULT_PROCESSING, hidden: true });
-    doc.ensureAssetEdits(target, "b", { folder: "", processing: DEFAULT_PROCESSING, hidden: true });
+    doc.ensureAssetEdits(target, "a", { batch: "", processing: DEFAULT_PROCESSING, hidden: true });
+    doc.ensureAssetEdits(target, "b", { batch: "", processing: DEFAULT_PROCESSING, hidden: true });
     doc.upsertSetMember(
       target,
       { id: "batch", kind: "animation", columns: 2, rows: 1 },
@@ -471,7 +482,7 @@ describe("asset edits", () => {
   it("drops a member from its set when the asset is purged", () => {
     const target = doc.createDoc();
     doc.createScene(target, "pg", "main");
-    doc.ensureAssetEdits(target, "a", { folder: "", processing: DEFAULT_PROCESSING });
+    doc.ensureAssetEdits(target, "a", { batch: "", processing: DEFAULT_PROCESSING });
     doc.upsertSetMember(
       target,
       { id: "batch", kind: "grid", columns: 2, rows: 1 },
@@ -480,6 +491,24 @@ describe("asset edits", () => {
 
     doc.purgeAsset(target, "a");
     expect(doc.listAssetSets(target)).toEqual([]);
+  });
+});
+
+describe("folders", () => {
+  it("creates, renames and deletes, and remembers where a job's images go", () => {
+    const target = doc.createDoc();
+
+    doc.putFolder(target, { id: "f1", name: "Knights" });
+    doc.putFolder(target, { id: "f2", name: "Castles" });
+    expect(doc.listFolders(target).map((entry) => entry.name)).toEqual(["Castles", "Knights"]);
+
+    doc.renameFolder(target, "f1", "Heroes");
+    doc.deleteFolder(target, "f2");
+    expect(doc.listFolders(target)).toEqual([{ id: "f1", name: "Heroes" }]);
+
+    doc.setJobFolder(target, "job1", "f1");
+    expect(doc.jobFolder(target, "job1")).toBe("f1");
+    expect(doc.jobFolder(target, "job2")).toBe("");
   });
 });
 

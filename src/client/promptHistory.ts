@@ -23,7 +23,7 @@ const PROMPT_KEYS: readonly DraftKey[] = ["promptBody", "variables"];
 const SETUP_KEYS: readonly DraftKey[] = [
   "promptBody",
   "variables",
-  "folder",
+  "batchName",
   "animation",
   "itemGrid",
   "loop",

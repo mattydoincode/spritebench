@@ -558,7 +558,14 @@ export function paletteBakeAssetIds(scene: Pick<Scene, "items" | "groups" | "ter
 export interface AssetEdits {
   /** Empty means "show the number instead". */
   name: string;
-  folder: string;
+  /**
+   * The Generate click this came from, when it made more than one image
+   * ("batch-004"). Shown as a tinted group in the library. Empty for a lone
+   * image, or one dragged out of its batch.
+   */
+  batch: string;
+  /** Which project folder this sits in (a `Folder` id). Empty means unfiled. */
+  folderId: string;
   tags: string[];
   processing: ProcessingSettings;
   /**
@@ -581,7 +588,8 @@ export interface ResolvedAsset extends AssetRecord {
   /** Pretty name if set, otherwise the zero-padded number. */
   label: string;
   name: string;
-  folder: string;
+  batch: string;
+  folderId: string;
   tags: string[];
   processing: ProcessingSettings;
   /** Sorted by name, so the inspector's picker has a stable order. */
@@ -612,6 +620,16 @@ export interface StudioSettings {
  * Shared on the project, so collaborators draw from the same set. Only ever
  * added where the prompt says so -- nothing is appended behind your back.
  */
+/**
+ * A named place in the library, shared on the project. Created in the
+ * library, picked in the Generate panel; images and whole batches are dragged
+ * between them.
+ */
+export interface Folder {
+  id: string;
+  name: string;
+}
+
 export interface Snippet {
   id: string;
   name: string;

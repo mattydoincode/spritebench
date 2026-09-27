@@ -126,13 +126,13 @@ describe("project prompt drafts", () => {
 
   it("writes the working prompt into the active project's draft", () => {
     const drafts = persistProjectDrafts({
-      ...draft({ promptBody: "current", folder: "props" }),
+      ...draft({ promptBody: "current", batchName: "knights" }),
       activeProjectId: "alpha",
       drafts: { beta: draft({ promptBody: "other" }) }
     });
 
     expect(drafts.alpha?.promptBody).toBe("current");
-    expect(drafts.alpha?.folder).toBe("props");
+    expect(drafts.alpha?.batchName).toBe("knights");
     expect(drafts.beta?.promptBody).toBe("other");
   });
 

@@ -5,7 +5,7 @@ import { getProject } from "@/db/repo/projects";
 import { readDoc } from "@/db/repo/projectDoc";
 import { loadPalette } from "@/server/palettes";
 import { decodePng, encodePng } from "@/server/png";
-import { docFromState, readAssetEdits } from "@/shared/doc";
+import { docFromState, listFolders, readAssetEdits } from "@/shared/doc";
 import { exportStem, sanitizeName } from "@/shared/naming";
 import type { AssetRecord } from "@/shared/model";
 import { exportKey } from "@/storage/keys";
@@ -62,7 +62,9 @@ export async function approveAsset(
   const asset = toAssetRecord(row);
   const [project, snapshot] = await Promise.all([getProject(projectId), readDoc(projectId)]);
 
-  const edits = readAssetEdits(docFromState(snapshot.state), asset.id);
+  const projectDoc = docFromState(snapshot.state);
+  const edits = readAssetEdits(projectDoc, asset.id);
+  const folderName = listFolders(projectDoc).find((entry) => entry.id === edits?.folderId)?.name;
   const processing = edits?.processing ?? asset.generatedWith;
 
   const palette = processing.paletteId
@@ -75,7 +77,7 @@ export async function approveAsset(
     palette
   );
 
-  const folder = sanitizeName(options.subfolder ?? edits?.folder ?? "props", "props");
+  const folder = sanitizeName(options.subfolder ?? folderName ?? "props", "props");
   const stem = options.name
     ? sanitizeName(options.name, `asset_${asset.seq}`)
     : exportStem(project?.name ?? "project", asset.seq, edits?.name);

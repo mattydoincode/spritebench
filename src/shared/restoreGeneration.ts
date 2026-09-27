@@ -51,7 +51,6 @@ export interface RestoredGeneration {
   chunk: RestoredChunk;
   each: RestoredEach;
   animateExpansions: boolean;
-  folder: string;
   generation: GenerationParams;
   processing: ProcessingSettings;
 }
@@ -62,7 +61,6 @@ export interface RestoreGenerationInput {
   generatedWith: ProcessingSettings;
   inputs: JobInputs | null;
   sequencePlan: SequencePlan | null;
-  folder?: string;
 }
 
 const DEFAULT_ANIMATION: RestoredAnimation = {
@@ -128,7 +126,6 @@ export function defaultGenerateSetup(model: string): RestoredGeneration {
     mask: null,
     ...offModes(),
     animateExpansions: false,
-    folder: "",
     generation: { ...DEFAULT_GENERATION, model },
     processing: { ...DEFAULT_PROCESSING }
   };
@@ -184,7 +181,6 @@ export function restoreGeneration(asset: RestoreGenerationInput): RestoredGenera
     mask: inputs?.mask ?? null,
     ...modes,
     animateExpansions: Boolean(inputs?.animate),
-    folder: asset.folder ?? "",
     generation: { ...DEFAULT_GENERATION, ...asset.generation },
     processing: { ...DEFAULT_PROCESSING, ...asset.generatedWith }
   };

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useDoc } from "@/client/stores/doc";
 import { useServer } from "@/client/stores/server";
 import { defaultPaneSize, useUi } from "@/client/stores/ui";
@@ -30,7 +30,7 @@ import {
   PIXEL_CONSTRAINT_TEMPLATE_NAME,
   pixelConstraintWindow
 } from "@/core/pixelMask";
-import { suggestedFolder } from "@/shared/folder";
+import { isBatch } from "@/shared/batch";
 import { planAnimation, planItemGrid } from "@/shared/animationPrompt";
 import { activeFeaturePrompts } from "@/shared/featurePrompt";
 import { SuggestedPrompt } from "./SuggestedPrompt";
@@ -510,7 +510,7 @@ function EachMode({ canEdit }: { canEdit: boolean }) {
           <EachImages />
           <p className="mb-2 text-[10px] leading-snug text-slate-500">
             Same prompt on every image. {bases.length > 0 ? `${bases.length} edit${bases.length === 1 ? "" : "s"}` : "Add images first"}
-            , then Generate. Lands in a batch folder like variables.
+            , then Generate. Lands as one batch, like variables.
           </p>
         </>
       ) : !canEdit ? (
@@ -705,6 +705,84 @@ function SheetSuggestion() {
   return <SuggestedPrompt text={sheet.defaultText} />;
 }
 
+const NEW_FOLDER = "__new";
+
+/**
+ * Where this Generate lands: a folder (or unfiled), and -- when the click
+ * makes several images -- the batch name, blank for the next batch-NNN. A
+ * folder can be made right here when the project has none that fit.
+ */
+function Destination({ batching }: { batching: boolean }) {
+  const folders = useDoc((state) => state.folders);
+  const folderId = useUi((state) => state.folderId);
+  const batchName = useUi((state) => state.batchName);
+  const nextBatch = useServer((state) => state.nextBatch)();
+  const [naming, setNaming] = useState<string | null>(null);
+  const ui = useUi.getState;
+
+  const current = folders.some((entry) => entry.id === folderId) ? folderId : "";
+  const label = "flex min-w-0 items-center gap-1.5 text-[10px] tracking-wider text-slate-500 uppercase";
+
+  const create = () => {
+    const id = naming ? useDoc.getState().createFolder(naming) : null;
+    if (id) ui().setGenerateFolder(id);
+    setNaming(null);
+  };
+
+  return (
+    <div className="mt-1.5 flex shrink-0 items-center gap-2">
+      <label className={`${label} flex-1`}>
+        folder
+        {naming === null ? (
+          <select
+            value={current}
+            className="min-w-0 flex-1 normal-case tracking-normal"
+            onChange={(event) => {
+              if (event.target.value === NEW_FOLDER) setNaming("");
+              else ui().setGenerateFolder(event.target.value);
+            }}
+          >
+            <option value="">Unfiled</option>
+            {folders.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.name}
+              </option>
+            ))}
+            <option value={NEW_FOLDER}>New folder…</option>
+          </select>
+        ) : (
+          <input
+            autoFocus
+            value={naming}
+            placeholder="folder name, Enter to create"
+            className="min-w-0 flex-1 normal-case tracking-normal"
+            onChange={(event) => setNaming(event.target.value)}
+            onBlur={create}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") create();
+              if (event.key === "Escape") setNaming(null);
+            }}
+          />
+        )}
+      </label>
+
+      {batching ? (
+        <label className={label} title="Name this batch, or leave blank for the next number">
+          batch
+          <input
+            value={batchName}
+            placeholder={nextBatch}
+            spellCheck={false}
+            style={{ width: "7rem" }}
+            className="normal-case tracking-normal"
+            onChange={(event) => ui().setBatchName(event.target.value)}
+          />
+        </label>
+      ) : null}
+    </div>
+  );
+}
+
 export function GeneratePanel() {
   const settings = useServer((state) => state.settings);
   const project = useServer((state) => state.project);
@@ -720,7 +798,6 @@ export function GeneratePanel() {
   const variables = useUi((state) => state.variables);
   const animateExpansions = useUi((state) => state.animateExpansions);
   const batches = useUi((state) => state.batches);
-  const folder = useUi((state) => state.folder);
   const busy = useUi((state) => state.busy);
   const promptHeight = useUi((state) => state.layout.prompt);
   const snippets = useDoc((state) => state.snippets);
@@ -801,11 +878,7 @@ export function GeneratePanel() {
       : null,
     each.enabled && provider === "gemini" ? "Gemini revise guide" : null
   ].filter((entry): entry is string => entry !== null);
-  const folderHint = suggestedFolder({
-    animation: animation.enabled,
-    itemGrid: itemGrid.enabled && !animation.enabled,
-    many: create.images > 1 && !loop.enabled && !chunk.enabled
-  });
+  const batching = isBatch({ images: create.images, loop: loop.enabled, chunk: chunk.enabled });
 
   const prompt = (
     <PromptEditor bindings={bindings} summary={summary}>
@@ -841,6 +914,16 @@ export function GeneratePanel() {
         <p className="mt-1 shrink-0 text-[10px] leading-snug text-amber-300">{create.blocked}</p>
       ) : create.breakdown ? (
         <p className="mt-1 shrink-0 text-[10px] leading-snug text-slate-500">{create.breakdown}</p>
+      ) : null}
+      <Destination batching={batching} />
+      {canAnimate ? (
+        <div className="mt-1 shrink-0">
+          <Toggle
+            label="Collect into an animation"
+            checked={animateExpansions}
+            onChange={(value) => ui().setAnimateExpansions(value)}
+          />
+        </div>
       ) : null}
     </PromptEditor>
   );
@@ -901,26 +984,6 @@ export function GeneratePanel() {
         <EachMode canEdit={modelOrDefault(generation.model).supportsEdit} />
         <AnimationMode />
         <ItemGridMode />
-      </Section>
-
-      <Section id="generate.output" label="output">
-        <Field label="Folder" hint={folderHint ? `defaults to ${folderHint}` : "optional"}>
-          <input
-            type="text"
-            value={folder}
-            placeholder={folderHint || "library folder"}
-            maxLength={255}
-            onChange={(event) => ui().setFolder(event.target.value)}
-          />
-        </Field>
-
-        {canAnimate ? (
-          <Toggle
-            label="Collect into an animation"
-            checked={animateExpansions}
-            onChange={(value) => ui().setAnimateExpansions(value)}
-          />
-        ) : null}
       </Section>
 
       <Section id="generate.size" label="size">

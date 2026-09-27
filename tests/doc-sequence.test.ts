@@ -31,7 +31,7 @@ function walk(overrides: Partial<Sequence> = {}): Sequence {
 /** A doc with one asset's editable half already seeded. */
 function seeded(): Y.Doc {
   const created = doc.createDoc();
-  doc.ensureAssetEdits(created, ASSET, { folder: "", processing: DEFAULT_PROCESSING });
+  doc.ensureAssetEdits(created, ASSET, { batch: "", processing: DEFAULT_PROCESSING });
   return created;
 }
 

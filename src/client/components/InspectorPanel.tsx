@@ -48,6 +48,7 @@ function lightboxScale(width: number, height: number): number {
 export function InspectorPanel() {
   const selectedIds = useUi((state) => state.selectedIds);
   const palettes = useServer((state) => state.palettes);
+  const folders = useDoc((state) => state.folders);
   const scene = useActiveScene();
   const busy = useUi((state) => state.busy);
   const asset = useSelectedAsset();
@@ -304,11 +305,17 @@ export function InspectorPanel() {
         <Row>
           <div className="flex-1">
             <Field label="Folder">
-              <input
-                type="text"
-                value={asset.folder}
-                onChange={(event) => doc().setFolder(asset.id, event.target.value)}
-              />
+              <select
+                value={folders.some((entry) => entry.id === asset.folderId) ? asset.folderId : ""}
+                onChange={(event) => doc().moveToFolder([asset.id], event.target.value)}
+              >
+                <option value="">Unfiled</option>
+                {folders.map((entry) => (
+                  <option key={entry.id} value={entry.id}>
+                    {entry.name}
+                  </option>
+                ))}
+              </select>
             </Field>
           </div>
           <div className="flex-1">

@@ -2,20 +2,20 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { requestPartUrl } from "@/client/api";
-import { startAssetDrag } from "@/client/dragAssets";
+import { isAssetDrag, readAssetDrag, startAssetDrag } from "@/client/dragAssets";
 import { resolveAssetsNow, useActiveScene, useAssets } from "@/client/stores/assets";
 import { useDoc } from "@/client/stores/doc";
 import { useProjectLoaded, useServer } from "@/client/stores/server";
-import { useUi } from "@/client/stores/ui";
+import { sectionCollapsed, useUi } from "@/client/stores/ui";
 import { useNow } from "@/client/useNow";
 import { isoProjectionFromSource } from "@/core/isoMask";
 import { describeSettings } from "@/core/describe";
 import { faceId, isLibraryVisible, setBadge } from "@/shared/assetSet";
-import { folderSwatch, groupByFolder, type FolderSwatch } from "@/shared/folder";
+import { batchSwatch, groupByBatch, type BatchSwatch } from "@/shared/batch";
 import {
-  FOLDER_PEEK,
+  BATCH_PEEK,
+  batchIsCollapsed,
   flattenLibrary,
-  folderIsCollapsed,
   isFailedJob,
   libraryItemMatches,
   libraryItems,
@@ -27,7 +27,7 @@ import { providerAttachmentPlan } from "@/shared/providerPrompt";
 import { isSetAsset } from "@/shared/repeaterMix";
 import { AssetThumb } from "./AssetBitmap";
 import { ExportDialog } from "./ExportDialog";
-import { Button, Panel, Row, Skeleton } from "./ui";
+import { Button, ConfirmTextButton, Panel, Row, Skeleton, TextButton } from "./ui";
 
 const TITLE_PAD = "pt-4";
 
@@ -185,7 +185,7 @@ function JobThumb({
   );
 }
 
-function FolderToggle({
+function BatchToggle({
   collapsed,
   hidden,
   swatch,
@@ -193,13 +193,13 @@ function FolderToggle({
 }: {
   collapsed: boolean;
   hidden: number;
-  swatch: FolderSwatch;
+  swatch: BatchSwatch;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
-      title={collapsed ? `Show ${hidden} more` : "Collapse folder"}
+      title={collapsed ? `Show ${hidden} more` : "Collapse batch"}
       onClick={onClick}
       className="flex w-5 shrink-0 flex-col items-center justify-center self-stretch rounded text-[10px] leading-none"
       style={{ color: swatch.label }}
@@ -241,21 +241,261 @@ function stageMany(sceneId: string, assetIds: string[], startIndex: number): voi
   });
 }
 
+type Entry = LibraryEntry<ResolvedAsset>;
+
+const UNFILED = "unfiled";
+
+/** Asset ids in a set of entries; running jobs have none yet. */
+function assetIdsOf(entries: Entry[]): string[] {
+  return entries.filter((entry) => entry.kind === "asset").map((entry) => entry.id);
+}
+
+/**
+ * One folder's images: its batches as tinted groups (dragged by their label
+ * to move the whole batch), then its loose images.
+ */
+function FolderContents({
+  entries,
+  thumb
+}: {
+  entries: Entry[];
+  thumb: (entry: Entry) => React.ReactNode;
+}) {
+  const collapsedBatches = useUi((state) => state.collapsedBatches);
+  const ui = useUi.getState;
+
+  if (entries.length === 0) {
+    return <p className="text-[11px] text-slate-500">Empty. Drag images or batches here.</p>;
+  }
+
+  return (
+    <div className="flex flex-wrap items-start gap-2">
+      {groupByBatch(entries).map((group) => {
+        if (!group.batch) {
+          return group.items.map((entry) => (
+            <div key={entry.id} className={TITLE_PAD}>
+              {thumb(entry)}
+            </div>
+          ));
+        }
+
+        const overflow = group.items.length > BATCH_PEEK;
+        const collapsed = batchIsCollapsed(group.batch, group.items.length, BATCH_PEEK, collapsedBatches);
+        const shown = collapsed ? group.items.slice(0, BATCH_PEEK) : group.items;
+        const hidden = group.items.length - shown.length;
+        const swatch = batchSwatch(group.batch);
+
+        return (
+          <div key={group.batch} className={collapsed ? undefined : "max-w-full"}>
+            <div
+              draggable
+              onDragStart={(event) => startAssetDrag(event, assetIdsOf(group.items))}
+              title="Drag to move the whole batch to another folder"
+              className="mb-0.5 flex max-w-full cursor-grab items-baseline gap-1 px-1 text-[10px] leading-4"
+              style={{ color: swatch.label }}
+            >
+              {overflow ? (
+                <button
+                  type="button"
+                  className="w-2.5"
+                  title={collapsed ? "Expand batch" : "Collapse batch"}
+                  onClick={() => ui().toggleBatch(group.batch)}
+                >
+                  {collapsed ? "\u25b8" : "\u25be"}
+                </button>
+              ) : null}
+              <span className="min-w-0 truncate font-medium">{group.batch}</span>
+              <span className="shrink-0 opacity-70">{group.items.length}</span>
+            </div>
+            <div
+              className="flex flex-wrap gap-2 rounded border p-1.5"
+              style={{ background: swatch.fill, borderColor: swatch.stroke }}
+            >
+              {shown.map((entry) => thumb(entry))}
+              {overflow ? (
+                <BatchToggle
+                  collapsed={collapsed}
+                  hidden={hidden}
+                  swatch={swatch}
+                  onClick={() => ui().toggleBatch(group.batch)}
+                />
+              ) : null}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * A folder across the full width of the library: a sticky heading bar, like
+ * a panel section, that images and batches can be dropped on. Unfiled is the
+ * same thing without rename or delete.
+ */
+function FolderSection({
+  id,
+  name,
+  entries,
+  thumb
+}: {
+  /** A folder id, or `UNFILED`. */
+  id: string;
+  name: string;
+  entries: Entry[];
+  thumb: (entry: Entry) => React.ReactNode;
+}) {
+  const sectionId = `library.folder.${id}`;
+  const collapsed = useUi((state) => sectionCollapsed(sectionId, state.collapsedSections));
+  const [over, setOver] = useState(false);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const real = id !== UNFILED;
+
+  const rename = () => {
+    if (renaming !== null) useDoc.getState().renameFolder(id, renaming);
+    setRenaming(null);
+  };
+
+  return (
+    <section
+      onDragOver={(event) => {
+        if (!isAssetDrag(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+        setOver(true);
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOver(false);
+      }}
+      onDrop={(event) => {
+        setOver(false);
+        const ids = readAssetDrag(event);
+        if (ids.length === 0) return;
+        event.preventDefault();
+        useDoc.getState().moveToFolder(ids, real ? id : "");
+      }}
+      className={`-mx-3 border-t border-[var(--color-edge)] last:border-b ${
+        over ? "bg-[var(--color-accent-dim)]/20" : ""
+      }`}
+    >
+      <div
+        className={`group sticky top-0 z-10 flex h-8 items-center gap-2 px-3 transition-colors ${
+          over ? "bg-[var(--color-accent-dim)]/60" : "bg-[var(--color-ink-800)]"
+        }`}
+      >
+        <button
+          type="button"
+          aria-expanded={!collapsed}
+          title={collapsed ? `Show ${name}` : `Hide ${name}`}
+          onClick={() => useUi.getState().toggleSection(sectionId)}
+          className="flex min-w-0 flex-1 items-center gap-2 self-stretch"
+        >
+          <svg
+            aria-hidden
+            viewBox="0 0 10 10"
+            className={`h-2.5 w-2.5 shrink-0 text-slate-400 transition-transform ${collapsed ? "" : "rotate-90"}`}
+          >
+            <path d="M3 1.5 6.5 5 3 8.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+          </svg>
+          {renaming === null ? (
+            <span
+              className={`truncate text-[11px] font-semibold tracking-wider uppercase ${
+                real ? "text-slate-200" : "text-slate-400"
+              }`}
+              onDoubleClick={(event) => {
+                if (!real) return;
+                event.stopPropagation();
+                setRenaming(name);
+              }}
+              title={real ? "Double-click to rename" : undefined}
+            >
+              {name}
+            </span>
+          ) : null}
+          {renaming === null ? (
+            <span className="shrink-0 text-[10px] text-slate-500 tabular-nums">{entries.length}</span>
+          ) : null}
+        </button>
+        {renaming !== null ? (
+          <input
+            autoFocus
+            value={renaming}
+            className="min-w-0 flex-1 text-[11px]"
+            onChange={(event) => setRenaming(event.target.value)}
+            onBlur={rename}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") rename();
+              if (event.key === "Escape") setRenaming(null);
+            }}
+          />
+        ) : null}
+        {real && renaming === null ? (
+          <ConfirmTextButton
+            title="Delete this folder. Its images move to Unfiled."
+            onConfirm={() => useDoc.getState().deleteFolder(id)}
+          >
+            &times;
+          </ConfirmTextButton>
+        ) : null}
+      </div>
+      {collapsed ? null : (
+        <div className="px-3 pt-2.5 pb-3">
+          <FolderContents entries={entries} thumb={thumb} />
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** "+ folder", then a name box in its place. */
+function NewFolderButton() {
+  const [naming, setNaming] = useState<string | null>(null);
+
+  const create = () => {
+    if (naming) useDoc.getState().createFolder(naming);
+    setNaming(null);
+  };
+
+  if (naming === null) {
+    return (
+      <TextButton title="Make a folder to sort images into" onClick={() => setNaming("")}>
+        + folder
+      </TextButton>
+    );
+  }
+
+  return (
+    <input
+      autoFocus
+      value={naming}
+      placeholder="folder name"
+      style={{ width: "9rem" }}
+      className="text-[11px]"
+      onChange={(event) => setNaming(event.target.value)}
+      onBlur={create}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") create();
+        if (event.key === "Escape") setNaming(null);
+      }}
+    />
+  );
+}
+
 export function LibraryPanel() {
   const projectId = useServer((state) => state.project?.id ?? null);
   const loaded = useProjectLoaded();
   const assets = useAssets();
   const jobs = useServer((state) => state.jobs);
+  const folders = useDoc((state) => state.folders);
   const selectedIds = useUi((state) => state.selectedIds);
   const busy = useUi((state) => state.busy);
+  const filter = useUi((state) => state.libraryFolder);
+  const collapsedBatches = useUi((state) => state.collapsedBatches);
   const scene = useActiveScene();
   const store = useServer.getState;
   const ui = useUi.getState;
 
-  const collapsedFolders = useUi((state) => state.collapsedFolders);
-
   const [search, setSearch] = useState("");
-  const [folderFilter, setFolderFilter] = useState("");
   const [thumbSize, setThumbSize] = useState(88);
   const [exporting, setExporting] = useState(false);
 
@@ -264,29 +504,46 @@ export function LibraryPanel() {
     [assets]
   );
 
+  const known = useMemo(() => new Set(folders.map((entry) => entry.id)), [folders]);
+  // A folder id that no longer resolves (the folder was deleted) reads as unfiled.
+  const folderOf = (entry: Entry) => (known.has(entry.folderId) ? entry.folderId : UNFILED);
+
   const items = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return libraryItems(visibleAssets, jobs)
-      .filter((entry) => (folderFilter ? entry.folder === folderFilter : true))
-      .filter((entry) => libraryItemMatches(entry, needle));
-  }, [folderFilter, jobs, search, visibleAssets]);
+    const jobFolder = (jobId: string) => useDoc.getState().jobFolderOf(jobId);
+    return libraryItems(visibleAssets, jobs, jobFolder).filter((entry) =>
+      libraryItemMatches(entry, needle)
+    );
+  }, [jobs, search, visibleAssets]);
 
-  const folders = useMemo(() => {
-    const set = new Set<string>();
-    for (const entry of libraryItems(visibleAssets, jobs)) {
-      if (entry.folder) set.add(entry.folder);
+  const activeFilter = filter === UNFILED || known.has(filter) ? filter : "";
+
+  // Folder sections in name order, Unfiled last; only the filtered one when filtered.
+  const sections = useMemo(() => {
+    const byFolder = new Map<string, Entry[]>();
+    for (const entry of items) {
+      const key = folderOf(entry);
+      byFolder.set(key, [...(byFolder.get(key) ?? []), entry]);
     }
-    return [...set].sort();
-  }, [jobs, visibleAssets]);
 
-  const groups = useMemo(() => groupByFolder(items), [items]);
-  const cells = useMemo(
-    () => flattenLibrary(groups, collapsedFolders, FOLDER_PEEK),
-    [collapsedFolders, groups]
-  );
+    const all = [
+      ...folders.map((entry) => ({ id: entry.id, name: entry.name, entries: byFolder.get(entry.id) ?? [] })),
+      { id: UNFILED, name: "Unfiled", entries: byFolder.get(UNFILED) ?? [] }
+    ];
+
+    // Unfiled always shows, even empty, so there is somewhere to drag images back to.
+    return activeFilter ? all.filter((section) => section.id === activeFilter) : all;
+  }, [activeFilter, folders, items, known]);
+
+  // Shift-click ranges follow what is on screen, section by section.
   const ordered = useMemo(
-    () => cells.filter((cell): cell is { type: "item"; item: LibraryEntry<ResolvedAsset> } => cell.type === "item").map((cell) => cell.item),
-    [cells]
+    () =>
+      sections.flatMap((section) =>
+        flattenLibrary(groupByBatch(section.entries), collapsedBatches, BATCH_PEEK)
+          .filter((cell): cell is { type: "item"; item: Entry } => cell.type === "item")
+          .map((cell) => cell.item)
+      ),
+    [collapsedBatches, sections]
   );
 
   const selectedAssets = useMemo(
@@ -319,7 +576,7 @@ export function LibraryPanel() {
     ui().select(id, event.ctrlKey || event.metaKey);
   };
 
-  const thumb = (entry: LibraryEntry<ResolvedAsset>) =>
+  const thumb = (entry: Entry) =>
     entry.kind === "job" ? (
       <JobThumb
         key={entry.id}
@@ -377,7 +634,6 @@ export function LibraryPanel() {
                   generatedWith: selectedJob.processing,
                   inputs: selectedJob.inputs,
                   sequencePlan: selectedJob.sequencePlan,
-                  folder: selectedJob.folder,
                   label: selectedJob.label
                 });
               }
@@ -406,20 +662,27 @@ export function LibraryPanel() {
       </Row>
 
       <Row className="mb-3">
-        <select value={folderFilter} onChange={(event) => setFolderFilter(event.target.value)}>
-          <option value="">all folders</option>
-          {folders.map((folder) => (
-            <option key={folder} value={folder}>
-              {folder}
+        <select
+          value={activeFilter}
+          title="Show one folder. New images go to the folder you are looking at."
+          onChange={(event) => ui().setLibraryFolder(event.target.value)}
+        >
+          <option value="">All folders</option>
+          {folders.map((entry) => (
+            <option key={entry.id} value={entry.id}>
+              {entry.name}
             </option>
           ))}
+          <option value={UNFILED}>Unfiled</option>
         </select>
+        <NewFolderButton />
         <input
           type="range"
           min={48}
           max={160}
           step={8}
           value={thumbSize}
+          title="Thumbnail size"
           onChange={(event) => setThumbSize(Number.parseInt(event.target.value, 10))}
         />
       </Row>
@@ -472,70 +735,21 @@ export function LibraryPanel() {
             />
           ))}
         </div>
-      ) : items.length === 0 ? (
+      ) : items.length === 0 && folders.length === 0 ? (
         <p className="text-[11px] leading-snug text-slate-500">
           Nothing here yet. Write a prompt and hit Generate.
         </p>
       ) : (
-        <div className="flex flex-wrap items-start gap-2">
-          {groups.map((group) => {
-            if (!group.folder) {
-              return group.items.map((entry) => (
-                <div key={entry.id} className={TITLE_PAD}>
-                  {thumb(entry)}
-                </div>
-              ));
-            }
-
-            const overflow = group.items.length > FOLDER_PEEK;
-            const collapsed = folderIsCollapsed(
-              group.folder,
-              group.items.length,
-              FOLDER_PEEK,
-              collapsedFolders
-            );
-            const shown = collapsed ? group.items.slice(0, FOLDER_PEEK) : group.items;
-            const hidden = group.items.length - shown.length;
-            const swatch = folderSwatch(group.folder);
-
-            return (
-              <div
-                key={group.folder}
-                className={collapsed ? undefined : "max-w-full"}
-              >
-                <button
-                  type="button"
-                  disabled={!overflow}
-                  title={
-                    overflow ? (collapsed ? "Expand folder" : "Collapse folder") : undefined
-                  }
-                  onClick={() => {
-                    if (overflow) ui().toggleFolder(group.folder);
-                  }}
-                  className="mb-0.5 flex max-w-full items-baseline gap-1 px-1 text-left text-[10px] leading-4 disabled:cursor-default"
-                  style={{ color: swatch.label }}
-                >
-                  {overflow ? <span className="w-2.5">{collapsed ? "▸" : "▾"}</span> : null}
-                  <span className="min-w-0 truncate font-medium">{group.folder}</span>
-                  <span className="shrink-0 opacity-70">{group.items.length}</span>
-                </button>
-                <div
-                  className="flex flex-wrap gap-2 rounded border p-1.5"
-                  style={{ background: swatch.fill, borderColor: swatch.stroke }}
-                >
-                  {shown.map((entry) => thumb(entry))}
-                  {overflow ? (
-                    <FolderToggle
-                      collapsed={collapsed}
-                      hidden={hidden}
-                      swatch={swatch}
-                      onClick={() => ui().toggleFolder(group.folder)}
-                    />
-                  ) : null}
-                </div>
-              </div>
-            );
-          })}
+        <div>
+          {sections.map((section) => (
+            <FolderSection
+              key={section.id}
+              id={section.id}
+              name={section.name}
+              entries={section.entries}
+              thumb={thumb}
+            />
+          ))}
         </div>
       )}
     </Panel>

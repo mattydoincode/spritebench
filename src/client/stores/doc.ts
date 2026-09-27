@@ -17,6 +17,7 @@ import {
   type AssetRecord,
   type JobRecord,
   type Scene,
+  type Folder,
   type Snippet,
   type RepeatGroup,
   type StagedItem,
@@ -55,6 +56,7 @@ interface DocState {
   edits: Record<string, AssetEdits>;
   sets: AssetSet[];
   snippets: Snippet[];
+  folders: Folder[];
   settings: ProjectSettings;
   canUndo: boolean;
   canRedo: boolean;
@@ -109,11 +111,24 @@ interface DocState {
   /** Creates the editable half of any asset that does not have one yet. */
   backfill: (
     assets: AssetRecord[],
-    context?: { folders?: Record<string, string>; jobs?: JobRecord[] }
+    context?: { batches?: Record<string, string>; jobs?: JobRecord[] }
   ) => void;
   editsFor: (assetId: string) => AssetEdits | null;
   rename: (assetId: string, name: string) => void;
-  setFolder: (assetId: string, folder: string) => void;
+  setBatch: (assetId: string, batch: string) => void;
+  /**
+   * Moves images into a folder ("" for unfiled). A batch moved whole keeps
+   * its name; images taken out of a batch leave it, so a batch never ends up
+   * split across folders.
+   */
+  moveToFolder: (assetIds: string[], folderId: string) => void;
+  /** Returns the new folder's id. */
+  createFolder: (name: string) => string | null;
+  renameFolder: (id: string, name: string) => void;
+  deleteFolder: (id: string) => void;
+  /** Where a job's images land when they arrive. */
+  setJobFolder: (jobId: string, folderId: string) => void;
+  jobFolderOf: (jobId: string) => string;
   setTags: (assetId: string, tags: string[]) => void;
   patchProcessing: (assetId: string, patch: Partial<ProcessingSettings>) => void;
   applyProcessingToMany: (assetIds: string[], processing: ProcessingSettings) => void;
@@ -164,6 +179,7 @@ export const useDoc = create<DocState>((set, get) => {
       ready: sync.ready,
       scenes: doc.listScenes(sync.doc),
       snippets: doc.listSnippets(sync.doc),
+      folders: doc.listFolders(sync.doc),
       settings: doc.readProjectSettings(sync.doc),
       edits: Object.fromEntries(
         [...doc.assetEditsMap(sync.doc).keys()].flatMap((assetId) => {
@@ -185,6 +201,7 @@ export const useDoc = create<DocState>((set, get) => {
     edits: {},
     sets: [],
     snippets: [],
+    folders: [],
     settings: DEFAULT_PROJECT_SETTINGS,
     canUndo: false,
     canRedo: false,
@@ -206,6 +223,7 @@ export const useDoc = create<DocState>((set, get) => {
         edits: {},
         sets: [],
         snippets: [],
+        folders: [],
         settings: DEFAULT_PROJECT_SETTINGS
       });
       void sync.start();
@@ -220,6 +238,7 @@ export const useDoc = create<DocState>((set, get) => {
         edits: {},
         sets: [],
         snippets: [],
+        folders: [],
         settings: DEFAULT_PROJECT_SETTINGS
       });
     },
@@ -403,7 +422,7 @@ export const useDoc = create<DocState>((set, get) => {
       const { sync } = get();
       if (!sync) return;
 
-      const folders = context.folders ?? {};
+      const batches = context.batches ?? {};
       const jobs = new Map((context.jobs ?? []).map((job) => [job.id, job]));
 
       for (const asset of assets) {
@@ -411,7 +430,8 @@ export const useDoc = create<DocState>((set, get) => {
         const spec = setSpecFromInputs(job?.inputs ?? asset.inputs);
 
         doc.ensureAssetEdits(sync.doc, asset.id, {
-          folder: (asset.jobId && folders[asset.jobId]) || "",
+          batch: (asset.jobId && batches[asset.jobId]) || "",
+          folderId: asset.jobId ? doc.jobFolder(sync.doc, asset.jobId) : "",
           processing: asset.generatedWith,
           hidden: Boolean(spec)
         });
@@ -428,7 +448,8 @@ export const useDoc = create<DocState>((set, get) => {
           const origin = loopOriginMember(job.inputs ?? asset.inputs);
           if (origin) {
             doc.ensureAssetEdits(sync.doc, origin.assetId, {
-              folder: (asset.jobId && folders[asset.jobId]) || "",
+              batch: (asset.jobId && batches[asset.jobId]) || "",
+              folderId: asset.jobId ? doc.jobFolder(sync.doc, asset.jobId) : "",
               processing: asset.generatedWith,
               hidden: true
             });
@@ -469,9 +490,60 @@ export const useDoc = create<DocState>((set, get) => {
       if (sync) doc.patchAssetEdits(sync.doc, assetId, { name });
     },
 
-    setFolder(assetId, folder) {
+    setBatch(assetId, batch) {
       const { sync } = get();
-      if (sync) doc.patchAssetEdits(sync.doc, assetId, { folder });
+      if (sync) doc.patchAssetEdits(sync.doc, assetId, { batch });
+    },
+
+    moveToFolder(assetIds, folderId) {
+      const { sync, edits } = get();
+      if (!sync) return;
+
+      const moving = new Set(assetIds);
+      // Which batches are moving whole: every member is in `assetIds`.
+      const members = new Map<string, string[]>();
+      for (const [id, entry] of Object.entries(edits)) {
+        if (!entry.batch) continue;
+        members.set(entry.batch, [...(members.get(entry.batch) ?? []), id]);
+      }
+
+      doc.transactLocal(sync.doc, () => {
+        for (const id of moving) {
+          const batch = edits[id]?.batch ?? "";
+          const whole = batch !== "" && (members.get(batch) ?? []).every((member) => moving.has(member));
+          doc.patchAssetEdits(sync.doc, id, whole ? { folderId } : { folderId, batch: "" });
+        }
+      });
+    },
+
+    createFolder(name) {
+      const { sync } = get();
+      const trimmed = name.trim();
+      if (!sync || !trimmed) return null;
+
+      const id = crypto.randomUUID();
+      doc.putFolder(sync.doc, { id, name: trimmed });
+      return id;
+    },
+
+    renameFolder(id, name) {
+      const { sync } = get();
+      if (sync && name.trim()) doc.renameFolder(sync.doc, id, name.trim());
+    },
+
+    deleteFolder(id) {
+      const { sync } = get();
+      if (sync) doc.deleteFolder(sync.doc, id);
+    },
+
+    jobFolderOf(jobId) {
+      const { sync } = get();
+      return sync ? doc.jobFolder(sync.doc, jobId) : "";
+    },
+
+    setJobFolder(jobId, folderId) {
+      const { sync } = get();
+      if (sync && folderId) doc.setJobFolder(sync.doc, jobId, folderId);
     },
 
     setTags(assetId, tags) {
