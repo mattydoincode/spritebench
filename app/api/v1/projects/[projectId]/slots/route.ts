@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { listEngineCollections } from "@/db/repo/engineCollections";
 import { listEngineSlots, upsertCatalog } from "@/db/repo/engineSlots";
+import { engineSyncedAt, markEngineSynced } from "@/db/repo/projects";
 import { v1ProjectContext } from "@/server/v1";
 import { catalogBodySchema, parseBody, withValidation } from "@/server/validation";
 
@@ -11,10 +12,12 @@ type Params = { params: Promise<{ projectId: string }> };
 export async function GET(request: Request, { params }: Params) {
   return withValidation(async () => {
     const { projectId } = await v1ProjectContext(request, params, "view");
-    return NextResponse.json({
-      slots: await listEngineSlots(projectId),
-      collections: await listEngineCollections(projectId)
-    });
+    const [slots, collections, syncedAt] = await Promise.all([
+      listEngineSlots(projectId),
+      listEngineCollections(projectId),
+      engineSyncedAt(projectId)
+    ]);
+    return NextResponse.json({ slots, collections, engineSyncedAt: syncedAt });
   });
 }
 
@@ -31,6 +34,8 @@ export async function POST(request: Request, { params }: Params) {
       })),
       body.collections
     );
+    // Only the plugin posts the catalog, so this is "Godot has synced here".
+    await markEngineSynced(projectId);
     return NextResponse.json({
       slots,
       collections: await listEngineCollections(projectId)

@@ -134,6 +134,8 @@ interface ServerState {
   slots: EngineSlotRecord[];
   /** Godot collections of keyed records; their field slots are in `slots`. */
   collections: EngineCollectionView[];
+  /** When the Godot plugin last synced this project; null means never. */
+  engineSyncedAt: string | null;
 
   loadProjects: () => Promise<ProjectSummary[]>;
   /**
@@ -321,6 +323,7 @@ export const useServer = create<ServerState>((set, get) => {
     mintedToken: null,
     slots: [],
     collections: [],
+    engineSyncedAt: null,
 
     async loadProjects() {
       try {
@@ -362,7 +365,8 @@ export const useServer = create<ServerState>((set, get) => {
               palettes: [],
               templates: [],
               slots: [],
-              collections: []
+              collections: [],
+              engineSyncedAt: null
             })
       });
     },
@@ -387,11 +391,14 @@ export const useServer = create<ServerState>((set, get) => {
           projectApi<{ jobs: JobRecord[] }>(id, "/jobs"),
           projectApi<{ palettes: PaletteInfo[] }>(id, "/palettes"),
           projectApi<{ templates: TemplateInfo[] }>(id, "/templates"),
-          api<{ slots: EngineSlotRecord[]; collections?: EngineCollectionView[] }>(
-            `/api/v1/projects/${id}/slots`
-          ).catch(() => ({
+          api<{
+            slots: EngineSlotRecord[];
+            collections?: EngineCollectionView[];
+            engineSyncedAt?: string | null;
+          }>(`/api/v1/projects/${id}/slots`).catch(() => ({
             slots: [] as EngineSlotRecord[],
-            collections: [] as EngineCollectionView[]
+            collections: [] as EngineCollectionView[],
+            engineSyncedAt: null
           }))
         ]);
 
@@ -404,7 +411,8 @@ export const useServer = create<ServerState>((set, get) => {
           palettes: palettesRes.palettes,
           templates: templatesRes.templates,
           slots: slotsRes.slots,
-          collections: slotsRes.collections ?? []
+          collections: slotsRes.collections ?? [],
+          engineSyncedAt: slotsRes.engineSyncedAt ?? null
         });
 
         useDoc.getState().backfill(assetsRes.assets, {
@@ -1167,11 +1175,12 @@ export const useServer = create<ServerState>((set, get) => {
 
     async refreshSlots() {
       try {
-        const { slots, collections } = await api<{
+        const { slots, collections, engineSyncedAt } = await api<{
           slots: EngineSlotRecord[];
           collections?: EngineCollectionView[];
+          engineSyncedAt?: string | null;
         }>(`/api/v1/projects/${projectId()}/slots`);
-        set({ slots, collections: collections ?? [] });
+        set({ slots, collections: collections ?? [], engineSyncedAt: engineSyncedAt ?? null });
       } catch {
         // Polling is best effort; the next tick recovers.
       }

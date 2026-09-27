@@ -441,10 +441,14 @@ function useHighlightedAssets(): ReadonlySet<string> {
   }, [selectedIds, selectedItemIds, activeItemId, scene]);
 }
 
+/** Until there is a release page, the addon's repository. */
+const GODOT_PLUGIN_URL = "https://github.com/mattydoincode/spritebench-godot";
+
 export function EnginePanel() {
   const allSlots = useServer((state) => state.slots);
   const collections = useServer((state) => state.collections);
   const project = useServer((state) => state.project);
+  const engineSyncedAt = useServer((state) => state.engineSyncedAt);
   const loaded = useProjectLoaded();
   const assets = useAssets();
   const thumbSize = useUi((state) => state.engineThumbSize);
@@ -456,9 +460,19 @@ export function EnginePanel() {
 
   return (
     <Panel tabs={<LeftTabs />}>
-      {project ? (
-        <p className="mb-2 font-mono text-[10px] break-all text-slate-500">
-          project {project.id}
+      {loaded && !engineSyncedAt ? (
+        <p className="mb-2 text-[10px] leading-snug text-slate-500">
+          Using Godot? The{" "}
+          <a
+            href={GODOT_PLUGIN_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="underline hover:text-slate-300"
+          >
+            SpriteBench plugin
+          </a>{" "}
+          pulls these into your project. Project id{" "}
+          <span className="font-mono select-all">{project?.id}</span>
         </p>
       ) : null}
 
@@ -501,8 +515,7 @@ export function EnginePanel() {
         </div>
       ) : slots.length === 0 && collections.length === 0 ? (
         <p className="text-[11px] leading-snug text-slate-500">
-          No Godot slots yet. Enable the SpriteBench addon, paste a personal access
-          token, and sync.
+          No game assets yet.
         </p>
       ) : slots.length === 0 ? null : (
         <ul className="flex flex-col gap-2">

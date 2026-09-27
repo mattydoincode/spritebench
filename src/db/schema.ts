@@ -134,6 +134,8 @@ export const projects = pgTable("projects", {
   nextAssetSeq: integer("next_asset_seq").notNull().default(1),
   /** Provider id → which of the owner's keys this project bills. Missing means the owner's default. */
   keyDefaults: jsonb("key_defaults").$type<Record<string, string>>().notNull().default({}),
+  /** Last time the Godot plugin synced its catalog here. Null: never, so the studio offers the plugin. */
+  engineSyncedAt: timestamp("engine_synced_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp("deleted_at", { withTimezone: true })
 }, (table) => [index("projects_owner_idx").on(table.ownerUserId)]);

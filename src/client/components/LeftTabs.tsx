@@ -20,7 +20,7 @@ export function LeftTabs() {
         count={slots.length > 0 ? slots.length : undefined}
         onClick={() => setTab("godot")}
       >
-        Godot
+        Game Assets
       </PanelTab>
     </>
   );

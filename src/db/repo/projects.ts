@@ -160,6 +160,18 @@ export async function nextAssetSeq(
   return row.seq - 1;
 }
 
+export async function markEngineSynced(projectId: string): Promise<void> {
+  await db().update(projects).set({ engineSyncedAt: new Date() }).where(eq(projects.id, projectId));
+}
+
+export async function engineSyncedAt(projectId: string): Promise<string | null> {
+  const [row] = await db()
+    .select({ at: projects.engineSyncedAt })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  return row?.at?.toISOString() ?? null;
+}
+
 /** Provider id → key id this project bills. Missing providers use the owner's default. */
 export async function getProjectKeyDefaults(projectId: string): Promise<Record<string, string>> {
   const [row] = await db()
