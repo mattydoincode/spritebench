@@ -252,8 +252,8 @@ function clampPane(pane: Pane, size: number): number {
 /**
  * Default sizes as shares of the window, so a first open or a double-click
  * reset fits the screen it is on: side panels a fifth of the width each, the
- * library about a third of the height, the prompt and the inspector preview
- * 40% of their panels.
+ * library about a third of the height, the prompt 40% of its panel, and the
+ * inspector preview's image about 30% of the window.
  * Stored sizes stay in pixels -- dragging is in pixels.
  */
 const LAYOUT_SHARES: Record<Pane, number> = {
@@ -261,7 +261,8 @@ const LAYOUT_SHARES: Record<Pane, number> = {
   right: 0.2,
   library: 0.35,
   prompt: 0.4,
-  preview: 0.4,
+  // Of the window, for the image itself; PREVIEW_CHROME is added on top.
+  preview: 0.3,
   // Unused: feedback defaults to fitting its content (0), not a share.
   feedback: 0
 };
@@ -270,6 +271,14 @@ const LAYOUT_SHARES: Record<Pane, number> = {
 const LEFT_CHROME = 80;
 /** Panel header, above the inspector's body. */
 const RIGHT_CHROME = 40;
+/**
+ * Everything in the pinned preview besides the image: tabs, size caption,
+ * and the name, tags and download rows under it. Added to the preview's
+ * share so the image itself gets that share of the window, not the block.
+ */
+const PREVIEW_CHROME = 160;
+/** The preview never takes more of the inspector than this by default. */
+const PREVIEW_MAX_SHARE = 0.6;
 
 /** Stands in for the window where there is none, so server and first client render agree. */
 const FALLBACK_VIEWPORT = { width: 1600, height: 900 };
@@ -284,7 +293,13 @@ export function defaultLayout(
     right: clampPane("right", viewport.width * LAYOUT_SHARES.right),
     library: clampPane("library", viewport.height * LAYOUT_SHARES.library),
     prompt: clampPane("prompt", (viewport.height - LEFT_CHROME) * LAYOUT_SHARES.prompt),
-    preview: clampPane("preview", (viewport.height - RIGHT_CHROME) * LAYOUT_SHARES.preview),
+    preview: clampPane(
+      "preview",
+      Math.min(
+        viewport.height * LAYOUT_SHARES.preview + PREVIEW_CHROME,
+        (viewport.height - RIGHT_CHROME) * PREVIEW_MAX_SHARE
+      )
+    ),
     feedback: 0
   };
 }
