@@ -172,7 +172,12 @@ function ModelAndSize() {
   const generation = settings.generation;
   const model = modelOrDefault(generation.model);
   const picker = sizePickerOptions(model);
-  const selectedSize = sizeSelection(generation, model);
+  // "custom" is a choice, not only a fallback: picking it with a preset's size
+  // still in place would otherwise match that preset and snap straight back,
+  // never showing the width and height fields.
+  const [customSize, setCustomSize] = useState(false);
+  const matched = sizeSelection(generation, model);
+  const selectedSize = customSize && !generation.useAutoSize ? "custom" : matched;
   const sizeHint = describeRequestSize(model, generation.size, generation.useAutoSize);
   const sheet = animation.enabled
     ? planAnimation({
@@ -239,7 +244,10 @@ function ModelAndSize() {
           value={selectedSize}
           options={picker.map((option) => option.id)}
           labels={Object.fromEntries(picker.map((option) => [option.id, option.label]))}
-          onChange={(value) => store().setGeneration(applySizeSelection(value, generation, model))}
+          onChange={(value) => {
+            setCustomSize(value === "custom");
+            store().setGeneration(applySizeSelection(value, generation, model));
+          }}
         />
       </Field>
 
