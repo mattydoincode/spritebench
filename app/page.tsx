@@ -12,6 +12,31 @@ const HERO_IMAGE = "/marketing/hero-2560.webp";
 /** The walkthrough's YouTube id (the part after `v=`). Empty hides the link. */
 const YOUTUBE_ID = "";
 
+/** The small list beside the intro. Short labels; one line each where possible. */
+const FEATURES = [
+  "Batch generation with OpenAI or Gemini",
+  "Chained prompts",
+  "Chunk and process big images",
+  "Animations and sprite sheets",
+  "Variations and item grids",
+  "Prompt snippets and variables",
+  "Template builder",
+  "Masks for editing part of an image",
+  "Background removal",
+  "Cropping",
+  "Pixel art: downsample, palettes, dithering",
+  "Slice sheets into frames",
+  "Library with folders, tags and search",
+  "Upload artists' finals",
+  "Scene for composing art",
+  "Repeaters",
+  "Isometric support",
+  "Terrain testing",
+  "Live collaboration and share links",
+  "Zip export",
+  "Godot plugin sync (experimental)"
+];
+
 /**
  * The public front door: one screen, a small personal project rather than a
  * product page.
@@ -47,7 +72,7 @@ export default async function LandingPage() {
         />
       </header>
 
-      <main className="relative flex flex-1 items-center px-6 pb-16 sm:px-12">
+      <main className="relative flex flex-1 flex-col justify-center gap-12 px-6 pb-16 sm:px-12 lg:flex-row lg:items-center lg:justify-between">
         <div className="max-w-2xl">
           <h1 className="text-5xl leading-[1.05] font-semibold tracking-tight text-white sm:text-6xl">
             Prototype with AI.
@@ -56,9 +81,10 @@ export default async function LandingPage() {
           </h1>
 
           <p className="mt-6 text-lg leading-relaxed text-slate-300">
-            A little tool I&apos;m building for making game art. Generate sprites with your own
-            OpenAI or Gemini key, clean them up into pixel art, and hand the good ones to an artist
-            to finish.
+            Hi, I'm Matt, and I like building games (badly).
+            I made this app to help game developers prototype game art with AI then loop in artists once they're ready for prime time.
+            It has all the nerdy game-dev specific features I've wanted for a while and an experimental Godot plugin for syncing assets to Godot. 
+            You bring your own OpenAI or Gemini keys, and the app is free for now. 
           </p>
 
           <p className="mt-4 text-[15px] leading-relaxed text-slate-400">
@@ -86,6 +112,22 @@ export default async function LandingPage() {
             ) : null}
           </div>
         </div>
+
+        <aside className="w-full max-w-md shrink-0 rounded-lg border border-white/10 bg-black/45 p-5 backdrop-blur-sm">
+          <h2 className="mb-3 text-xs font-medium tracking-wider text-slate-400 uppercase">
+            What&apos;s in it
+          </h2>
+          <ul className="grid gap-x-5 gap-y-1.5 text-[13px] leading-snug text-slate-300 sm:grid-cols-2">
+            {FEATURES.map((feature) => (
+              <li key={feature} className="flex gap-2">
+                <span aria-hidden className="text-[var(--color-accent)]">
+                  ·
+                </span>
+                {feature}
+              </li>
+            ))}
+          </ul>
+        </aside>
       </main>
 
       <footer className="relative flex gap-5 px-6 py-5 text-sm text-slate-500 sm:px-12">
