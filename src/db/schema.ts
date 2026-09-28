@@ -161,6 +161,22 @@ export const feedback = pgTable("feedback", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
 }, (table) => [index("feedback_created_idx").on(table.createdAt)]);
 
+/**
+ * One row per view of a public page (home, sign-in, privacy, terms), for the
+ * admin's visitor counts. No cookies and no IP address: `visitor` is a hash of
+ * IP, user agent, the day and a server secret, so it counts distinct visitors
+ * within a day but cannot identify anyone or follow them to the next day.
+ */
+export const pageViews = pgTable("page_views", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  path: text("path").notNull(),
+  signedIn: boolean("signed_in").notNull(),
+  /** The referring site's host (reddit.com), never the full URL. */
+  referrerHost: text("referrer_host"),
+  visitor: text("visitor").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+}, (table) => [index("page_views_created_idx").on(table.createdAt)]);
+
 export const projectMembers = pgTable("project_members", {
   projectId: uuid("project_id")
     .notNull()

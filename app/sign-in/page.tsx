@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { trackPageView } from "@/server/analytics";
 import { auth, signIn } from "@/server/auth";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +18,7 @@ export default async function SignInPage({
   const destination = next?.startsWith("/") && !next.startsWith("//") ? next : "/projects";
 
   if (session?.user) redirect(destination);
+  await trackPageView("/sign-in", false);
 
   return (
     <main className="page-shell flex h-screen items-center justify-center">

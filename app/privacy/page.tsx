@@ -1,9 +1,13 @@
 import Link from "next/link";
 import { LegalPage } from "@/client/components/LegalPage";
+import { trackPageView } from "@/server/analytics";
+import { optionalUser } from "@/server/session";
 
 export const metadata = { title: "Privacy — SpriteBench" };
+export const dynamic = "force-dynamic";
 
-export default function PrivacyPage() {
+export default async function PrivacyPage() {
+  await trackPageView("/privacy", Boolean(await optionalUser()));
   return (
     <LegalPage title="Privacy" updated="September 2026">
       <h2>What we collect</h2>
@@ -17,6 +21,13 @@ export default function PrivacyPage() {
         We also store what you make: projects, the prompts you write, generated and
         uploaded images, palettes, templates, and a record of each generation
         request and its cost.
+      </p>
+      <p>
+        When you open one of the public pages (the home page, sign-in, this page or the
+        terms), we count the visit: which page, whether you were signed in, and the site
+        that linked you here. There are no cookies for this and no IP addresses are kept.
+        To count unique visitors we store a one-way hash of your IP address, browser and
+        the date, which changes every day and cannot be turned back into who you are.
       </p>
 
       <h2>Image model keys</h2>

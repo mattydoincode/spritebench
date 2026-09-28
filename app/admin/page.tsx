@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { PageShell } from "@/client/components/AppHeader";
 import { adminStats, isAdmin, listFeedback, userUsage } from "@/db/repo/feedback";
+import { visitorStats } from "@/db/repo/pageViews";
 import { optionalUser } from "@/server/session";
 
 export const dynamic = "force-dynamic";
@@ -33,7 +34,18 @@ export default async function AdminPage() {
   const userId = await optionalUser();
   if (!userId || !(await isAdmin(userId))) notFound();
 
-  const [stats, entries, usage] = await Promise.all([adminStats(), listFeedback(), userUsage()]);
+  const [stats, entries, usage, visits] = await Promise.all([
+    adminStats(),
+    listFeedback(),
+    userUsage(),
+    visitorStats(14)
+  ]);
+  const today = new Date().toISOString().slice(0, 10);
+  const todayVisits = visits.days.find((entry) => entry.day === today);
+  // Visitors are distinct per day, so this is visitor-days, not people.
+  const fortnightVisitors = visits.days.reduce((sum, entry) => sum + entry.visitors, 0);
+  const fortnightViews = visits.days.reduce((sum, entry) => sum + entry.views, 0);
+  const peak = Math.max(1, ...visits.days.map((entry) => entry.views));
   const monthly = (stats.storedBytes / 1024 ** 3) * R2_PER_GB_MONTH;
 
   const tiles = [
@@ -63,6 +75,115 @@ export default async function AdminPage() {
               ) : null}
             </div>
           ))}
+        </div>
+
+        <h2 className="mt-10 text-lg font-medium text-white">Visitors</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Public pages only (home, sign-in, privacy, terms), bots excluded. No cookies; a visitor
+          is counted once per day.
+        </p>
+
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {[
+            { label: "Views today", value: todayVisits?.views ?? 0 },
+            { label: "Visitors today", value: todayVisits?.visitors ?? 0 },
+            { label: "Views, 14 days", value: fortnightViews },
+            { label: "Visitor-days, 14 days", value: fortnightVisitors }
+          ].map((tile) => (
+            <div
+              key={tile.label}
+              className="rounded-lg border border-[var(--color-edge)] bg-[var(--color-ink-800)] px-4 py-3"
+            >
+              <div className="text-sm text-slate-400">{tile.label}</div>
+              <div className="mt-1 text-2xl font-semibold text-white tabular-nums">{tile.value}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-3 grid gap-3 lg:grid-cols-[1.4fr_1fr]">
+          <div className="overflow-x-auto rounded-lg border border-[var(--color-edge)]">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-[var(--color-ink-800)] text-slate-400">
+                <tr>
+                  <th className="px-3 py-2 font-medium">Day (UTC)</th>
+                  <th className="px-3 py-2 text-right font-medium">Views</th>
+                  <th className="px-3 py-2 text-right font-medium">Visitors</th>
+                  <th className="px-3 py-2 text-right font-medium">Signed in</th>
+                  <th className="w-1/3 px-3 py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {visits.days.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-3 py-3 text-slate-500">
+                      No visits yet.
+                    </td>
+                  </tr>
+                ) : (
+                  visits.days.map((entry) => (
+                    <tr key={entry.day} className="border-t border-[var(--color-edge)] text-slate-300">
+                      <td className="px-3 py-2">{entry.day}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{entry.views}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{entry.visitors}</td>
+                      <td className="px-3 py-2 text-right text-slate-500 tabular-nums">
+                        {entry.signedInViews}
+                      </td>
+                      <td className="px-3 py-2">
+                        <div
+                          className="h-2 rounded-sm bg-[var(--color-accent-dim)]"
+                          style={{ width: `${(entry.views / peak) * 100}%` }}
+                        />
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex flex-col gap-3">
+            {[
+              {
+                title: "Referrers",
+                rows: visits.referrers.map((entry) => ({ key: entry.host, ...entry })),
+                empty: "No referrers yet."
+              },
+              {
+                title: "Pages",
+                rows: visits.pages.map((entry) => ({ key: entry.path, ...entry })),
+                empty: "No views yet."
+              }
+            ].map((list) => (
+              <div key={list.title} className="overflow-x-auto rounded-lg border border-[var(--color-edge)]">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-[var(--color-ink-800)] text-slate-400">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">{list.title}</th>
+                      <th className="px-3 py-2 text-right font-medium">Views</th>
+                      <th className="px-3 py-2 text-right font-medium">Visitors</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {list.rows.length === 0 ? (
+                      <tr>
+                        <td colSpan={3} className="px-3 py-3 text-slate-500">
+                          {list.empty}
+                        </td>
+                      </tr>
+                    ) : (
+                      list.rows.map((row) => (
+                        <tr key={row.key} className="border-t border-[var(--color-edge)] text-slate-300">
+                          <td className="px-3 py-2">{row.key}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{row.views}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{row.visitors}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
         </div>
 
         <h2 className="mt-10 text-lg font-medium text-white">Users</h2>

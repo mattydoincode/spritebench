@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { trackPageView } from "@/server/analytics";
 import { auth } from "@/server/auth";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,7 @@ const YOUTUBE_ID = "";
 export default async function LandingPage() {
   const session = await auth();
   const signedIn = Boolean(session?.user);
+  await trackPageView("/", signedIn);
 
   return (
     <div

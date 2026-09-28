@@ -1,13 +1,17 @@
 import Link from "next/link";
 import { LegalPage } from "@/client/components/LegalPage";
+import { trackPageView } from "@/server/analytics";
+import { optionalUser } from "@/server/session";
 
 export const metadata = { title: "Terms — SpriteBench" };
+export const dynamic = "force-dynamic";
 
 /**
  * Required for Google brand verification alongside the privacy policy. Draft
  * copy -- accurate about how the service works, not lawyer-reviewed.
  */
-export default function TermsPage() {
+export default async function TermsPage() {
+  await trackPageView("/terms", Boolean(await optionalUser()));
   return (
     <LegalPage title="Terms of Service" updated="September 2026">
       <h2>The service</h2>
