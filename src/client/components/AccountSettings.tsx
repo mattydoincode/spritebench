@@ -27,6 +27,72 @@ function providerName(id: string): string {
 const DISCLAIMER =
   "SpriteBench never generates on your behalf with its own credits. Your key is encrypted before it is stored, and after you save it only the last four characters are ever shown again.";
 
+function HelpLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-[var(--color-accent)] underline-offset-2 hover:underline"
+    >
+      {children}
+    </a>
+  );
+}
+
+/**
+ * Where a key comes from, for people who have never made one. Both providers
+ * gate image models behind billing, which is the step people miss.
+ */
+function KeyHelp({ provider }: { provider: string }) {
+  return (
+    <details className="mb-2 rounded-md border border-[var(--color-edge)] bg-[var(--color-ink-800)] px-3 py-2 text-sm text-slate-400">
+      <summary className="cursor-pointer text-slate-300">How do I get a key?</summary>
+      {provider === "gemini" ? (
+        <ol className="mt-2 list-decimal space-y-1 pl-5 leading-relaxed">
+          <li>
+            Open <HelpLink href="https://aistudio.google.com/apikey">Google AI Studio</HelpLink> and
+            sign in with a Google account.
+          </li>
+          <li>
+            Click <b>Create API key</b> and copy it. It starts with <code>AIza</code>.
+          </li>
+          <li>
+            Image models need billing: click <b>Set up billing</b> next to the key. You pay Google
+            per image, usually a few cents.
+          </li>
+        </ol>
+      ) : (
+        <ol className="mt-2 list-decimal space-y-1 pl-5 leading-relaxed">
+          <li>
+            Sign up at <HelpLink href="https://platform.openai.com/signup">platform.openai.com</HelpLink>{" "}
+            (separate from a ChatGPT subscription).
+          </li>
+          <li>
+            Add credit under{" "}
+            <HelpLink href="https://platform.openai.com/settings/organization/billing/overview">
+              Billing
+            </HelpLink>
+            . $5 goes a long way; you pay OpenAI per image.
+          </li>
+          <li>
+            Image models may ask you to{" "}
+            <HelpLink href="https://platform.openai.com/settings/organization/general">
+              verify your organization
+            </HelpLink>{" "}
+            first (a quick ID check).
+          </li>
+          <li>
+            Create a key under{" "}
+            <HelpLink href="https://platform.openai.com/api-keys">API keys</HelpLink> and copy it.
+            It starts with <code>sk-</code>.
+          </li>
+        </ol>
+      )}
+    </details>
+  );
+}
+
 function AddKeyModal({ onClose }: { onClose: () => void }) {
   const providers = providerIds();
 
@@ -103,6 +169,8 @@ function AddKeyModal({ onClose }: { onClose: () => void }) {
         />
       </label>
 
+      <KeyHelp provider={provider} />
+
       <div className="mt-6 flex justify-end gap-2">
         <button
           type="button"
@@ -129,7 +197,7 @@ function EmptyKeys({ onAdd }: { onAdd: () => void }) {
     <div className="flex flex-col items-center justify-center gap-5 rounded-lg border-2 border-dashed border-[var(--color-ink-500)] px-6 py-14 text-center">
       <p className="max-w-md text-slate-400">
         You have not added any keys. You will not be able to generate new art until
-        you provide one.
+        you provide one. Keys come from OpenAI or Google; Add Key shows how to get one.
       </p>
 
       <button
