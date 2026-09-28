@@ -12,31 +12,6 @@ const HERO_IMAGE = "/marketing/hero-2560.webp";
 /** The walkthrough's YouTube id (the part after `v=`). Empty hides the link. */
 const YOUTUBE_ID = "";
 
-/** The small list beside the intro. Short labels; one line each where possible. */
-const FEATURES = [
-  "OpenAI and Gemini, in batches",
-  "Chained prompts",
-  "Chunk big images",
-  "Animations and sprite sheets",
-  "Variations and item grids",
-  "Prompt snippets, variables",
-  "Template builder",
-  "Masked edits",
-  "Background removal",
-  "Cropping",
-  "Pixel art, palettes, dithering",
-  "Slice sheets into frames",
-  "Library: folders, tags, search",
-  "Upload artists' finals",
-  "A scene to compose art",
-  "Repeaters",
-  "Isometric support",
-  "Terrain testing",
-  "Live collaboration",
-  "Zip export",
-  "Godot sync (experimental)"
-];
-
 /**
  * The public front door: one screen, a small personal project rather than a
  * product page.
@@ -72,7 +47,7 @@ export default async function LandingPage() {
         />
       </header>
 
-      <main className="relative flex flex-1 flex-col justify-center gap-12 px-6 pb-16 sm:px-12 lg:flex-row lg:items-center lg:justify-between">
+      <main className="relative flex flex-1 items-center px-6 pb-16 sm:px-12">
         <div className="max-w-2xl">
           <h1 className="text-5xl leading-[1.05] font-semibold tracking-tight text-white sm:text-6xl">
             Prototype with AI.
@@ -111,23 +86,6 @@ export default async function LandingPage() {
             ) : null}
           </div>
         </div>
-
-        <aside className="w-full max-w-lg shrink-0 rounded-lg border border-white/10 bg-black/45 p-5 backdrop-blur-sm">
-          <h2 className="mb-3 text-xs font-medium tracking-wider text-slate-400 uppercase">
-            What&apos;s in it
-          </h2>
-          {/* Columns, not a grid: items flow down each side, so a wrapped one leaves no gap beside it. */}
-          <ul className="gap-x-6 text-[13px] leading-snug text-slate-300 sm:columns-2">
-            {FEATURES.map((feature) => (
-              <li key={feature} className="mb-1.5 flex break-inside-avoid gap-2">
-                <span aria-hidden className="text-[var(--color-accent)]">
-                  ·
-                </span>
-                {feature}
-              </li>
-            ))}
-          </ul>
-        </aside>
       </main>
 
       <footer className="relative flex gap-5 px-6 py-5 text-sm text-slate-500 sm:px-12">
