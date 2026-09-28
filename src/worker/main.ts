@@ -1,7 +1,7 @@
 import "@/server/env-load";
 import { closeDb } from "@/db";
-import { failOrphanedJobs } from "@/db/repo/jobs";
 import {
+  GENERATE_DLQ,
   GENERATE_QUEUE,
   GENERATE_RETRY_LIMIT,
   INGEST_QUEUE,
@@ -13,7 +13,7 @@ import type { GenerateJobPayload } from "@/queue/dispatch";
 import { configProblems, workerConcurrency, workerUserConcurrency } from "@/server/config";
 import { ingestUpload, type IngestPayload } from "@/server/uploads";
 import { compactProjectDocs } from "./prune";
-import { runJob } from "./runJob";
+import { runJob, settleDeadJob } from "./runJob";
 
 /** Nightly, at 04:00 UTC. */
 const PRUNE_SCHEDULE = "0 4 * * *";
@@ -53,11 +53,6 @@ async function main(): Promise<void> {
   const concurrency = workerConcurrency();
   const instance = await boss({ listen: true });
 
-  // Anything still marked running belongs to a process that died hard; a
-  // graceful shutdown drains rather than leaving these behind.
-  const orphaned = await failOrphanedJobs();
-  if (orphaned > 0) console.warn(`[worker] failed ${orphaned} orphaned job(s) from a hard stop`);
-
   // One job per handler call, `localConcurrency` of them in flight. Each is a
   // single provider request, so this is the number of images being generated at
   // once by this process. Metadata carries the retry count, which decides
@@ -86,6 +81,15 @@ async function main(): Promise<void> {
       if (retry) throw new Error(`job ${job.data.jobId} needs another attempt`);
     }
   );
+
+  // A job that used up its retries, most often because the worker running it
+  // died and stopped sending heartbeats. This replaces sweeping every
+  // `running` row at startup, which during a deploy also caught the jobs the
+  // previous worker was still finishing.
+  await instance.work<GenerateJobPayload>(GENERATE_DLQ, { batchSize: 1 }, async ([job]) => {
+    if (!job?.data?.jobId) return;
+    await settleDeadJob(job.data.jobId);
+  });
 
   // Two at a time: decoding is the memory-hungry part of an upload (capped at
   // 40 MP, ~160 MB each), and most of an ingest is waiting on storage anyway.

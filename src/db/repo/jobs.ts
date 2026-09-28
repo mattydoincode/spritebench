@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { withDefaults } from "@/core/settings";
 import { DEFAULT_GENERATION, type JobRecord, type JobStatus } from "@/shared/model";
 import { db, type Transaction } from "../index";
@@ -249,29 +249,4 @@ export async function clearFailedJobs(projectId: string): Promise<void> {
   await db()
     .delete(jobs)
     .where(and(eq(jobs.projectId, projectId), inArray(jobs.status, ["error", "cancelled"])));
-}
-
-/**
- * Fails jobs left mid-flight by a hard crash. Run on worker boot; a graceful
- * shutdown drains instead, so anything found here really did die.
- */
-export async function failOrphanedJobs(): Promise<number> {
-  const rows = await db()
-    .update(jobs)
-    .set({
-      status: "error",
-      error: "interrupted before the worker could finish it",
-      finishedAt: new Date()
-    })
-    .where(and(eq(jobs.status, "running"), isNull(jobs.providerCallCompletedAt)))
-    .returning({ id: jobs.id, projectId: jobs.projectId, batchId: jobs.batchId });
-
-  const seen = new Set<string>();
-  for (const row of rows) {
-    if (!row.batchId || seen.has(row.batchId)) continue;
-    seen.add(row.batchId);
-    await cancelBlockedInBatch(row.projectId, row.batchId);
-  }
-
-  return rows.length;
 }

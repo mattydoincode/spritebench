@@ -11,6 +11,13 @@ export const INGEST_QUEUE = "ingest-upload";
 /** A generation can legitimately take minutes before the monitor reclaims it. */
 const JOB_EXPIRE_SECONDS = 900;
 
+/**
+ * How long a generate job may go without its worker checking in before the
+ * queue decides that worker is gone and retries the job elsewhere. The worker
+ * checks in every half of this, so two missed check-ins in a row.
+ */
+export const GENERATE_HEARTBEAT_SECONDS = 120;
+
 /** Attempts after the first, for transient provider and network failures. */
 export const GENERATE_RETRY_LIMIT = 3;
 

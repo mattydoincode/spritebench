@@ -93,6 +93,12 @@ workers:
     # A worker component takes no http_port and gets no health check: it is
     # not routed, which is exactly what makes it a real always-on process.
     run_command: node dist/worker.mjs
+    # On a deploy the new worker starts first, then the old one gets SIGTERM
+    # and drains: it takes no new jobs and exits the moment its in-flight
+    # generations finish, usually well under this. The platform's default of
+    # 120s would kill a slow one mid-call. QUEUE_DRAIN_TIMEOUT_MS stays below.
+    termination:
+      grace_period_seconds: 600
 
 jobs:
   # Runs after the build and before either component takes traffic; a non-zero

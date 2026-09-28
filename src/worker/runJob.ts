@@ -4,6 +4,7 @@ import {
   appendAssetId,
   claimJob,
   finishJob,
+  getJobRow,
   markProviderCallComplete,
   requeueJob
 } from "@/db/repo/jobs";
@@ -227,4 +228,29 @@ export async function runJob(jobId: string, attemptsLeft = 0): Promise<{ retry: 
   }
 
   return { retry: false };
+}
+
+/**
+ * Settles a job the queue has given up on: its retries ran out while the row
+ * still says it is in progress, usually because the worker running it died.
+ * Without this the job would sit in `running` forever.
+ *
+ * Nothing is called again. Images that already reached storage count, so the
+ * job is done if any landed and an error otherwise, and a loop moves on or
+ * stops the same way it would after any other finish.
+ */
+export async function settleDeadJob(jobId: string): Promise<void> {
+  const job = await getJobRow(jobId);
+  if (!job || (job.status !== "queued" && job.status !== "running")) return;
+
+  const landed = job.assetIds?.[0] ?? null;
+  await finishJob(
+    jobId,
+    landed
+      ? { status: "done" }
+      : { status: "error", error: "the worker running this job stopped before it finished" }
+  );
+  console.warn(`[worker] job ${jobId} ran out of attempts, settled as ${landed ? "done" : "error"}`);
+
+  await applyLoopFollowUp(job.projectId, job.batchId, job.inputs, loopOutcome(landed));
 }

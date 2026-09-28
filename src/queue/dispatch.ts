@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { fromDrizzle } from "pg-boss";
 import type { Database } from "@/db";
 import type { IngestPayload } from "@/server/uploads";
-import { GENERATE_QUEUE, INGEST_QUEUE, boss } from "./boss";
+import { GENERATE_HEARTBEAT_SECONDS, GENERATE_QUEUE, INGEST_QUEUE, boss } from "./boss";
 
 export interface GenerateJobPayload {
   jobId: string;
@@ -34,6 +34,10 @@ export async function dispatchJob(
       // A duplicate send for the same row is a no-op rather than a second
       // paid generation.
       singletonKey: jobId,
+      // Set per job because pg-boss cannot add a heartbeat to a queue that
+      // already exists. A worker that dies has its jobs retried after this,
+      // instead of after the 15-minute expiry.
+      heartbeatSeconds: GENERATE_HEARTBEAT_SECONDS,
       // The worker caps how many jobs of one group run at once (see
       // WORKER_USER_CONCURRENCY), so a 40-image request queues behind itself
       // rather than in front of everyone else. A job with no user is ungrouped.
