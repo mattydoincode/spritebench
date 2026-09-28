@@ -14,27 +14,27 @@ const YOUTUBE_ID = "";
 
 /** The small list beside the intro. Short labels; one line each where possible. */
 const FEATURES = [
-  "Batch generation with OpenAI or Gemini",
+  "OpenAI and Gemini, in batches",
   "Chained prompts",
-  "Chunk and process big images",
+  "Chunk big images",
   "Animations and sprite sheets",
   "Variations and item grids",
-  "Prompt snippets and variables",
+  "Prompt snippets, variables",
   "Template builder",
-  "Masks for editing part of an image",
+  "Masked edits",
   "Background removal",
   "Cropping",
-  "Pixel art: downsample, palettes, dithering",
+  "Pixel art, palettes, dithering",
   "Slice sheets into frames",
-  "Library with folders, tags and search",
+  "Library: folders, tags, search",
   "Upload artists' finals",
-  "Scene for composing art",
+  "A scene to compose art",
   "Repeaters",
   "Isometric support",
   "Terrain testing",
-  "Live collaboration and share links",
+  "Live collaboration",
   "Zip export",
-  "Godot plugin sync (experimental)"
+  "Godot sync (experimental)"
 ];
 
 /**
@@ -113,13 +113,14 @@ export default async function LandingPage() {
           </div>
         </div>
 
-        <aside className="w-full max-w-md shrink-0 rounded-lg border border-white/10 bg-black/45 p-5 backdrop-blur-sm">
+        <aside className="w-full max-w-lg shrink-0 rounded-lg border border-white/10 bg-black/45 p-5 backdrop-blur-sm">
           <h2 className="mb-3 text-xs font-medium tracking-wider text-slate-400 uppercase">
             What&apos;s in it
           </h2>
-          <ul className="grid gap-x-5 gap-y-1.5 text-[13px] leading-snug text-slate-300 sm:grid-cols-2">
+          {/* Columns, not a grid: items flow down each side, so a wrapped one leaves no gap beside it. */}
+          <ul className="gap-x-6 text-[13px] leading-snug text-slate-300 sm:columns-2">
             {FEATURES.map((feature) => (
-              <li key={feature} className="flex gap-2">
+              <li key={feature} className="mb-1.5 flex break-inside-avoid gap-2">
                 <span aria-hidden className="text-[var(--color-accent)]">
                   ·
                 </span>
