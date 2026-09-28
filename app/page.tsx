@@ -88,8 +88,7 @@ export default async function LandingPage() {
           </p>
 
           <p className="mt-4 text-[15px] leading-relaxed text-slate-400">
-            It&apos;s alpha software: free for now, though that may change. Things will break, and
-            there&apos;s a feedback box in the app if you find something. I read all of it.
+            It&apos;s alpha software: free for now, though that may change. There&apos;s a feedback box in the app if you find bugs or have feature requests. Although I will support SpriteBench, download any critical assets!.
           </p>
 
           <div className="mt-8 flex flex-wrap items-center gap-5">

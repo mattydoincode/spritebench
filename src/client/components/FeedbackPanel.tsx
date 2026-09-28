@@ -42,7 +42,7 @@ export function FeedbackPanel() {
       }
     >
       <p className="mb-2 text-[11px] leading-snug text-slate-500">
-        This software is in alpha development. Feel free to file bug reports, give feedback, or
+        SpriteBench is in alpha development by a solo developer. Feel free to file bug reports, give feedback, or
         request features.
       </p>
 
