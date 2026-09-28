@@ -39,6 +39,17 @@ export class LocalFsStorage implements Storage {
     await fs.writeFile(full, bytes);
   }
 
+  async copy(from: string, to: string, _options?: PutOptions): Promise<void> {
+    const target = this.resolve(to);
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    try {
+      await fs.copyFile(this.resolve(from), target);
+    } catch (error) {
+      if (isMissing(error)) throw new ObjectNotFoundError(from);
+      throw error;
+    }
+  }
+
   async get(key: string): Promise<Bytes> {
     try {
       return asBytes(await fs.readFile(this.resolve(key)));

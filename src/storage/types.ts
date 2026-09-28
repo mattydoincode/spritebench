@@ -29,6 +29,8 @@ export interface PutOptions {
  */
 export interface Storage {
   put(key: string, bytes: Uint8Array, options?: PutOptions): Promise<void>;
+  /** Copies within the store; the bytes never come back through the app. */
+  copy(from: string, to: string, options?: PutOptions): Promise<void>;
   get(key: string): Promise<Bytes>;
   head(key: string): Promise<StoredObject | null>;
   exists(key: string): Promise<boolean>;

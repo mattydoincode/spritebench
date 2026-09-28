@@ -1,4 +1,5 @@
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
@@ -75,6 +76,25 @@ export class R2Storage implements Storage {
         CacheControl: options?.cacheControl
       })
     );
+  }
+
+  async copy(from: string, to: string, options?: PutOptions): Promise<void> {
+    try {
+      await this.client.send(
+        new CopyObjectCommand({
+          Bucket: this.bucket,
+          Key: assertSafeKey(to),
+          CopySource: `${this.bucket}/${assertSafeKey(from).split("/").map(encodeURIComponent).join("/")}`,
+          // REPLACE, or the copy keeps the source's headers and ignores these.
+          MetadataDirective: "REPLACE",
+          ContentType: options?.contentType,
+          CacheControl: options?.cacheControl
+        })
+      );
+    } catch (error) {
+      if (isMissing(error)) throw new ObjectNotFoundError(from);
+      throw error;
+    }
   }
 
   async get(key: string): Promise<Bytes> {

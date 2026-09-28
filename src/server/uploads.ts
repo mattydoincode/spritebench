@@ -60,36 +60,52 @@ export async function ingestUpload(payload: IngestPayload): Promise<boolean> {
     return false;
   }
 
-  let png: Buffer;
+  // The header alone: dimensions and format, without decoding a single pixel,
+  // so an oversized image is refused before it costs any memory.
   let width: number;
   let height: number;
+  let isPng: boolean;
   try {
-    const { data, info } = await sharp(bytes, { limitInputPixels: MAX_UPLOAD_PIXELS })
-      .png()
-      .toBuffer({ resolveWithObject: true });
-    png = data;
-    width = info.width;
-    height = info.height;
+    const meta = await sharp(bytes).metadata();
+    width = meta.width ?? 0;
+    height = meta.height ?? 0;
+    isPng = meta.format === "png";
+  } catch {
+    width = 0;
+    height = 0;
+    isPng = false;
+  }
+
+  if (width === 0 || height === 0 || width * height > MAX_UPLOAD_PIXELS) {
+    await storage().delete(staged);
+    return false;
+  }
+
+  // A PNG is stored as sent, copied inside the bucket rather than re-encoded
+  // and uploaded again -- the slowest step by far. Anything else becomes PNG.
+  // Either way it is fully decoded once, for the thumbnail, which is also what
+  // proves the file is really an image.
+  let png: Uint8Array;
+  let thumbnail: Uint8Array;
+  try {
+    png = isPng
+      ? bytes
+      : await sharp(bytes, { limitInputPixels: MAX_UPLOAD_PIXELS }).png().toBuffer();
+    thumbnail = await buildThumbnail(png);
   } catch {
     await storage().delete(staged);
     return false;
   }
 
   const key = sourceKey(projectId, uploadId);
-  await storage().put(key, png, {
-    contentType: "image/png",
-    cacheControl: "public, max-age=31536000, immutable"
-  });
-
-  let thumb: string | null = thumbKey(projectId, uploadId);
-  try {
-    await storage().put(thumb, await buildThumbnail(png), {
-      contentType: "image/webp",
-      cacheControl: "public, max-age=31536000, immutable"
-    });
-  } catch {
-    thumb = null;
-  }
+  const thumb = thumbKey(projectId, uploadId);
+  const cacheControl = "public, max-age=31536000, immutable";
+  await Promise.all([
+    isPng
+      ? storage().copy(staged, key, { contentType: "image/png", cacheControl })
+      : storage().put(key, png, { contentType: "image/png", cacheControl }),
+    storage().put(thumb, thumbnail, { contentType: "image/webp", cacheControl })
+  ]);
 
   await insertAsset({
     id: uploadId,
@@ -100,7 +116,7 @@ export async function ingestUpload(payload: IngestPayload): Promise<boolean> {
     thumbKey: thumb,
     sourceWidth: width,
     sourceHeight: height,
-    byteSize: png.length,
+    byteSize: png.byteLength,
     // The prompt is where the library searches; the file name is the
     // closest thing an upload has to one.
     prompt: { prefix: "", body: name, suffix: "" },

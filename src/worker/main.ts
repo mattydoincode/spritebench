@@ -87,11 +87,13 @@ async function main(): Promise<void> {
     }
   );
 
-  // One at a time: decoding is the memory-hungry part of an upload, and a
-  // queue of them should wait rather than stack up next to generations.
+  // Two at a time: decoding is the memory-hungry part of an upload (capped at
+  // 40 MP, ~160 MB each), and most of an ingest is waiting on storage anyway.
+  // Polled every half second rather than pg-boss's default 2s, since someone
+  // is watching a placeholder tile the whole time.
   await instance.work<IngestPayload>(
     INGEST_QUEUE,
-    { batchSize: 1, localConcurrency: 1 },
+    { batchSize: 1, localConcurrency: 2, pollingIntervalSeconds: 0.5 },
     async ([job]) => {
       if (!job?.data?.uploadId) throw new Error("ingest job has no uploadId");
       await ingestUpload(job.data);
