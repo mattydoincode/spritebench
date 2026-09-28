@@ -7,6 +7,7 @@ import type { Rgb } from "@/core/types";
 import { ApiError, api, projectApi, rejectIfNotOk, sourceUrl } from "@/client/api";
 import { processor } from "@/client/processor";
 import { uploadFiles } from "@/client/upload";
+import { useUploads } from "@/client/stores/uploads";
 import type { PaletteInfo } from "@/db/repo/palettes";
 import type { TemplateInfo } from "@/db/repo/templates";
 import { clampGeneration, findModel, providerLabel, snapRequestSize } from "@/providers/models";
@@ -530,32 +531,41 @@ export const useServer = create<ServerState>((set, get) => {
       const images = files.filter((file) => file.type.startsWith("image/"));
       if (images.length === 0) return;
 
-      useUi.getState().setBusy("uploading");
+      // Placeholder tiles are the progress indicator, one per file, in the
+      // folder the images are headed for.
+      const outgoing = images.map((file) => ({ id: crypto.randomUUID(), file }));
+      const placeholders = useUploads.getState();
+      placeholders.add(outgoing, folderId);
+
       try {
-        const { assetIds, skipped, stillProcessing } = await uploadFiles(
-          projectId(),
-          images,
-          (message) => useUi.getState().setBusy(message)
-        );
+        const { assetIds, failed, stillProcessing } = await uploadFiles(projectId(), outgoing, {
+          progress: (id, fraction) => placeholders.update(id, { phase: "uploading", progress: fraction }),
+          processing: (id) => placeholders.update(id, { phase: "processing", progress: 1 }),
+          failed: (id, reason) => placeholders.update(id, { phase: "failed", error: reason }),
+          // Each image replaces its placeholder as soon as it is ready, rather
+          // than the whole drop landing at the end.
+          done: async (finished) => {
+            const ids = finished.map(({ assetId }) => assetId);
+            // Seeds each new image's editable half, which moveToFolder writes to.
+            await get().refreshAssets();
+            if (folderId) useDoc.getState().moveToFolder(ids, folderId);
+            placeholders.remove(finished.map(({ id }) => id));
+          }
+        });
 
-        // Seeds each new image's editable half, which moveToFolder writes to.
-        await get().refreshAssets();
-        if (folderId && assetIds.length > 0) useDoc.getState().moveToFolder(assetIds, folderId);
+        const leftover = outgoing
+          .map(({ id }) => id)
+          .filter((id) => useUploads.getState().uploads.some((upload) => upload.id === id && upload.phase !== "failed"));
+        placeholders.remove(leftover);
 
-        useUi
-          .getState()
-          .setNotice(
-            [
-              `uploaded ${assetIds.length} image${assetIds.length === 1 ? "" : "s"}`,
-              ...(stillProcessing > 0 ? [`${stillProcessing} still processing`] : []),
-              ...skipped
-            ].join(" · ")
-          );
+        const parts = [`uploaded ${assetIds.length} image${assetIds.length === 1 ? "" : "s"}`];
+        if (failed > 0) parts.push(`${failed} refused`);
+        if (stillProcessing > 0) parts.push(`${stillProcessing} still processing; reload to see them`);
+        useUi.getState().setNotice(parts.join(" · "));
         if (assetIds.length > 0) useUi.getState().selectMany(assetIds);
       } catch (error) {
+        placeholders.remove(outgoing.map(({ id }) => id));
         fail(error);
-      } finally {
-        useUi.getState().setBusy(null);
       }
     },
 

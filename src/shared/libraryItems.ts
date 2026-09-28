@@ -12,9 +12,32 @@ export type LibraryAsset = {
   tags: string[];
 };
 
+/** A file on its way in: sent to storage, then checked by the worker. */
+export type UploadPlaceholder = {
+  /** Client-side id, stable from the moment the file is chosen. */
+  id: string;
+  name: string;
+  folderId: string;
+  createdAt: string;
+  phase: "waiting" | "uploading" | "processing" | "failed";
+  /** 0..1 while uploading. */
+  progress: number;
+  error?: string;
+  /** An object URL of the file itself, so the tile shows it straight away. */
+  previewUrl: string;
+};
+
 export type LibraryEntry<A extends LibraryAsset = LibraryAsset> =
   | { kind: "asset"; id: string; batch: string; folderId: string; createdAt: string; asset: A }
-  | { kind: "job"; id: string; batch: string; folderId: string; createdAt: string; job: JobRecord };
+  | { kind: "job"; id: string; batch: string; folderId: string; createdAt: string; job: JobRecord }
+  | {
+      kind: "upload";
+      id: string;
+      batch: string;
+      folderId: string;
+      createdAt: string;
+      upload: UploadPlaceholder;
+    };
 
 /** Collapsed batches show this many thumbs, then a +N tile. */
 export const BATCH_PEEK = 3;
@@ -52,9 +75,21 @@ export function isLibraryJob(job: Pick<JobRecord, "status">): boolean {
 export function libraryItems<A extends LibraryAsset>(
   assets: A[],
   jobs: JobRecord[],
-  jobFolder: (jobId: string) => string = () => ""
+  jobFolder: (jobId: string) => string = () => "",
+  uploads: UploadPlaceholder[] = []
 ): LibraryEntry<A>[] {
   const entries: LibraryEntry<A>[] = [];
+
+  for (const upload of uploads) {
+    entries.push({
+      kind: "upload",
+      id: upload.id,
+      batch: "",
+      folderId: upload.folderId,
+      createdAt: upload.createdAt,
+      upload
+    });
+  }
 
   for (const asset of assets) {
     entries.push({
@@ -99,6 +134,8 @@ export function libraryItemMatches(entry: LibraryEntry, needle: string): boolean
       asset.tags.some((tag) => tag.toLowerCase().includes(needle))
     );
   }
+
+  if (entry.kind === "upload") return entry.upload.name.toLowerCase().includes(needle);
 
   const job = entry.job;
   return (

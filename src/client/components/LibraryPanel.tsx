@@ -8,6 +8,7 @@ import { useAssets } from "@/client/stores/assets";
 import { useDoc } from "@/client/stores/doc";
 import { useProjectLoaded, useServer } from "@/client/stores/server";
 import { sectionCollapsed, useUi } from "@/client/stores/ui";
+import { useUploads } from "@/client/stores/uploads";
 import { useNow } from "@/client/useNow";
 import { describeSettings } from "@/core/describe";
 import { faceId, isLibraryVisible, setBadge } from "@/shared/assetSet";
@@ -19,7 +20,8 @@ import {
   isFailedJob,
   libraryItemMatches,
   libraryItems,
-  type LibraryEntry
+  type LibraryEntry,
+  type UploadPlaceholder
 } from "@/shared/libraryItems";
 import { formatElapsed, jobElapsedSeconds } from "@/shared/jobTime";
 import type { JobRecord, JobStatus, ResolvedAsset } from "@/shared/model";
@@ -160,6 +162,68 @@ function LibraryThumb({
         {asset.set && faceId(asset.set) === asset.id ? `${asset.label} · ${setBadge(asset.set)}` : asset.label}
       </div>
     </button>
+  );
+}
+
+/**
+ * A file on its way in. Shows the file itself, dimmed, with how far along it
+ * is: a filling bar while the bytes go up, a pulse while the worker checks
+ * it, and the reason if it was refused.
+ */
+function UploadThumb({ upload, thumbSize }: { upload: UploadPlaceholder; thumbSize: number }) {
+  const failed = upload.phase === "failed";
+  const label =
+    upload.phase === "uploading"
+      ? `uploading ${Math.round(upload.progress * 100)}%`
+      : upload.phase === "processing"
+        ? "processing"
+        : upload.phase === "waiting"
+          ? "waiting"
+          : "failed";
+
+  return (
+    <div
+      title={`${upload.name}\n${label}${upload.error ? `\n${upload.error}` : ""}`}
+      style={{ width: thumbSize }}
+      className={`box-content flex shrink-0 flex-col overflow-hidden rounded border ${
+        failed ? "border-rose-800" : "border-sky-700"
+      }`}
+    >
+      <div className="checkerboard relative overflow-hidden" style={{ width: thumbSize, height: thumbSize }}>
+        <img
+          src={upload.previewUrl}
+          alt=""
+          className={`absolute inset-0 h-full w-full object-contain ${
+            failed ? "opacity-25 grayscale" : "opacity-45"
+          }`}
+        />
+        <div className="absolute inset-x-0 bottom-0 bg-black/60">
+          <div
+            className={`h-1 transition-[width] duration-200 ${
+              failed
+                ? "w-full bg-rose-600"
+                : upload.phase === "processing"
+                  ? "w-full animate-pulse bg-sky-400"
+                  : "bg-sky-500"
+            }`}
+            style={
+              upload.phase === "uploading" || upload.phase === "waiting"
+                ? { width: `${Math.round(upload.progress * 100)}%` }
+                : undefined
+            }
+          />
+          <div
+            className={`py-0.5 text-center text-[10px] tabular-nums ${
+              failed ? "text-rose-300" : "text-sky-200"
+            }`}
+          >
+            {label}
+          </div>
+        </div>
+      </div>
+      <div className="truncate px-1 py-0.5 text-[10px] text-slate-400">{upload.name}</div>
+      {upload.error ? <div className="truncate px-1 text-[9px] text-rose-400">{upload.error}</div> : null}
+    </div>
   );
 }
 
@@ -561,6 +625,7 @@ export function LibraryPanel() {
   const store = useServer.getState;
   const ui = useUi.getState;
 
+  const uploads = useUploads((state) => state.uploads);
   const [search, setSearch] = useState("");
   const [thumbSize, setThumbSize] = useState(88);
 
@@ -590,10 +655,10 @@ export function LibraryPanel() {
   const items = useMemo(() => {
     const needle = search.trim().toLowerCase();
     const jobFolder = (jobId: string) => useDoc.getState().jobFolderOf(jobId);
-    return libraryItems(visibleAssets, jobs, jobFolder).filter((entry) =>
+    return libraryItems(visibleAssets, jobs, jobFolder, uploads).filter((entry) =>
       libraryItemMatches(entry, needle)
     );
-  }, [jobs, search, visibleAssets]);
+  }, [jobs, search, uploads, visibleAssets]);
 
   const activeFilter = filter === UNFILED || known.has(filter) ? filter : "";
 
@@ -645,7 +710,12 @@ export function LibraryPanel() {
 
       if (anchorIndex >= 0 && index >= 0) {
         const [from, to] = anchorIndex < index ? [anchorIndex, index] : [index, anchorIndex];
-        ui().selectMany(ordered.slice(from, to + 1).map((entry) => entry.id));
+        ui().selectMany(
+          ordered
+            .slice(from, to + 1)
+            .filter((entry) => entry.kind !== "upload")
+            .map((entry) => entry.id)
+        );
         return;
       }
     }
@@ -654,7 +724,9 @@ export function LibraryPanel() {
   };
 
   const thumb = (entry: Entry, size = thumbSize) =>
-    entry.kind === "job" ? (
+    entry.kind === "upload" ? (
+      <UploadThumb key={entry.id} upload={entry.upload} thumbSize={size} />
+    ) : entry.kind === "job" ? (
       <JobThumb
         key={entry.id}
         job={entry.job}
