@@ -21,6 +21,21 @@ export function thumbKey(projectId: string, assetId: string): string {
   return `${projectPrefix(projectId)}/thumbs/${assetId}.webp`;
 }
 
+/**
+ * Where a browser upload lands before the worker has checked it. The id
+ * becomes the asset's id, so the finished asset and its staging copy are
+ * never both missing at once.
+ *
+ * The one key outside `p/`: staging is transient, and a single top-level
+ * prefix lets one bucket lifecycle rule clear uploads that were sent but
+ * never completed.
+ */
+export const UPLOAD_PREFIX = "uploads";
+
+export function uploadKey(projectId: string, uploadId: string): string {
+  return `${UPLOAD_PREFIX}/${projectId}/${uploadId}`;
+}
+
 export function templateKey(projectId: string, templateId: string): string {
   return `${projectPrefix(projectId)}/templates/${templateId}.png`;
 }

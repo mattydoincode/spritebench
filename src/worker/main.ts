@@ -4,12 +4,14 @@ import { failOrphanedJobs } from "@/db/repo/jobs";
 import {
   GENERATE_QUEUE,
   GENERATE_RETRY_LIMIT,
+  INGEST_QUEUE,
   PRUNE_QUEUE,
   boss,
   stopBoss
 } from "@/queue/boss";
 import type { GenerateJobPayload } from "@/queue/dispatch";
 import { configProblems, workerConcurrency, workerUserConcurrency } from "@/server/config";
+import { ingestUpload, type IngestPayload } from "@/server/uploads";
 import { compactProjectDocs } from "./prune";
 import { runJob } from "./runJob";
 
@@ -82,6 +84,17 @@ async function main(): Promise<void> {
       // for a reason a retry cannot change is already recorded as an error, so
       // it completes here and never reaches the dead-letter queue.
       if (retry) throw new Error(`job ${job.data.jobId} needs another attempt`);
+    }
+  );
+
+  // One at a time: decoding is the memory-hungry part of an upload, and a
+  // queue of them should wait rather than stack up next to generations.
+  await instance.work<IngestPayload>(
+    INGEST_QUEUE,
+    { batchSize: 1, localConcurrency: 1 },
+    async ([job]) => {
+      if (!job?.data?.uploadId) throw new Error("ingest job has no uploadId");
+      await ingestUpload(job.data);
     }
   );
 

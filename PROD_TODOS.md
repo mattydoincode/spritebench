@@ -39,7 +39,12 @@ at the top of each section; tick things off rather than deleting them.
 - [x] Per-user usage on /admin: projects, jobs, failed jobs, images, stored bytes, last
       generation, joined; plus total stored and its rough R2 cost.
 
-- [ ] Per-user storage or image cap. Nothing limits how many images a user keeps (the /admin
+- [x] Uploads go browser → R2 on a signed PUT (exact size and type), then the worker checks,
+      converts and thumbnails them one at a time (40 MP cap). The web service never holds upload
+      bytes.
+- [ ] R2 lifecycle rule: delete objects under prefix `uploads/` after 1 day, on both buckets.
+      That's where uploads wait for the worker; anything left there was never completed.
+- [ ] Per-user storage or image cap (not needed for launch). Nothing limits how many images a user keeps (the /admin
       usage table is the basis for one).
 - [ ] Clean up storage for soft-deleted projects (files stay in R2 forever today).
 - [x] Rate limits in middleware (`src/server/rateLimit.ts`): per session/PAT token buckets for

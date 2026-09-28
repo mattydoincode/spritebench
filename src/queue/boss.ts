@@ -5,6 +5,8 @@ import { count, num } from "@/server/env";
 export const GENERATE_QUEUE = "generate";
 export const GENERATE_DLQ = "generate-dlq";
 export const PRUNE_QUEUE = "prune-sources";
+/** Browser uploads waiting to be checked and turned into assets. */
+export const INGEST_QUEUE = "ingest-upload";
 
 /** A generation can legitimately take minutes before the monitor reclaims it. */
 const JOB_EXPIRE_SECONDS = 900;
@@ -39,6 +41,7 @@ async function start(): Promise<PgBoss> {
     deadLetter: GENERATE_DLQ
   });
   await next.createQueue(PRUNE_QUEUE, { retryLimit: 1 });
+  await next.createQueue(INGEST_QUEUE, { retryLimit: 3, retryDelay: 5, retryBackoff: true });
 
   instance = next;
   return next;

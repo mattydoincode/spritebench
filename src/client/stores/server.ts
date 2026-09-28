@@ -6,6 +6,7 @@ import { DEFAULT_PROCESSING } from "@/core/settings";
 import type { Rgb } from "@/core/types";
 import { ApiError, api, projectApi, rejectIfNotOk, sourceUrl } from "@/client/api";
 import { processor } from "@/client/processor";
+import { uploadFiles } from "@/client/upload";
 import type { PaletteInfo } from "@/db/repo/palettes";
 import type { TemplateInfo } from "@/db/repo/templates";
 import { clampGeneration, findModel, providerLabel, snapRequestSize } from "@/providers/models";
@@ -529,15 +530,12 @@ export const useServer = create<ServerState>((set, get) => {
       const images = files.filter((file) => file.type.startsWith("image/"));
       if (images.length === 0) return;
 
-      const form = new FormData();
-      for (const file of images) form.append("files", file);
-
       useUi.getState().setBusy("uploading");
       try {
-        const { assetIds, skipped } = await projectApi<{ assetIds: string[]; skipped: string[] }>(
+        const { assetIds, skipped, stillProcessing } = await uploadFiles(
           projectId(),
-          "/assets/upload",
-          { method: "POST", body: form }
+          images,
+          (message) => useUi.getState().setBusy(message)
         );
 
         // Seeds each new image's editable half, which moveToFolder writes to.
@@ -549,6 +547,7 @@ export const useServer = create<ServerState>((set, get) => {
           .setNotice(
             [
               `uploaded ${assetIds.length} image${assetIds.length === 1 ? "" : "s"}`,
+              ...(stillProcessing > 0 ? [`${stillProcessing} still processing`] : []),
               ...skipped
             ].join(" · ")
           );

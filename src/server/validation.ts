@@ -12,6 +12,7 @@ import {
 } from "@/core/types";
 import { findModel, modelIds, providerIds } from "@/providers/models";
 import { IMAGE_QUALITIES } from "@/shared/model";
+import { MAX_UPLOAD_BYTES, MAX_UPLOAD_FILES } from "@/shared/uploadLimits";
 import { ForbiddenError, UnauthorizedError } from "./errors";
 
 const size = z.object({
@@ -301,6 +302,26 @@ export const rerunBodySchema = z.object({
   useStoredGeneration: z.boolean().optional(),
   useStoredProcessing: z.boolean().optional(),
   folder: z.string().max(255).optional()
+});
+
+export const uploadSignBodySchema = z.object({
+  files: z
+    .array(
+      z.object({
+        name: z.string().trim().min(1).max(255),
+        size: z.number().int().positive().max(MAX_UPLOAD_BYTES),
+        type: z.string().regex(/^image\/[a-z0-9.+-]+$/i, "must be an image type")
+      })
+    )
+    .min(1)
+    .max(MAX_UPLOAD_FILES)
+});
+
+export const uploadCompleteBodySchema = z.object({
+  uploads: z
+    .array(z.object({ id: z.string().uuid(), name: z.string().trim().min(1).max(255) }))
+    .min(1)
+    .max(MAX_UPLOAD_FILES)
 });
 
 export const apiTokenBodySchema = z.object({

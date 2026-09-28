@@ -161,4 +161,27 @@ export class R2Storage implements Storage {
       { expiresIn: ttlSeconds }
     );
   }
+
+  async signedUploadUrl(
+    key: string,
+    size: number,
+    contentType: string,
+    ttlSeconds: number
+  ): Promise<string> {
+    assertSafeKey(key);
+
+    // Both headers are signed, not hoisted into the query string, so R2
+    // refuses a body of any other length or type. There is no presigned POST
+    // with a size range on R2; an exact length is how the limit holds.
+    return getSignedUrl(
+      this.client,
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        ContentLength: size,
+        ContentType: contentType
+      }),
+      { expiresIn: ttlSeconds, signableHeaders: new Set(["content-length", "content-type"]) }
+    );
+  }
 }

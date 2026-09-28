@@ -110,4 +110,14 @@ export class LocalFsStorage implements Storage {
     assertSafeKey(key);
     return `/api/storage/${key.split("/").map(encodeURIComponent).join("/")}`;
   }
+
+  /** The storage route's PUT, which checks membership and size itself. */
+  async signedUploadUrl(
+    key: string,
+    _size: number,
+    _contentType: string,
+    ttlSeconds: number
+  ): Promise<string> {
+    return this.signedUrl(key, ttlSeconds);
+  }
 }

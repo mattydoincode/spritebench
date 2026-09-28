@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireMember } from "@/server/access";
 import { requireV1User } from "@/server/v1";
 import { withValidation } from "@/server/validation";
+import { MAX_UPLOAD_BYTES } from "@/shared/uploadLimits";
 import { ObjectNotFoundError, storage, storageDriver } from "@/storage";
 
 export const dynamic = "force-dynamic";
@@ -78,5 +79,38 @@ export async function GET(
       }
       return NextResponse.json({ error: "could not read object" }, { status: 400 });
     }
+  });
+}
+
+const UPLOAD_KEY = /^uploads\/([^/]+)\/[0-9a-f-]{36}$/;
+
+/**
+ * The local driver's stand-in for a signed upload URL. Only staging keys are
+ * writable, and only by editors of the project in the key; R2 enforces the
+ * same through the signature instead.
+ */
+export async function PUT(
+  request: Request,
+  { params }: { params: Promise<{ key: string[] }> }
+) {
+  return withValidation(async () => {
+    if (storageDriver() !== "local") {
+      return NextResponse.json({ error: "not found" }, { status: 404 });
+    }
+
+    const { key: segments } = await params;
+    const key = segments.map(decodeURIComponent).join("/");
+    const projectId = UPLOAD_KEY.exec(key)?.[1];
+    if (!projectId) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+    await requireMember(await requireV1User(request), projectId, "edit");
+
+    const bytes = new Uint8Array(await request.arrayBuffer());
+    if (bytes.byteLength > MAX_UPLOAD_BYTES) {
+      return NextResponse.json({ error: "file too large" }, { status: 413 });
+    }
+
+    await storage().put(key, bytes);
+    return new NextResponse(null, { status: 200 });
   });
 }

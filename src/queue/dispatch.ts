@@ -1,7 +1,8 @@
 import { sql } from "drizzle-orm";
 import { fromDrizzle } from "pg-boss";
 import type { Database } from "@/db";
-import { GENERATE_QUEUE, boss } from "./boss";
+import type { IngestPayload } from "@/server/uploads";
+import { GENERATE_QUEUE, INGEST_QUEUE, boss } from "./boss";
 
 export interface GenerateJobPayload {
   jobId: string;
@@ -40,4 +41,10 @@ export async function dispatchJob(
       ...(transaction ? { db: fromDrizzle(transaction, sql) } : {})
     }
   );
+}
+
+/** Queues a staged upload for the worker. Sending the same upload twice is a no-op. */
+export async function dispatchIngest(payload: IngestPayload): Promise<string | null> {
+  const instance = await boss();
+  return instance.send(INGEST_QUEUE, payload, { singletonKey: payload.uploadId });
 }

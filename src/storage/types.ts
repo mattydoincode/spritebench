@@ -36,6 +36,17 @@ export interface Storage {
   list(prefix: string): Promise<StoredObject[]>;
   /** A URL the browser can fetch directly, valid for `ttlSeconds`. */
   signedUrl(key: string, ttlSeconds: number): Promise<string>;
+  /**
+   * A URL the browser can PUT one object to directly, valid for `ttlSeconds`.
+   * Signed for exactly `size` bytes of `contentType`, so the upload has to be
+   * what was asked for.
+   */
+  signedUploadUrl(
+    key: string,
+    size: number,
+    contentType: string,
+    ttlSeconds: number
+  ): Promise<string>;
 }
 
 export class ObjectNotFoundError extends Error {
