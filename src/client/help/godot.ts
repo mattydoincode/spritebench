@@ -2,14 +2,14 @@
 export default `
 ## Godot plugin (beta)
 
-An experimental Godot 4.6 editor addon that pulls art from a SpriteBench project into your game. It's early, so expect rough edges.
+An experimental Godot 4.6 editor addon that pulls art from a SpriteBench project into your game. It's alpha, so expect rough edges and back up your project before trying it.
 
 ### Setup
 
 1. Get the addon from [github.com/mattydoincode/spritebench-godot](https://github.com/mattydoincode/spritebench-godot), copy **addons/spritebench** into your project, and enable it under Project Settings → Plugins.
 2. In SpriteBench, go to **Settings → Account & keys** and create a personal access token. Paste it into the SpriteBench dock in Godot.
-3. Paste your SpriteBench project id into the dock as well.
-4. Tick the SpriteBench box on a Sprite2D or AnimatedSprite2D, or add a SpriteBenchSet resource, then press Sync. Sync also runs when you save a scene.
+3. Paste your **Project ID** into the dock as well. It's the long id in this project's address (spritebench.com/projects/...), and the Game Assets tab shows it until your first sync.
+4. Tick **SpriteBench slot** on a Sprite2D or AnimatedSprite2D, or add a SpriteBenchSet resource, then press Sync. Sync also runs when you save a scene.
 
 ### Assigning art
 
