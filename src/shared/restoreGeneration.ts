@@ -67,7 +67,7 @@ const DEFAULT_ANIMATION: RestoredAnimation = {
   enabled: false,
   actions: [
     { name: "idle", frames: 4 },
-    { name: "walk", frames: 6 }
+    { name: "walk", frames: 4 }
   ],
   cellSize: 64
 };
