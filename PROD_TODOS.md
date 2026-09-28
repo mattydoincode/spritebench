@@ -21,7 +21,7 @@ at the top of each section; tick things off rather than deleting them.
       (it can trigger brand verification).
 - [x] `AUTH_URL=https://spritebench.com` set in DO (without it Auth.js sent Google the
       container's `localhost:8080` callback), auth secrets encrypted, spend alert added.
-- [ ] Make yourself admin: `update users set is_admin = true where email = '…';`
+- [x] Make yourself admin: `update users set is_admin = true where email = '…';`
 - [x] R2 bucket is private: in the bucket's Settings, "Public Development URL" (r2.dev) is
       disabled and "Custom Domains" is empty; and `R2_PUBLIC_BASE` is unset in production.
       With either on, image links become permanent public URLs instead of 1-hour signed ones.
@@ -70,6 +70,8 @@ at the top of each section; tick things off rather than deleting them.
       stays; Godot slot assign/pull use it.
 
 ## Godot addon
+
+Beta, not part of the launch pitch. Nothing here blocks going public.
 
 - [ ] Interim: `spritebench-godot` is public now; still cut a GitHub Release with
       `addons/spritebench/` zipped (a GitHub Action on version tags), and link

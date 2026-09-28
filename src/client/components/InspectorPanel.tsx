@@ -202,12 +202,17 @@ export function InspectorPanel() {
               slice
             </TextButton>
           ) : null}
-          <TextButton
+          {/* A real button, not a text link: cropping is one of the most common things done here. */}
+          <Button
             title="Crop this image without touching the raw file, for every instance at once"
             onClick={() => ui().openImageEditor(asset.id)}
+            className="flex items-center gap-1 py-0.5"
           >
-            {processing.edits.length > 0 ? `edit (${processing.edits.length})` : "edit"}
-          </TextButton>
+            <svg aria-hidden viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M4 1v10h10M1 4h10v10" />
+            </svg>
+            {processing.edits.length > 0 ? `crop (${processing.edits.length})` : "crop"}
+          </Button>
         </div>
       </div>
 

@@ -7,19 +7,60 @@ import { useServer } from "@/client/stores/server";
 import { useUi } from "@/client/stores/ui";
 import { applyEdits, describeEdit, type CropEdit } from "@/core/edits";
 import type { ImageEdit } from "@/core/edits";
+import { grabAt, grabCursor, moveBox, resizeBox, type CropGrab } from "@/shared/cropBox";
 import { insetRect } from "@/shared/sequence";
 import { fitCamera, type ViewCamera } from "@/core/viewport";
 import { ImageViewport, ViewControls, viewPoint } from "./ImageViewport";
 import { useSource } from "./SourceCanvas";
 import { Button, Divider, Field, NumberInput, Modal, Row } from "./ui";
 
-const VIEW = { width: 620, height: 460 };
+/** The side column of crop fields and the edit list, plus the gap beside it. */
+const SIDEBAR = 252;
+/** Modal padding and borders around the image, across. */
+const CHROME_WIDTH = 30;
+/** Header, footer, zoom controls, size caption and padding, down. */
+const CHROME_HEIGHT = 250;
+/** How close to an edge, in screen pixels, grabs it rather than the inside. */
+const GRAB_MARGIN = 8;
 
 interface Selection {
   x: number;
   y: number;
   width: number;
   height: number;
+}
+
+type Drag =
+  | { mode: "draw"; originX: number; originY: number }
+  | { mode: "move"; startX: number; startY: number; from: Selection }
+  | { mode: "resize"; grab: Extract<CropGrab, { mode: "resize" }>; from: Selection };
+
+/**
+ * Most of the window: this is a zoom-in tool, so the image gets all the room
+ * the screen has rather than a fixed postcard.
+ */
+function useEditorSize() {
+  const measure = () => {
+    const modal = Math.min(window.innerWidth * 0.94, 2000);
+    return {
+      modal,
+      view: {
+        width: Math.max(360, Math.round(modal - SIDEBAR - CHROME_WIDTH)),
+        height: Math.max(280, Math.round(window.innerHeight - CHROME_HEIGHT))
+      }
+    };
+  };
+  const [size, setSize] = useState(() =>
+    typeof window === "undefined" ? { modal: 980, view: { width: 620, height: 460 } } : measure()
+  );
+
+  useEffect(() => {
+    const onResize = () => setSize(measure());
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  return size;
 }
 
 export function ImageEditModal() {
@@ -33,7 +74,9 @@ export function ImageEditModal() {
   const [undone, setUndone] = useState<ImageEdit[]>([]);
   const [camera, setCamera] = useState<ViewCamera>({ zoom: 1, panX: 0, panY: 0 });
 
-  const dragRef = useRef<{ originX: number; originY: number } | null>(null);
+  const { modal: modalWidth, view: VIEW } = useEditorSize();
+  const [cursor, setCursor] = useState("crosshair");
+  const dragRef = useRef<Drag | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
 
   const sequence =
@@ -80,7 +123,7 @@ export function ImageEditModal() {
   useEffect(() => {
     if (!edited) return;
     setCamera(fitCamera(edited, VIEW));
-  }, [edited?.width, edited?.height, assetId, frame?.id]);
+  }, [edited?.width, edited?.height, assetId, frame?.id, VIEW.width, VIEW.height]);
 
   useEffect(() => {
     if (!assetId) return;
@@ -124,17 +167,42 @@ export function ImageEditModal() {
     };
   };
 
+  /** Unclamped and unrounded, for deciding what a press grabs. */
+  const rawImagePoint = (clientX: number, clientY: number) => {
+    const surface = surfaceRef.current;
+    if (!surface) return { x: 0, y: 0 };
+    const point = viewPoint(surface, camera, clientX, clientY);
+    return { x: point.imageX, y: point.imageY };
+  };
+
+  const grabFor = (clientX: number, clientY: number) =>
+    grabAt(
+      selection,
+      rawImagePoint(clientX, clientY),
+      GRAB_MARGIN / Math.max(camera.zoom, 0.0001)
+    );
+
   const setSelectionFrom = (clientX: number, clientY: number) => {
-    const start = dragRef.current;
-    if (!start) return;
+    const drag = dragRef.current;
+    if (!drag || !edited) return;
 
     const point = toImagePoint(clientX, clientY);
 
+    if (drag.mode === "move") {
+      setSelection(moveBox(drag.from, point.x - drag.startX, point.y - drag.startY, edited));
+      return;
+    }
+
+    if (drag.mode === "resize") {
+      setSelection(resizeBox(drag.from, drag.grab.edges, point));
+      return;
+    }
+
     setSelection({
-      x: Math.min(start.originX, point.x),
-      y: Math.min(start.originY, point.y),
-      width: Math.abs(point.x - start.originX),
-      height: Math.abs(point.y - start.originY)
+      x: Math.min(drag.originX, point.x),
+      y: Math.min(drag.originY, point.y),
+      width: Math.abs(point.x - drag.originX),
+      height: Math.abs(point.y - drag.originY)
     });
   };
 
@@ -191,13 +259,13 @@ export function ImageEditModal() {
           : `Edit ${asset.label}`
       }
       onClose={() => useUi.getState().closeImageEditor()}
-      width={980}
+      width={modalWidth}
       footer={
         <Row className="justify-between">
           <span className="text-[10px] text-slate-500">
             {frame
               ? "Wheel zooms, Space/Alt-drag pans, drag a box to crop. Edits apply to this frame alone."
-              : "Wheel zooms, Space/Alt-drag pans. Edits sit on the raw PNG — the original file is untouched."}
+              : "Wheel zooms, Space/Alt-drag pans. Drag a box, then drag inside it to move or its edges to resize. The original file is untouched."}
           </span>
 
           <Row>
@@ -267,17 +335,28 @@ export function ImageEditModal() {
                 height={VIEW.height}
                 camera={camera}
                 onCameraChange={setCamera}
-                cursor="crosshair"
+                cursor={cursor}
                 viewportRef={surfaceRef}
                 onPointerDown={(event) => {
                   event.preventDefault();
                   const point = toImagePoint(event.clientX, event.clientY);
-                  dragRef.current = { originX: point.x, originY: point.y };
-                  setSelection({ x: point.x, y: point.y, width: 0, height: 0 });
+                  const grab = grabFor(event.clientX, event.clientY);
+
+                  if (grab.mode === "move" && selection) {
+                    dragRef.current = { mode: "move", startX: point.x, startY: point.y, from: selection };
+                  } else if (grab.mode === "resize" && selection) {
+                    dragRef.current = { mode: "resize", grab, from: selection };
+                  } else {
+                    dragRef.current = { mode: "draw", originX: point.x, originY: point.y };
+                    setSelection({ x: point.x, y: point.y, width: 0, height: 0 });
+                  }
                   event.currentTarget.setPointerCapture(event.pointerId);
                 }}
                 onPointerMove={(event) => {
-                  if (!dragRef.current) return;
+                  if (!dragRef.current) {
+                    setCursor(grabCursor(grabFor(event.clientX, event.clientY)));
+                    return;
+                  }
                   setSelectionFrom(event.clientX, event.clientY);
                 }}
                 onPointerUp={(event) => {
@@ -298,7 +377,17 @@ export function ImageEditModal() {
                       height: selection.height * camera.zoom,
                       boxShadow: "0 0 0 9999px rgba(0,0,0,0.55)"
                     }}
-                  />
+                  >
+                    {/* Corner handles: the box can be grabbed and reshaped, not only redrawn. */}
+                    {(["-left-1 -top-1", "-right-1 -top-1", "-left-1 -bottom-1", "-right-1 -bottom-1"] as const).map(
+                      (corner) => (
+                        <span
+                          key={corner}
+                          className={`absolute h-2 w-2 border border-[var(--color-accent)] bg-[var(--color-ink-900)] ${corner}`}
+                        />
+                      )
+                    )}
+                  </div>
                 ) : null}
               </ImageViewport>
             ) : null}
@@ -325,7 +414,8 @@ export function ImageEditModal() {
           <Divider label="crop" />
 
           <p className="mb-2 text-[10px] leading-snug text-slate-500">
-            Drag a box on the image, or type the rectangle in raw pixels of the current image.
+            Drag a box on the image, then drag inside it to move it or its edges and corners to
+            resize. Or type the rectangle in pixels of the current image.
           </p>
 
           <Row>
