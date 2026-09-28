@@ -44,51 +44,56 @@ function HelpLink({ href, children }: { href: string; children: React.ReactNode 
  * Where a key comes from, for people who have never made one. Both providers
  * gate image models behind billing, which is the step people miss.
  */
+function KeySteps({ provider }: { provider: string }) {
+  return provider === "gemini" ? (
+    <ol className="list-decimal space-y-1 pl-5 leading-relaxed">
+      <li>
+        Open <HelpLink href="https://aistudio.google.com/apikey">Google AI Studio</HelpLink> and
+        sign in with a Google account.
+      </li>
+      <li>
+        Click <b>Create API key</b> and copy it. It starts with <code>AIza</code>.
+      </li>
+      <li>
+        Image models need billing: click <b>Set up billing</b> next to the key. You pay Google per
+        image, usually a few cents.
+      </li>
+    </ol>
+  ) : (
+    <ol className="list-decimal space-y-1 pl-5 leading-relaxed">
+      <li>
+        Sign up at <HelpLink href="https://platform.openai.com/signup">platform.openai.com</HelpLink>{" "}
+        (separate from a ChatGPT subscription).
+      </li>
+      <li>
+        Add credit under{" "}
+        <HelpLink href="https://platform.openai.com/settings/organization/billing/overview">
+          Billing
+        </HelpLink>
+        . $5 goes a long way; you pay OpenAI per image.
+      </li>
+      <li>
+        Image models may ask you to{" "}
+        <HelpLink href="https://platform.openai.com/settings/organization/general">
+          verify your organization
+        </HelpLink>{" "}
+        first (a quick ID check).
+      </li>
+      <li>
+        Create a key under <HelpLink href="https://platform.openai.com/api-keys">API keys</HelpLink>{" "}
+        and copy it. It starts with <code>sk-</code>.
+      </li>
+    </ol>
+  );
+}
+
 function KeyHelp({ provider }: { provider: string }) {
   return (
     <details className="mb-2 rounded-md border border-[var(--color-edge)] bg-[var(--color-ink-800)] px-3 py-2 text-sm text-slate-400">
       <summary className="cursor-pointer text-slate-300">How do I get a key?</summary>
-      {provider === "gemini" ? (
-        <ol className="mt-2 list-decimal space-y-1 pl-5 leading-relaxed">
-          <li>
-            Open <HelpLink href="https://aistudio.google.com/apikey">Google AI Studio</HelpLink> and
-            sign in with a Google account.
-          </li>
-          <li>
-            Click <b>Create API key</b> and copy it. It starts with <code>AIza</code>.
-          </li>
-          <li>
-            Image models need billing: click <b>Set up billing</b> next to the key. You pay Google
-            per image, usually a few cents.
-          </li>
-        </ol>
-      ) : (
-        <ol className="mt-2 list-decimal space-y-1 pl-5 leading-relaxed">
-          <li>
-            Sign up at <HelpLink href="https://platform.openai.com/signup">platform.openai.com</HelpLink>{" "}
-            (separate from a ChatGPT subscription).
-          </li>
-          <li>
-            Add credit under{" "}
-            <HelpLink href="https://platform.openai.com/settings/organization/billing/overview">
-              Billing
-            </HelpLink>
-            . $5 goes a long way; you pay OpenAI per image.
-          </li>
-          <li>
-            Image models may ask you to{" "}
-            <HelpLink href="https://platform.openai.com/settings/organization/general">
-              verify your organization
-            </HelpLink>{" "}
-            first (a quick ID check).
-          </li>
-          <li>
-            Create a key under{" "}
-            <HelpLink href="https://platform.openai.com/api-keys">API keys</HelpLink> and copy it.
-            It starts with <code>sk-</code>.
-          </li>
-        </ol>
-      )}
+      <div className="mt-2">
+        <KeySteps provider={provider} />
+      </div>
     </details>
   );
 }
@@ -194,11 +199,26 @@ function AddKeyModal({ onClose }: { onClose: () => void }) {
 
 function EmptyKeys({ onAdd }: { onAdd: () => void }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-5 rounded-lg border-2 border-dashed border-[var(--color-ink-500)] px-6 py-14 text-center">
-      <p className="max-w-md text-slate-400">
-        You have not added any keys. You will not be able to generate new art until
-        you provide one. Keys come from OpenAI or Google; Add Key shows how to get one.
+    <div className="flex flex-col items-center gap-6 rounded-lg border-2 border-dashed border-[var(--color-ink-500)] px-6 py-10">
+      <p className="max-w-md text-center text-slate-400">
+        SpriteBench generates with your own OpenAI or Google Gemini key, so you pay the provider
+        directly. Add one to start making art.
       </p>
+
+      {/* Shown up front: someone without a key would never think to open Add Key to find out. */}
+      <div className="grid w-full max-w-3xl gap-4 text-left text-sm text-slate-400 sm:grid-cols-2">
+        {(["openai", "gemini"] as const).map((provider) => (
+          <div
+            key={provider}
+            className="rounded-md border border-[var(--color-edge)] bg-[var(--color-ink-800)] p-4"
+          >
+            <h3 className="mb-2 font-medium text-slate-200">
+              Get {provider === "gemini" ? "a Gemini" : "an OpenAI"} key
+            </h3>
+            <KeySteps provider={provider} />
+          </div>
+        ))}
+      </div>
 
       <button
         type="button"
