@@ -24,4 +24,6 @@ With a custom stencil, **Where to draw** decides which part the model may change
 ### The template builder
 
 Press **build**, above your starting images, to make a guide shape instead of drawing one: a diamond, prism, sphere, road intersection or building. Set its width, depth and height, the light direction, and whether it's seen at an iso angle or front-on. Intersections also take road and sidewalk widths and colours. The result becomes a template you can attach like any other, and a quick way to get consistent blocks, props and tiles.
+
+I'll add more shapes and templates on request. If there's one that would help your game, tell me in the feedback box.
 `;
