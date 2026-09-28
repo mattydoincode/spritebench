@@ -1,17 +1,24 @@
 # Debian rather than Alpine on purpose: sharp ships prebuilt binaries for
 # glibc, and on musl it falls back to compiling libvips from source.
-FROM node:22-bookworm-slim AS base
-ENV NODE_ENV=production
-WORKDIR /app
+#
+# Every stage starts from the image itself rather than from a shared `base`
+# stage. App Platform builds with kaniko, which derives a fresh cache key for a
+# stage built on another stage on every build, so a shared base meant no RUN
+# layer was ever reused -- `npm ci` reinstalled on every deploy with an
+# unchanged lockfile.
 
 # --- dependencies -----------------------------------------------------------
 # Kept as its own stage so a source-only change does not reinstall anything.
-FROM base AS deps
+FROM node:22-bookworm-slim AS deps
+ENV NODE_ENV=production
+WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --include=dev
 
 # --- build ------------------------------------------------------------------
-FROM base AS build
+FROM node:22-bookworm-slim AS build
+ENV NODE_ENV=production
+WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
@@ -20,12 +27,16 @@ COPY . .
 RUN npm run build && npm run build:node
 
 # --- production dependencies ------------------------------------------------
-FROM base AS prod-deps
+FROM node:22-bookworm-slim AS prod-deps
+ENV NODE_ENV=production
+WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 # --- runtime ----------------------------------------------------------------
-FROM base AS runtime
+FROM node:22-bookworm-slim AS runtime
+ENV NODE_ENV=production
+WORKDIR /app
 
 # Signals reach PID 1 directly, which is what makes the worker's graceful
 # SIGTERM drain work under a container runtime.
