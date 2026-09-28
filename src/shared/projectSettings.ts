@@ -54,7 +54,11 @@ export interface ProjectSettingsPatch {
 }
 
 export const DEFAULT_PROJECT_CUTOUT: ProjectCutoutSettings = {
-  mode: DEFAULT_PROCESSING.cutout,
+  // New images keep their background until the project opts into a cutout.
+  // Removing it by default surprised people whose art was not on a plain
+  // backdrop: parts of the subject vanished with it. The per-method settings
+  // below still start from the processing defaults, ready when chosen.
+  mode: "none",
   edgeFloodFill: {
     cutoutTolerance: DEFAULT_PROCESSING.cutoutTolerance,
     cutoutLocalTolerance: DEFAULT_PROCESSING.cutoutLocalTolerance,

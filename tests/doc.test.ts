@@ -885,7 +885,8 @@ describe("terrain", () => {
 describe("project settings", () => {
   it("reads built-in cutout defaults from an empty document", () => {
     const settings = doc.readProjectSettings(doc.createDoc());
-    expect(settings.cutout.mode).toBe(DEFAULT_PROCESSING.cutout);
+    // A new project keeps backgrounds until it opts into a cutout.
+    expect(settings.cutout.mode).toBe("none");
     expect(settings.cutout.chromaKey.chromaKeys).toEqual(DEFAULT_PROCESSING.chromaKeys);
   });
 
