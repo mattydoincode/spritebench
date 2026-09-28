@@ -14,11 +14,13 @@ at the top of each section; tick things off rather than deleting them.
       (`npm run db:migrate:prod`) with the deploy).
 - [x] ~~Clear refresh tokens Google already issued~~ (moot after the wipe):
       `update accounts set refresh_token = null, access_token = null where provider = 'google';`
-- [ ] Google Cloud Console: Google Auth Platform → Audience → Publish app, so the same project
+- [x] Google Cloud Console: Google Auth Platform → Audience → Publish app, so the same project
       goes from "Testing" (only listed test users can sign in) to "In production". Basic scopes
       need no review, and localhost redirects keep working. Check the OAuth client lists
       `https://spritebench.com/api/auth/callback/google`. Skip the consent-screen logo for now
       (it can trigger brand verification).
+- [x] `AUTH_URL=https://spritebench.com` set in DO (without it Auth.js sent Google the
+      container's `localhost:8080` callback), auth secrets encrypted, spend alert added.
 - [ ] Make yourself admin: `update users set is_admin = true where email = '…';`
 - [x] R2 bucket is private: in the bucket's Settings, "Public Development URL" (r2.dev) is
       disabled and "Custom Domains" is empty; and `R2_PUBLIC_BASE` is unset in production.
@@ -42,7 +44,7 @@ at the top of each section; tick things off rather than deleting them.
 - [x] Uploads go browser → R2 on a signed PUT (exact size and type), then the worker checks,
       converts and thumbnails them one at a time (40 MP cap). The web service never holds upload
       bytes.
-- [ ] R2 lifecycle rule: delete objects under prefix `uploads/` after 1 day, on both buckets.
+- [x] R2 lifecycle rule: delete objects under prefix `uploads/` after 1 day, on both buckets.
       That's where uploads wait for the worker; anything left there was never completed.
 - [ ] Per-user storage or image cap (not needed for launch). Nothing limits how many images a user keeps (the /admin
       usage table is the basis for one).
