@@ -36,5 +36,5 @@ Drag images from the library onto the scene in the middle to see how they look t
 
 ### Feedback
 
-This is alpha software, so things will break. The feedback box under the inspector comes straight to me.
+Found a bug, or have a feature request? Use the feedback box under the inspector; it comes straight to me.
 `;
