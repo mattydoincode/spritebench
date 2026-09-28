@@ -23,7 +23,7 @@ export default async function SignInPage({
       <div className="w-full max-w-sm rounded-lg border border-[var(--color-edge)] bg-[var(--color-ink-800)] p-8">
         <img src="/branding/logo-white.png" alt="SpriteBench" className="h-[15px] w-auto [image-rendering:pixelated]" />
         <p className="mt-2 text-sm text-slate-400">
-          Generate, process and compose game art. Bring your own image model key.
+          Prototype with AI, Ship with Artists
         </p>
 
         <form
