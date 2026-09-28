@@ -23,6 +23,15 @@ export function workerUserConcurrency(): number {
   return count("WORKER_USER_CONCURRENCY");
 }
 
+/**
+ * Of the jobs in flight, how many may be building request images or storing
+ * results at once. Waiting on the provider is nearly free; decoding PNGs and
+ * building thumbnails is where memory spikes, so that part takes turns.
+ */
+export function workerProcessingConcurrency(): number {
+  return count("WORKER_PROCESSING_CONCURRENCY");
+}
+
 /** Hard ceiling on batches x imageCount for one generate request. */
 export function maxImagesPerRequest(): number {
   return count("MAX_IMAGES_PER_REQUEST");

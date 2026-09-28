@@ -227,8 +227,15 @@ hostname. Changing the domain means editing that file and running
 
 ## 5. Scaling notes
 
-`WORKER_CONCURRENCY` is provider calls in flight per worker process, and each
-one holds a Postgres connection while it writes. Keep
+`WORKER_CONCURRENCY` is provider calls in flight per worker process. A job
+spends almost all of that awaiting the provider, which holds a socket but no
+Postgres connection and no CPU, so it can run high (128). The memory-hungry
+part, building request images and decoding, thumbnailing and storing results,
+is capped separately by `WORKER_PROCESSING_CONCURRENCY`. The worker also holds
+one extra connection for LISTEN/NOTIFY, which is what lets 128 pg-boss pollers
+sit idle instead of fetching every 2s; it needs a direct connection, not a
+PgBouncer transaction pool. Each job borrows a Postgres connection briefly
+while it writes. Keep
 `DATABASE_POOL_MAX + QUEUE_POOL_MAX` across every service below the Postgres
 connection ceiling. The defaults (10 and 4) suit two services on Railway;
 `infra/do-app.yaml` lowers them to 6 and 3 for three components against a 1 GiB

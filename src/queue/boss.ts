@@ -17,16 +17,30 @@ export const GENERATE_RETRY_LIMIT = 3;
 let instance: PgBoss | null = null;
 let starting: Promise<PgBoss> | null = null;
 
-async function start(): Promise<PgBoss> {
+export interface BossOptions {
+  /**
+   * Hold a LISTEN connection so workers wake the moment a generate job is
+   * sent. pg-boss runs one poller per concurrency slot, so a worker with 128
+   * slots polling every 2s would be 64 fetches a second against an idle
+   * queue; with the listener up they only poll every 30s as a backstop. Costs
+   * one dedicated connection, so only the worker asks for it.
+   */
+  listen?: boolean;
+}
+
+async function start(options: BossOptions): Promise<PgBoss> {
   const next = new PgBoss({
     connectionString: poolConnectionString(),
     // pg-boss owns its own schema, well away from the domain tables.
     schema: "pgboss",
     max: count("QUEUE_POOL_MAX"),
-    ssl: sslConfig()
+    ssl: sslConfig(),
+    useListenNotify: Boolean(options.listen)
   });
 
   next.on("error", (error: unknown) => console.error("[queue] error", error));
+  // Includes the listener failing to start, which silently means polling.
+  next.on("warning", (warning: unknown) => console.warn("[queue] warning", warning));
 
   await next.start();
 
@@ -38,8 +52,11 @@ async function start(): Promise<PgBoss> {
     retryDelay: 15,
     retryBackoff: true,
     expireInSeconds: JOB_EXPIRE_SECONDS,
-    deadLetter: GENERATE_DLQ
+    deadLetter: GENERATE_DLQ,
+    notify: true
   });
+  // createQueue leaves an existing queue as it was, so the flag is set here too.
+  await next.updateQueue(GENERATE_QUEUE, { notify: true });
   await next.createQueue(PRUNE_QUEUE, { retryLimit: 1 });
   await next.createQueue(INGEST_QUEUE, { retryLimit: 3, retryDelay: 5, retryBackoff: true });
 
@@ -47,10 +64,11 @@ async function start(): Promise<PgBoss> {
   return next;
 }
 
-export async function boss(): Promise<PgBoss> {
+/** Options apply only to the call that starts the instance. */
+export async function boss(options: BossOptions = {}): Promise<PgBoss> {
   if (instance) return instance;
   if (!starting) {
-    starting = start().finally(() => {
+    starting = start(options).finally(() => {
       starting = null;
     });
   }

@@ -51,7 +51,7 @@ async function main(): Promise<void> {
   }
 
   const concurrency = workerConcurrency();
-  const instance = await boss();
+  const instance = await boss({ listen: true });
 
   // Anything still marked running belongs to a process that died hard; a
   // graceful shutdown drains rather than leaving these behind.

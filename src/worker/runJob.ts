@@ -7,6 +7,7 @@ import {
   markProviderCallComplete,
   requeueJob
 } from "@/db/repo/jobs";
+import { workerProcessingConcurrency } from "@/server/config";
 import { applyLoopFollowUp } from "@/server/loop";
 import { loopOutcome } from "@/shared/loop";
 import { keyForJob } from "@/db/repo/providerKeys";
@@ -19,6 +20,17 @@ import { buildThumbnail } from "@/server/thumbnails";
 import { sourceKey, thumbKey } from "@/storage/keys";
 import { storage } from "@/storage";
 import type { JobRow } from "@/db/schema";
+import { Semaphore } from "./semaphore";
+
+/**
+ * Jobs in flight far outnumber the images this process can hold decoded at
+ * once. The provider wait runs outside it; only building inputs and storing
+ * results take a turn.
+ */
+let processingGate: Semaphore | null = null;
+function processing(): Semaphore {
+  return (processingGate ??= new Semaphore(workerProcessingConcurrency()));
+}
 
 /**
  * The key chosen at enqueue is gone by the time the job runs -- the owner
@@ -36,7 +48,7 @@ async function callProvider(job: JobRow, apiKey: string): Promise<ProviderResult
   const provider = providerForModel(job.generation.model);
   const request = { apiKey, prompt: job.composedPrompt, generation: job.generation };
 
-  const inputs = await editInputsForJob(job.projectId, job);
+  const inputs = await processing().run(() => editInputsForJob(job.projectId, job));
   if (inputs) {
     return provider.edit({
       ...request,
@@ -120,59 +132,65 @@ export async function runJob(jobId: string, attemptsLeft = 0): Promise<{ retry: 
         elapsedSeconds: result.elapsedSeconds
       });
 
-      let firstAssetId: string | null = null;
+      // Decoding, thumbnailing and uploading hold every image in memory, so
+      // this takes a turn at the processing gate.
+      const firstAssetId = await processing().run(async () => {
+        let first: string | null = null;
 
-      for (const bytes of result.images) {
-        // The id names the storage key, so it is minted before the write. No
-        // probing for a free key: an id nobody has used cannot collide, which
-        // is one fewer HEAD request per image than the old name-derived keys.
-        const assetId = crypto.randomUUID();
-        const key = sourceKey(job.projectId, assetId);
+        for (const bytes of result.images) {
+          // The id names the storage key, so it is minted before the write. No
+          // probing for a free key: an id nobody has used cannot collide, which
+          // is one fewer HEAD request per image than the old name-derived keys.
+          const assetId = crypto.randomUUID();
+          const key = sourceKey(job.projectId, assetId);
 
-        await storage().put(key, bytes, {
-          contentType: "image/png",
-          cacheControl: "public, max-age=31536000, immutable"
-        });
-
-        const size = readPngSize(bytes);
-
-        // A failed thumbnail must not lose the image the project just paid for.
-        let thumb: string | null = null;
-        try {
-          const key = thumbKey(job.projectId, assetId);
-          await storage().put(key, await buildThumbnail(bytes), {
-            contentType: "image/webp",
+          await storage().put(key, bytes, {
+            contentType: "image/png",
             cacheControl: "public, max-age=31536000, immutable"
           });
-          thumb = key;
-        } catch (error) {
-          console.error(`[worker] could not build a thumbnail for ${key}`, error);
+
+          const size = readPngSize(bytes);
+
+          // A failed thumbnail must not lose the image the project just paid for.
+          let thumb: string | null = null;
+          try {
+            const key = thumbKey(job.projectId, assetId);
+            await storage().put(key, await buildThumbnail(bytes), {
+              contentType: "image/webp",
+              cacheControl: "public, max-age=31536000, immutable"
+            });
+            thumb = key;
+          } catch (error) {
+            console.error(`[worker] could not build a thumbnail for ${key}`, error);
+          }
+
+          const asset = await insertAsset({
+            id: assetId,
+            projectId: job.projectId,
+            createdByUserId: job.userId,
+            sourceKey: key,
+            thumbKey: thumb,
+            sourceWidth: size.width,
+            sourceHeight: size.height,
+            byteSize: bytes.length,
+            prompt: job.prompt,
+            composedPrompt: job.composedPrompt,
+            generation: job.generation,
+            processing: job.processing,
+            rerunOf: job.rerunOf,
+            jobId,
+            inputs: job.inputs,
+            sequencePlan: job.sequencePlan,
+            usage: result.usage,
+            elapsedSeconds: result.elapsedSeconds
+          });
+
+          await appendAssetId(jobId, asset.id);
+          first ??= asset.id;
         }
 
-        const asset = await insertAsset({
-          id: assetId,
-          projectId: job.projectId,
-          createdByUserId: job.userId,
-          sourceKey: key,
-          thumbKey: thumb,
-          sourceWidth: size.width,
-          sourceHeight: size.height,
-          byteSize: bytes.length,
-          prompt: job.prompt,
-          composedPrompt: job.composedPrompt,
-          generation: job.generation,
-          processing: job.processing,
-          rerunOf: job.rerunOf,
-          jobId,
-          inputs: job.inputs,
-          sequencePlan: job.sequencePlan,
-          usage: result.usage,
-          elapsedSeconds: result.elapsedSeconds
-        });
-
-        await appendAssetId(jobId, asset.id);
-        firstAssetId ??= asset.id;
-      }
+        return first;
+      });
 
       if (!firstAssetId) {
         await finishJob(jobId, {
