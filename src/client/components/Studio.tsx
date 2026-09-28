@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { GeneratePanel } from "@/client/components/GeneratePanel";
 import { ImageEditModal } from "@/client/components/ImageEditModal";
+import { HelpModal } from "@/client/components/HelpModal";
 import { SettingsModal } from "@/client/components/SettingsModal";
 import { SliceModal } from "@/client/components/SliceModal";
 import { TemplateBuilderModal } from "@/client/components/TemplateBuilderModal";
@@ -51,6 +52,7 @@ export function Studio({ bootstrap }: { bootstrap: StudioBootstrap }) {
   const editingAssetId = useUi((state) => state.editingAssetId);
   const slicingAssetId = useUi((state) => state.slicingAssetId);
   const settingsOpen = useUi((state) => state.settingsTab !== null);
+  const helpOpen = useUi((state) => state.helpTab !== null);
   const templateBuilderOpen = useUi((state) => state.templateBuilderOpen);
 
   const layout = useUi((state) => state.layout);
@@ -219,6 +221,7 @@ export function Studio({ bootstrap }: { bootstrap: StudioBootstrap }) {
       {editingAssetId ? <ImageEditModal /> : null}
       {slicingAssetId ? <SliceModal /> : null}
       {settingsOpen ? <SettingsModal /> : null}
+      {helpOpen ? <HelpModal /> : null}
       {templateBuilderOpen ? <TemplateBuilderModal /> : null}
     </main>
   );

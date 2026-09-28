@@ -38,6 +38,20 @@ export function ProjectBar() {
         <span className="text-xs font-medium text-slate-100">Settings</span>
       </button>
 
+      {/* Floated after Settings, so it sits to its left. */}
+      <button
+        type="button"
+        title="How SpriteBench works"
+        onClick={() => useUi.getState().openHelp()}
+        className="float-right ml-2 inline-flex h-6 items-center gap-1.5 rounded border border-[var(--color-edge)] bg-[var(--color-ink-600)] px-2 transition hover:border-[var(--color-accent-dim)] hover:bg-[var(--color-ink-500)]"
+      >
+        <svg aria-hidden viewBox="0 0 16 16" className="h-3.5 w-3.5 text-slate-300" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <circle cx="8" cy="8" r="6.5" />
+          <path d="M6.2 6.2a1.9 1.9 0 1 1 2.6 1.8c-.5.2-.8.6-.8 1.1v.4M8 11.6v.1" strokeLinecap="round" />
+        </svg>
+        <span className="text-xs font-medium text-slate-100">Help</span>
+      </button>
+
 
       <Link
         href="/projects"

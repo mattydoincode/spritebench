@@ -1,5 +1,6 @@
 "use client";
 
+import type { HelpTab } from "@/client/help";
 import { create } from "zustand";
 import { processor } from "@/client/processor";
 import { clampProcessWorkers, DEFAULT_PROCESS_WORKERS } from "@/client/processQueue";
@@ -733,6 +734,8 @@ interface UiState extends Stored {
   slicingAssetId: string | null;
   /** Which tab of the settings modal is open, or null when it is closed. */
   settingsTab: SettingsTab | null;
+  /** Which Help tab is open, or null when the dialog is closed. */
+  helpTab: HelpTab | null;
   templateBuilderOpen: boolean;
   batches: number;
   busy: string | null;
@@ -816,6 +819,8 @@ interface UiState extends Stored {
   closeSlicer: () => void;
   openSettings: (tab?: SettingsTab) => void;
   closeSettings: () => void;
+  openHelp: (tab?: HelpTab) => void;
+  closeHelp: () => void;
   openTemplateBuilder: () => void;
   closeTemplateBuilder: () => void;
 
@@ -849,6 +854,7 @@ export const useUi = create<UiState>((set, get) => {
     editingFrame: null,
     slicingAssetId: null,
     settingsTab: null,
+    helpTab: null,
     templateBuilderOpen: false,
     batches: 1,
     bases: [],
@@ -1228,6 +1234,14 @@ export const useUi = create<UiState>((set, get) => {
 
     closeSettings() {
       set({ settingsTab: null });
+    },
+
+    openHelp(tab = "overview") {
+      set({ helpTab: tab });
+    },
+
+    closeHelp() {
+      set({ helpTab: null });
     },
 
     openTemplateBuilder() {
