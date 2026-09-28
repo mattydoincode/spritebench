@@ -3,6 +3,7 @@ import { trackPageView } from "@/server/analytics";
 import { auth, signIn } from "@/server/auth";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "Sign in — SpriteBench" };
 
 export default async function SignInPage({
   searchParams

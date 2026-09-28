@@ -3,6 +3,7 @@ import { Studio } from "@/client/components/Studio";
 import { loadStudioBootstrap } from "@/server/studioBootstrap";
 
 export const dynamic = "force-dynamic";
+export const metadata = { title: "SpriteBench" };
 
 /**
  * Resolves the project on the server, so the studio's first paint already
