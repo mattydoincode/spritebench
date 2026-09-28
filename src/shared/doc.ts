@@ -27,7 +27,7 @@ import {
   type AssetSetMember,
   type AssetSetView
 } from "./assetSet";
-import { displayName } from "./naming";
+import { defaultName, displayName } from "./naming";
 import {
   DEFAULT_REPEATER,
   REPEATER_PLACEMENTS,
@@ -742,7 +742,8 @@ export function readAssetEdits(doc: Y.Doc, assetId: string): AssetEdits | null {
  * fallback to the number happens in exactly one place.
  */
 export function resolveAsset(record: AssetRecord, edits: AssetEdits | null): ResolvedAsset {
-  const name = edits?.name ?? "";
+  // A cleared rename falls back to the default, like one never made.
+  const name = edits?.name?.trim() || defaultName(record);
 
   return {
     ...record,

@@ -6,7 +6,7 @@ import { readDoc } from "@/db/repo/projectDoc";
 import { loadPalette } from "@/server/palettes";
 import { decodePng, encodePng } from "@/server/png";
 import { docFromState, listFolders, readAssetEdits } from "@/shared/doc";
-import { exportStem, sanitizeName } from "@/shared/naming";
+import { defaultName, exportStem, sanitizeName } from "@/shared/naming";
 import type { AssetRecord } from "@/shared/model";
 import { exportKey } from "@/storage/keys";
 import { ObjectNotFoundError, storage } from "@/storage";
@@ -80,7 +80,7 @@ export async function approveAsset(
   const folder = sanitizeName(options.subfolder ?? folderName ?? "props", "props");
   const stem = options.name
     ? sanitizeName(options.name, `asset_${asset.seq}`)
-    : exportStem(project?.name ?? "project", asset.seq, edits?.name);
+    : exportStem(project?.name ?? "project", asset.seq, edits?.name?.trim() || defaultName(asset));
 
   const target = exportKey(projectId, folder, stem);
   const bytes = encodePng(image);

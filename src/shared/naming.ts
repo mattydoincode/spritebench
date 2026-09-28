@@ -24,6 +24,18 @@ export function displayName(seq: number, prettyName?: string | null): string {
 }
 
 /**
+ * The name an asset has before anyone renames it. Uploads keep the file they
+ * came from (the stem, stored as their prompt text); generated images have
+ * none and show their number.
+ */
+export function defaultName(asset: {
+  origin: "generated" | "uploaded";
+  prompt: { body: string };
+}): string {
+  return asset.origin === "uploaded" ? asset.prompt.body.trim() : "";
+}
+
+/**
  * Filename-safe, and safe to put in a ZIP central directory or an object key:
  * no slashes, no `..`, no leading dot. Lowercased so exports are consistent
  * across case-sensitive and case-insensitive filesystems.

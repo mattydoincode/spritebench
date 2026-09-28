@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  defaultName,
   displayName,
   exportStem,
   formatSeq,
@@ -48,6 +49,13 @@ describe("displayName", () => {
 
   it("keeps a rename verbatim, including characters a filename could not hold", () => {
     expect(displayName(1, "hero/idle (v2)")).toBe("hero/idle (v2)");
+  });
+});
+
+describe("defaultName", () => {
+  it("names an upload after its file, and leaves generated images to their number", () => {
+    expect(defaultName({ origin: "uploaded", prompt: { body: "hero_idle" } })).toBe("hero_idle");
+    expect(defaultName({ origin: "generated", prompt: { body: "a rat in a hat" } })).toBe("");
   });
 });
 
