@@ -252,14 +252,15 @@ function clampPane(pane: Pane, size: number): number {
 /**
  * Default sizes as shares of the window, so a first open or a double-click
  * reset fits the screen it is on: side panels a fifth of the width each, the
- * library about a third of the height, the prompt 40% of its panel, and the
- * inspector preview's image about 30% of the window.
+ * library about a third of the height, the prompt about 40% of the window,
+ * and the inspector preview's image about 30%.
  * Stored sizes stay in pixels -- dragging is in pixels.
  */
 const LAYOUT_SHARES: Record<Pane, number> = {
   left: 0.2,
   right: 0.2,
   library: 0.35,
+  // Of the window, for the prompt itself; PROMPT_CHROME is added on top.
   prompt: 0.4,
   // Of the window, for the image itself; PREVIEW_CHROME is added on top.
   preview: 0.3,
@@ -279,6 +280,10 @@ const RIGHT_CHROME = 40;
 const PREVIEW_CHROME = 160;
 /** The preview never takes more of the inspector than this by default. */
 const PREVIEW_MAX_SHARE = 0.6;
+/** The Generate button row and cost line under the prompt, added to its share. */
+const PROMPT_CHROME = 100;
+/** The prompt never takes more of the Generate panel than this by default. */
+const PROMPT_MAX_SHARE = 0.65;
 
 /** Stands in for the window where there is none, so server and first client render agree. */
 const FALLBACK_VIEWPORT = { width: 1600, height: 900 };
@@ -292,7 +297,13 @@ export function defaultLayout(
     left: clampPane("left", viewport.width * LAYOUT_SHARES.left),
     right: clampPane("right", viewport.width * LAYOUT_SHARES.right),
     library: clampPane("library", viewport.height * LAYOUT_SHARES.library),
-    prompt: clampPane("prompt", (viewport.height - LEFT_CHROME) * LAYOUT_SHARES.prompt),
+    prompt: clampPane(
+      "prompt",
+      Math.min(
+        viewport.height * LAYOUT_SHARES.prompt + PROMPT_CHROME,
+        (viewport.height - LEFT_CHROME) * PROMPT_MAX_SHARE
+      )
+    ),
     preview: clampPane(
       "preview",
       Math.min(
