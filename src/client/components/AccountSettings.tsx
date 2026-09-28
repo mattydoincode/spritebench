@@ -87,11 +87,16 @@ function KeySteps({ provider }: { provider: string }) {
   );
 }
 
+/** Which provider to point new people at, and why, in one place. */
+const RECOMMENDED_PROVIDER = "gemini";
+const RECOMMENDATION = "I recommend starting with Gemini for now.";
+
 function KeyHelp({ provider }: { provider: string }) {
   return (
     <details className="mb-2 rounded-md border border-[var(--color-edge)] bg-[var(--color-ink-800)] px-3 py-2 text-sm text-slate-400">
       <summary className="cursor-pointer text-slate-300">How do I get a key?</summary>
       <div className="mt-2">
+        <p className="mb-2 text-slate-300">{RECOMMENDATION}</p>
         <KeySteps provider={provider} />
       </div>
     </details>
@@ -101,10 +106,11 @@ function KeyHelp({ provider }: { provider: string }) {
 function AddKeyModal({ onClose }: { onClose: () => void }) {
   const providers = providerIds();
 
-  const [provider, setProvider] = useState(providers[0] ?? "openai");
+  const initial = providers.includes(RECOMMENDED_PROVIDER) ? RECOMMENDED_PROVIDER : (providers[0] ?? "openai");
+  const [provider, setProvider] = useState(initial);
   // Defaults to the provider's name and follows it until the field is edited,
   // so the common case needs no typing and a second key can still be named.
-  const [label, setLabel] = useState(providerName(providers[0] ?? "openai"));
+  const [label, setLabel] = useState(providerName(initial));
   const [labelEdited, setLabelEdited] = useState(false);
   const [secret, setSecret] = useState("");
   const [saving, setSaving] = useState(false);
@@ -202,18 +208,27 @@ function EmptyKeys({ onAdd }: { onAdd: () => void }) {
     <div className="flex flex-col items-center gap-6 rounded-lg border-2 border-dashed border-[var(--color-ink-500)] px-6 py-10">
       <p className="max-w-md text-center text-slate-400">
         SpriteBench generates with your own OpenAI or Google Gemini key, so you pay the provider
-        directly. Add one to start making art.
+        directly. Add one to start making art. {RECOMMENDATION}
       </p>
 
       {/* Shown up front: someone without a key would never think to open Add Key to find out. */}
       <div className="grid w-full max-w-3xl gap-4 text-left text-sm text-slate-400 sm:grid-cols-2">
-        {(["openai", "gemini"] as const).map((provider) => (
+        {(["gemini", "openai"] as const).map((provider) => (
           <div
             key={provider}
-            className="rounded-md border border-[var(--color-edge)] bg-[var(--color-ink-800)] p-4"
+            className={`rounded-md border bg-[var(--color-ink-800)] p-4 ${
+              provider === RECOMMENDED_PROVIDER
+                ? "border-[var(--color-accent-dim)]"
+                : "border-[var(--color-edge)]"
+            }`}
           >
-            <h3 className="mb-2 font-medium text-slate-200">
+            <h3 className="mb-2 flex items-center gap-2 font-medium text-slate-200">
               Get {provider === "gemini" ? "a Gemini" : "an OpenAI"} key
+              {provider === RECOMMENDED_PROVIDER ? (
+                <span className="rounded-full border border-[var(--color-accent-dim)] px-2 py-0.5 text-[11px] font-normal text-[var(--color-accent)]">
+                  recommended
+                </span>
+              ) : null}
             </h3>
             <KeySteps provider={provider} />
           </div>
