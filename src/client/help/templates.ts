@@ -19,7 +19,7 @@ A plate sits under the prompt and shows the model where to draw:
 
 ### Editable region
 
-With a custom stencil, **Where to draw** decides which part the model may change: where the template is transparent, only the dark strokes, only the light areas, inside the shape you drew, or everything around it while the shape stays put. **Grow editable region** widens it by a few pixels so edges blend.
+With a custom stencil, **Where to draw** decides which part the model may change: where the template is transparent, only the dark strokes, only the light areas, inside the shape you drew, or everything around it while the shape stays put. **Grow editable region** widens it by a few pixels so edges blend. Masks are exact on OpenAI and approximate on Gemini; see Miscellaneous → Models.
 
 ### The template builder
 

@@ -2,7 +2,17 @@
 export default `
 ## Miscellaneous
 
-Useful things that don't fit anywhere else.
+### Models
+
+OpenAI and Gemini don't support the same things, and SpriteBench works around the gaps where it can:
+
+- **Masks**: OpenAI takes a real mask, so the area outside your editable region is protected exactly. Gemini has no mask channel, so SpriteBench sends it a guide image instead (white where it should draw) with instructions to leave the rest alone. It usually listens, but it can redraw parts you meant to keep. For precise edits, use OpenAI.
+- **Transparent backgrounds**: only the newer OpenAI models (GPT Image 2 and up) can return a transparent background directly. Otherwise, cut the background out in the inspector.
+- **Sizes**: newer OpenAI models take almost any size. Older OpenAI models and Gemini have fixed options; a custom size is snapped to the nearest one Gemini offers (its aspect ratios at 1K, 2K or 4K), and the Generate panel says what will be sent.
+- **Quality and moderation**: OpenAI only. Gemini ignores both.
+- **Images per request**: OpenAI can return up to 10 at once. Gemini returns 1, so a batch becomes several jobs that run side by side.
+
+I recommend starting with Gemini, and reaching for OpenAI when you need exact masked edits or a transparent background.
 
 ### Project defaults
 
