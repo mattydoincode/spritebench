@@ -114,7 +114,7 @@ of the pipeline should be a person, not a generation.
 
 ## Product
 
-- [ ] Redesign the marketing homepage.
-- [ ] Update `logo-editable.svg` and any favicon or social image to the Silkscreen wordmark.
+- [x] Redesign the marketing homepage (one screen, personal voice, pixel-art background).
+- [x] SB favicon and social preview image in Silkscreen. (`logo-editable.svg` is still the old mark.)
 - [ ] Inspector labels for results ("set", "tileset", "items") to match the new automation
       names.
